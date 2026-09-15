@@ -40,6 +40,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.unit.dp
 import com.skypie0102.githubbckp.backup.BackupType
+import com.skypie0102.githubbckp.backup.MirrorRestoreRecord
 import com.skypie0102.githubbckp.data.local.BackupEntity
 import com.skypie0102.githubbckp.data.local.RepositoryEntity
 import com.skypie0102.githubbckp.storage.StorageDestination
@@ -64,14 +65,18 @@ fun HomeScreen(viewModel: HomeViewModel) {
         if (uri != null) viewModel.chooseBackupFolder(uri)
         else viewModel.backupFolderSelectionCancelled()
     }
+    val restoreLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri != null) viewModel.restoreMirrorArchive(uri)
+        else viewModel.restoreArchiveSelectionCancelled()
+    }
 
     Scaffold(
         topBar = { TopAppBar(title = { Text("GitHub Backup") }) },
     ) { padding ->
         LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding),
+            modifier = Modifier.fillMaxSize().padding(padding),
             contentPadding = PaddingValues(20.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
@@ -125,9 +130,7 @@ fun HomeScreen(viewModel: HomeViewModel) {
                 }
             }
 
-            item {
-                Text("Backup destination", style = MaterialTheme.typography.titleLarge)
-            }
+            item { Text("Backup destination", style = MaterialTheme.typography.titleLarge) }
 
             item {
                 val driveSelected = state.storageDestination == StorageDestination.GOOGLE_DRIVE
@@ -146,12 +149,8 @@ fun HomeScreen(viewModel: HomeViewModel) {
                     enabled = !state.busy,
                     onClick = {
                         when {
-                            !state.driveConnected || driveSelected -> {
-                                viewModel.connectDrive { pendingIntent ->
-                                    driveLauncher.launch(
-                                        IntentSenderRequest.Builder(pendingIntent.intentSender).build(),
-                                    )
-                                }
+                            !state.driveConnected || driveSelected -> viewModel.connectDrive { pendingIntent ->
+                                driveLauncher.launch(IntentSenderRequest.Builder(pendingIntent.intentSender).build())
                             }
                             else -> viewModel.useGoogleDrive()
                         }
@@ -175,11 +174,8 @@ fun HomeScreen(viewModel: HomeViewModel) {
                     },
                     enabled = !state.busy,
                     onClick = {
-                        if (state.documentTreeConfigured && !folderSelected) {
-                            viewModel.useBackupFolder()
-                        } else {
-                            folderLauncher.launch(null)
-                        }
+                        if (state.documentTreeConfigured && !folderSelected) viewModel.useBackupFolder()
+                        else folderLauncher.launch(null)
                     },
                 )
             }
@@ -202,18 +198,13 @@ fun HomeScreen(viewModel: HomeViewModel) {
 
             if (state.busy) {
                 item {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.Center,
-                    ) {
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
                         CircularProgressIndicator()
                     }
                 }
             }
 
-            item {
-                Text("Backup format", style = MaterialTheme.typography.titleLarge)
-            }
+            item { Text("Backup format", style = MaterialTheme.typography.titleLarge) }
             item {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilterChip(
@@ -251,16 +242,12 @@ fun HomeScreen(viewModel: HomeViewModel) {
             }
 
             if (state.repositories.isEmpty()) {
-                item {
-                    Text("Connect GitHub and refresh to discover repositories.")
-                }
+                item { Text("Connect GitHub and refresh to discover repositories.") }
             } else {
                 items(state.repositories, key = { it.githubId }) { repository ->
                     RepositoryRow(
                         repository = repository,
-                        onSelectedChange = { selected ->
-                            viewModel.setRepositorySelected(repository.githubId, selected)
-                        },
+                        onSelectedChange = { selected -> viewModel.setRepositorySelected(repository.githubId, selected) },
                     )
                 }
                 item {
@@ -274,13 +261,39 @@ fun HomeScreen(viewModel: HomeViewModel) {
                 }
             }
 
+            item { Text("Restore Git mirror", style = MaterialTheme.typography.titleLarge) }
+            item {
+                Text(
+                    "Choose a Git mirror ZIP created by this app. It is copied into private app storage, extracted with path-traversal protection, and every advertised ref tip is verified before the restored copy is kept.",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+            item {
+                OutlinedButton(
+                    onClick = {
+                        restoreLauncher.launch(
+                            arrayOf("application/zip", "application/x-zip-compressed", "application/octet-stream"),
+                        )
+                    },
+                    enabled = !state.busy,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("Choose mirror archive to restore")
+                }
+            }
+            if (state.restoredMirrors.isNotEmpty()) {
+                item { Text("Restored mirrors", style = MaterialTheme.typography.titleMedium) }
+                items(state.restoredMirrors, key = { it.id }) { restore ->
+                    RestoredMirrorRow(
+                        restore = restore,
+                        onDelete = { viewModel.deleteRestoredMirror(restore.id) },
+                    )
+                }
+            }
+
             if (state.recentBackups.isNotEmpty()) {
-                item {
-                    Text("Recent backups", style = MaterialTheme.typography.titleLarge)
-                }
-                items(state.recentBackups.take(10), key = { it.id }) { backup ->
-                    BackupRow(backup)
-                }
+                item { Text("Recent backups", style = MaterialTheme.typography.titleLarge) }
+                items(state.recentBackups.take(10), key = { it.id }) { backup -> BackupRow(backup) }
             }
         }
     }
@@ -293,16 +306,11 @@ private fun RepositoryRow(
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(12.dp),
+            modifier = Modifier.fillMaxWidth().padding(12.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Checkbox(
-                checked = repository.selectedForBackup,
-                onCheckedChange = onSelectedChange,
-            )
+            Checkbox(checked = repository.selectedForBackup, onCheckedChange = onSelectedChange)
             Column(modifier = Modifier.weight(1f)) {
                 Text("${repository.owner}/${repository.name}", style = MaterialTheme.typography.titleMedium)
                 Text(
@@ -310,6 +318,27 @@ private fun RepositoryRow(
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun RestoredMirrorRow(
+    restore: MirrorRestoreRecord,
+    onDelete: () -> Unit,
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Text(restore.archiveName, style = MaterialTheme.typography.titleSmall)
+            Text("${restore.refCount} refs • ${restore.referencedObjectsVerified} ref-tip objects verified")
+            Text(
+                "Stored privately on this device for a future push/export step.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            OutlinedButton(onClick = onDelete) { Text("Delete restored copy") }
         }
     }
 }
@@ -349,9 +378,7 @@ private fun ConnectionCard(
                     Text(detail, style = MaterialTheme.typography.bodyMedium)
                 }
             }
-            OutlinedButton(onClick = onClick, enabled = enabled) {
-                Text(action)
-            }
+            OutlinedButton(onClick = onClick, enabled = enabled) { Text(action) }
         }
     }
 }
