@@ -13,7 +13,7 @@ import javax.inject.Singleton
 class BackupCoordinator @Inject constructor(
     @ApplicationContext private val context: Context,
     private val backupDao: BackupDao,
-    private val backupEngine: BackupEngine,
+    private val backupEngineFactory: BackupEngineFactory,
     private val storageProvider: StorageProvider,
 ) {
     suspend fun run(request: BackupRequest): Boolean {
@@ -30,7 +30,8 @@ class BackupCoordinator @Inject constructor(
 
         return try {
             val workingDirectory = File(context.cacheDir, "backups/${request.repository.id}/$backupId")
-            artifact = backupEngine.createBackup(
+            val engine = backupEngineFactory.forType(request.type)
+            artifact = engine.createBackup(
                 request = request,
                 workingDirectory = workingDirectory,
                 onProgress = { backupDao.updateBackupStatus(backupId, it) },

@@ -1,6 +1,5 @@
 package com.skypie0102.githubbckp.storage
 
-import com.skypie0102.githubbckp.storage.drive.GoogleDriveStorageProvider
 import dagger.Binds
 import dagger.Module
 import dagger.hilt.InstallIn
@@ -12,5 +11,5 @@ import javax.inject.Singleton
 abstract class StorageModule {
     @Binds
     @Singleton
-    abstract fun bindStorageProvider(implementation: GoogleDriveStorageProvider): StorageProvider
+    abstract fun bindStorageProvider(implementation: StorageRouter): StorageProvider
 }

@@ -14,8 +14,4 @@ abstract class BackupModule {
     @Binds
     @Singleton
     abstract fun bindGithubGateway(implementation: GithubRestGateway): GithubGateway
-
-    @Binds
-    @Singleton
-    abstract fun bindBackupEngine(implementation: SourceArchiveBackupEngine): BackupEngine
 }

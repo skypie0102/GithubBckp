@@ -41,5 +41,5 @@ jobs:
           git add gradlew gradlew.bat gradle/wrapper
           git commit -m "chore: add Gradle wrapper"
           git push
-      - name: Build
-        run: ./gradlew :app:assembleDebug :app:lintDebug
+      - name: Build and test
+        run: ./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug
