@@ -55,7 +55,7 @@ class GitMirrorBackupEngine @Inject constructor(
             }
 
         val lfsPointers = lfsPointerScanner.scan(mirrorDirectory)
-        val lfsObjectCount = lfsDownloadService.downloadAll(
+        lfsDownloadService.downloadAll(
             repositoryFullName = request.repository.fullName,
             accessToken = token,
             pointers = lfsPointers,
@@ -75,13 +75,6 @@ class GitMirrorBackupEngine @Inject constructor(
             checksumSha256 = digests.sha256,
             checksumMd5 = digests.md5,
             createdAtEpochMs = createdAt,
-            warnings = if (lfsObjectCount > 0) {
-                listOf(
-                    "This mirror includes $lfsObjectCount verified Git LFS object${if (lfsObjectCount == 1) "" else "s"}, but GitHub restore does not upload bundled LFS objects yet.",
-                )
-            } else {
-                emptyList()
-            },
         )
     }
 
