@@ -15,10 +15,10 @@ import org.junit.Assert.fail
 import org.junit.Test
 
 class GitMirrorRestoreServiceTest {
-    private val service = GitMirrorRestoreService()
+    private val service = GitMirrorRestoreService(GithubWikiBackupService())
 
     @Test
-    fun restoresMirrorAndVerifiesAdvertisedRefs() = runBlocking {
+    fun restoresMirrorAndVerifiesAdvertisedRefsAndBundledWiki() = runBlocking {
         val root = Files.createTempDirectory("mirror-restore-test").toFile()
         try {
             val source = File(root, "source")
@@ -41,6 +41,25 @@ class GitMirrorRestoreServiceTest {
                 .call()
                 .close()
 
+            val wikiSource = File(root, "wiki-source")
+            Git.init().setDirectory(wikiSource).call().use { git ->
+                File(wikiSource, "Home.md").writeText("# Wiki\n")
+                git.add().addFilepattern("Home.md").call()
+                git.commit()
+                    .setMessage("wiki home")
+                    .setAuthor("Test", "test@example.com")
+                    .setCommitter("Test", "test@example.com")
+                    .call()
+            }
+            val wikiMirror = File(mirror, GithubWikiBackupService.BUNDLED_WIKI_DIRECTORY)
+            wikiMirror.parentFile?.mkdirs()
+            Git.cloneRepository()
+                .setURI(wikiSource.toURI().toString())
+                .setDirectory(wikiMirror)
+                .setMirror(true)
+                .call()
+                .close()
+
             val archive = File(root, "source.mirror.zip")
             zipDirectory(mirror, archive)
             val restored = File(root, "restored.git")
@@ -49,8 +68,11 @@ class GitMirrorRestoreServiceTest {
             assertTrue(result.refNames.any { it.startsWith("refs/heads/") })
             assertTrue(result.refNames.contains("refs/tags/v1"))
             assertTrue(result.referencedObjectsVerified >= 2)
+            assertTrue(result.wikiRefNames.any { it.startsWith("refs/heads/") })
+            assertTrue(result.wikiReferencedObjectsVerified >= 1)
             assertTrue(File(restored, "HEAD").isFile)
             assertTrue(File(restored, "objects").isDirectory)
+            assertTrue(File(restored, "${GithubWikiBackupService.BUNDLED_WIKI_DIRECTORY}/HEAD").isFile)
         } finally {
             root.deleteRecursively()
         }

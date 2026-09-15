@@ -11,6 +11,7 @@ GitHub device authorization
   -> discover/select repositories
   -> source snapshot or Git mirror
   -> mirror: scan/download/verify referenced Git LFS objects
+  -> mirror: bundle initialized wiki history when present
   -> checksum artifact
   -> user-selected folder or Google Drive
   -> upload + verify
@@ -24,21 +25,21 @@ Periodic WorkManager controller
 Mirror ZIP
   -> Android document picker
   -> safe private import
-  -> validate bare Git repository refs/objects
+  -> validate main Git refs/objects + bundled wiki mirror
   -> create a new GitHub repository OR select an existing empty repository
   -> verify/upload bundled Git LFS objects
   -> verify target advertises no Git refs
-  -> push all writable refs without force
+  -> push all writable main-repository refs without force
 ```
 
 ### Backup formats
 
 - **Source snapshot** — downloads the repository default branch as GitHub's TAR.GZ archive. It is compact, but is not a full Git-history backup.
-- **Git mirror** — uses JGit mirror-clone semantics to fetch all Git refs into a bare repository. It scans reachable blobs for standard Git LFS pointers, downloads every referenced LFS object through the Git LFS Batch API, verifies size + SHA-256, stores those objects under the standard `lfs/objects` layout, then packages the repository as one `.mirror.zip` and computes SHA-256 + MD5.
+- **Git mirror** — uses JGit mirror-clone semantics to fetch all Git refs into a bare repository. It scans reachable blobs for standard Git LFS pointers, downloads every referenced LFS object through the Git LFS Batch API, verifies size + SHA-256, and stores those objects under the standard `lfs/objects` layout. If the repository has an initialized GitHub wiki, the wiki is mirror-cloned as a second bare repository under `github-backup/wiki.git/`. Everything is then packaged as one `.mirror.zip` and checksummed with SHA-256 + MD5.
 
-If any detected LFS object cannot be authorized, downloaded, or verified, the mirror backup fails rather than silently producing an incomplete successful artifact. GitHub recovery now validates and uploads bundled LFS objects before Git refs are published.
+If any detected LFS object cannot be authorized, downloaded, or verified, the mirror backup fails rather than silently producing an incomplete successful artifact. GitHub recovery validates and uploads bundled LFS objects before Git refs are published.
 
-Wikis, release assets, issues, and pull-request metadata are separate future completeness modules.
+Bundled wiki history is also validated during local restore. Automatic publication of wiki history back to GitHub is intentionally not implemented yet, so backups that actually contain wiki history carry a non-fatal completeness warning. Release assets, issues, and pull-request metadata remain separate future completeness modules.
 
 ### Destinations
 
@@ -115,21 +116,35 @@ During GitHub recovery, every referenced bundled object is revalidated locally f
 
 See [`docs/LFS_BACKUP.md`](docs/LFS_BACKUP.md) for protocol and security details.
 
+## GitHub wiki backup
+
+GitHub wikis are separate Git repositories. If the repository reports the wiki feature enabled, mirror mode attempts to clone `<owner>/<repository>.wiki.git` with mirror semantics. An enabled wiki that has never had an initial page is treated as having no wiki content.
+
+Initialized wiki history is bundled under:
+
+```text
+github-backup/wiki.git/
+```
+
+The wiki mirror is verified before packaging and again after local mirror restore. Automatic publication back to a target GitHub wiki is intentionally unavailable until there is a documented/safe initialization and overwrite design; main Git/LFS recovery remains independent of that limitation.
+
+See [`docs/WIKI_BACKUP.md`](docs/WIKI_BACKUP.md) for details.
+
 ## Mirror restoration
 
 The app can import a Git mirror ZIP through Android's document picker. The archive is copied into private app storage and restored with these checks:
 
 1. Reject ZIP entries that escape the restore directory.
-2. Extract into a bare-repository directory, including any bundled `lfs/objects` content.
-3. Open it with JGit.
-4. Verify every advertised ref tip exists in the object database.
+2. Extract into a bare-repository directory, including any bundled `lfs/objects` content and wiki mirror.
+3. Open the main repository with JGit and verify every advertised ref tip exists in the object database.
+4. If bundled wiki history exists, open it separately as a bare repository and verify its advertised ref tips too.
 5. Persist lightweight restore metadata so valid restores survive app restarts.
 
 A validated restore can then be published either into a **new** GitHub repository or an **existing repository that is still empty**. New repositories default to private. For an existing target, the user enters `owner/repository`, which also supports organization-owned recovery repositories the connected account can access.
 
-Recovery verifies/uploads referenced LFS objects before any Git refs are published. Immediately before the Git write, `GitMirrorPushService` runs an authenticated remote-ref advertisement check. If the target advertises any Git refs, restoration is refused. Writable refs are then pushed without force and every remote update result must be `OK` or `UP_TO_DATE`. GitHub's read-only `refs/pull/*` namespace is intentionally skipped and reported to the user; pull-request objects/metadata are not part of Git restoration.
+Recovery verifies/uploads referenced LFS objects before any Git refs are published. Immediately before the Git write, `GitMirrorPushService` runs an authenticated remote-ref advertisement check. If the target advertises any Git refs, restoration is refused. Writable main-repository refs are then pushed without force and every remote update result must be `OK` or `UP_TO_DATE`. GitHub's read-only `refs/pull/*` namespace is intentionally skipped and reported to the user; pull-request objects/metadata are not part of Git restoration.
 
-Destructive overwrite of a non-empty repository remains intentionally unavailable. Exact mirror overwrite can delete branches/tags and may conflict with repository rules or GitHub push policies, so that requires a separate confirmation/rules-aware design.
+Bundled wiki history stays preserved in the local restore but is not automatically pushed to GitHub yet. Destructive overwrite of a non-empty repository also remains intentionally unavailable. Exact mirror overwrite can delete branches/tags and may conflict with repository rules or GitHub push policies, so that requires a separate confirmation/rules-aware design.
 
 ## Security
 
@@ -140,11 +155,12 @@ Do **not** commit OAuth client secrets, access tokens, refresh tokens, signing k
 Key boundaries:
 
 - `GithubAuthManager` — GitHub device flow, encrypted token persistence and refresh
-- `GithubGateway` / `GithubRestGateway` — repository discovery and source archive transfer
+- `GithubGateway` / `GithubRestGateway` — repository discovery, feature lookup, and source archive transfer
 - `GithubRepositoryRestoreGateway` — create or resolve a GitHub recovery target
 - `BackupEngineFactory` — selects source snapshot or Git mirror engine
 - `GitLfsPointerScanner` / `GitLfsDownloadService` — discover, download, and verify mirror LFS objects
 - `GitLfsObjectStore` / `GitLfsUploadService` — revalidate and publish bundled LFS objects during recovery
+- `GithubWikiBackupService` — mirror and validate initialized GitHub wiki history
 - `GitMirrorRestoreService` / `MirrorRestoreCoordinator` — safe mirror import and persistent local restores
 - `GitMirrorPushService` / `GithubMirrorRestorePublisher` — LFS-first recovery, empty-target validation, and non-forced Git publication
 - `StorageRouter` — provider-aware upload, verification, and deletion routing
@@ -158,7 +174,7 @@ See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for component details.
 
 ## Next implementation slice
 
-1. Add optional wiki and release-asset backup/restore modules with explicit completeness reporting.
+1. Add release metadata + release-asset backup/restore with digest verification.
 2. Design a separately confirmed non-empty repository recovery flow with explicit remote-ref deletion semantics and repository-rule checks.
 3. Add issues and pull-request metadata backup/restore modules.
 4. Add richer backup/restore audit and export reporting.

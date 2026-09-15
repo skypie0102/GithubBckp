@@ -14,16 +14,19 @@ import org.eclipse.jgit.storage.file.FileRepositoryBuilder
 data class MirrorRestoreResult(
     val refNames: List<String>,
     val referencedObjectsVerified: Int,
+    val wikiRefNames: List<String> = emptyList(),
+    val wikiReferencedObjectsVerified: Int = 0,
 )
 
 /**
  * Restore primitive for GIT_MIRROR artifacts. It extracts the bare repository,
- * opens it with JGit, and verifies that every advertised ref tip exists in the
- * object database. The restored directory can then be pushed with mirror
- * semantics to a destination repository in a future restore flow.
+ * opens it with JGit, verifies advertised main-repository ref tips, and also
+ * verifies the bundled wiki mirror when one is present.
  */
 @Singleton
-class GitMirrorRestoreService @Inject constructor() {
+class GitMirrorRestoreService @Inject constructor(
+    private val wikiBackupService: GithubWikiBackupService,
+) {
     suspend fun restore(
         archive: File,
         destination: File,
@@ -38,7 +41,7 @@ class GitMirrorRestoreService @Inject constructor() {
         check(File(destination, "HEAD").isFile) { "Restored mirror is missing HEAD" }
         check(File(destination, "objects").isDirectory) { "Restored mirror is missing objects" }
 
-        FileRepositoryBuilder()
+        val mainResult = FileRepositoryBuilder()
             .setGitDir(destination)
             .setBare()
             .build()
@@ -51,11 +54,16 @@ class GitMirrorRestoreService @Inject constructor() {
                         "Mirror is missing object ${objectId.name}"
                     }
                 }
-                MirrorRestoreResult(
-                    refNames = refs.map { it.name }.sorted(),
-                    referencedObjectsVerified = objectIds.size,
-                )
+                refs.map { it.name }.sorted() to objectIds.size
             }
+        val wikiResult = wikiBackupService.validateBundledWiki(destination)
+
+        MirrorRestoreResult(
+            refNames = mainResult.first,
+            referencedObjectsVerified = mainResult.second,
+            wikiRefNames = wikiResult?.refNames.orEmpty(),
+            wikiReferencedObjectsVerified = wikiResult?.referencedObjectsVerified ?: 0,
+        )
     }
 
     suspend fun validate(archive: File, scratchDirectory: File): MirrorRestoreResult {

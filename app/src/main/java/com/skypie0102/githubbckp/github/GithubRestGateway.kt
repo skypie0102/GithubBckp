@@ -12,6 +12,7 @@ import javax.inject.Singleton
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
+import org.json.JSONObject
 
 @Singleton
 class GithubRestGateway @Inject constructor(
@@ -42,6 +43,12 @@ class GithubRestGateway @Inject constructor(
         }
     }
 
+    override suspend fun repositoryHasWiki(repository: RepositoryRef): Boolean = withContext(Dispatchers.IO) {
+        val token = authManager.requireAccessToken()
+        val url = "$API_BASE/repos/${path(repository.owner)}/${path(repository.name)}"
+        getJsonObject(url, token).optBoolean("has_wiki", false)
+    }
+
     override suspend fun downloadSourceArchive(
         repository: RepositoryRef,
         ref: String,
@@ -54,6 +61,16 @@ class GithubRestGateway @Inject constructor(
     }
 
     private fun getJsonArray(url: String, token: String): JSONArray {
+        val text = getJsonText(url, token)
+        return JSONArray(text)
+    }
+
+    private fun getJsonObject(url: String, token: String): JSONObject {
+        val text = getJsonText(url, token)
+        return JSONObject(text)
+    }
+
+    private fun getJsonText(url: String, token: String): String {
         val connection = openGet(url, token)
         return try {
             val code = connection.responseCode
@@ -64,7 +81,7 @@ class GithubRestGateway @Inject constructor(
             if (code !in 200..299) {
                 throw IOException("GitHub API HTTP $code: ${text.take(300)}")
             }
-            JSONArray(text)
+            text
         } finally {
             connection.disconnect()
         }

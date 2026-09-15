@@ -1,6 +1,7 @@
 package com.skypie0102.githubbckp.backup
 
 import com.skypie0102.githubbckp.github.GithubAuthManager
+import com.skypie0102.githubbckp.github.GithubGateway
 import java.io.BufferedOutputStream
 import java.io.File
 import java.io.FileInputStream
@@ -16,14 +17,17 @@ import org.eclipse.jgit.transport.UsernamePasswordCredentialsProvider
 
 /**
  * Creates the on-device equivalent of `git clone --mirror`, downloads every
- * standard Git LFS object referenced by reachable mirror refs, then packages
- * the bare repository and its local LFS object store into one portable artifact.
+ * standard Git LFS object referenced by reachable mirror refs, optionally
+ * mirrors an initialized GitHub wiki, then packages everything into one
+ * portable artifact.
  */
 @Singleton
 class GitMirrorBackupEngine @Inject constructor(
     private val githubAuthManager: GithubAuthManager,
+    private val githubGateway: GithubGateway,
     private val lfsPointerScanner: GitLfsPointerScanner,
     private val lfsDownloadService: GitLfsDownloadService,
+    private val wikiBackupService: GithubWikiBackupService,
 ) : BackupEngine {
     override suspend fun createBackup(
         request: BackupRequest,
@@ -62,6 +66,16 @@ class GitMirrorBackupEngine @Inject constructor(
             repositoryDirectory = mirrorDirectory,
         )
 
+        val wiki = if (githubGateway.repositoryHasWiki(request.repository)) {
+            wikiBackupService.backup(
+                repository = request.repository,
+                accessToken = token,
+                destination = File(mirrorDirectory, GithubWikiBackupService.BUNDLED_WIKI_DIRECTORY),
+            )
+        } else {
+            null
+        }
+
         onProgress(BackupStatus.PACKAGING)
         zipBareRepository(mirrorDirectory, archive)
         mirrorDirectory.deleteRecursively()
@@ -75,6 +89,13 @@ class GitMirrorBackupEngine @Inject constructor(
             checksumSha256 = digests.sha256,
             checksumMd5 = digests.md5,
             createdAtEpochMs = createdAt,
+            warnings = if (wiki != null) {
+                listOf(
+                    "Wiki history is bundled and validated in this mirror backup, but automatic GitHub wiki publication is not implemented yet.",
+                )
+            } else {
+                emptyList()
+            },
         )
     }
 

@@ -19,6 +19,7 @@ BackupCoordinator
    |     +-- GitMirrorBackupEngine
    |            +-- GitLfsPointerScanner
    |            +-- GitLfsDownloadService
+   |            +-- GithubWikiBackupService
    +-- StorageRouter
    |     +-- DocumentTreeStorageProvider
    |     +-- GoogleDriveStorageProvider
@@ -28,6 +29,7 @@ BackupCoordinator
 MirrorRestoreCoordinator
    |
 GitMirrorRestoreService
+   +-- GithubWikiBackupService (bundled wiki validation)
    |
 GithubMirrorRestorePublisher
    +-- GitLfsPointerScanner
@@ -40,11 +42,11 @@ GithubMirrorRestorePublisher
 
 `GithubAuthManager` uses GitHub OAuth Device Flow. The Android package carries only an OAuth client ID and does not embed a confidential client secret. Access and refresh material returned by GitHub is encrypted with an Android Keystore-backed AES-GCM key before being placed in SharedPreferences.
 
-`GithubGateway` owns repository discovery and authenticated source-archive transfer. Redirects from GitHub's API to archive storage are followed without forwarding the GitHub bearer token to the redirected host.
+`GithubGateway` owns repository discovery, authenticated source-archive transfer, and lightweight repository feature lookup. Redirects from GitHub's API to archive storage are followed without forwarding the GitHub bearer token to the redirected host.
 
 `GithubRepositoryRestoreGateway` either creates a new empty repository for the authenticated user or resolves a user-supplied `owner/repository` target. The latter supports recovery repositories created ahead of time, including organization-owned repositories the connected account can access.
 
-### Backup engines and Git LFS
+### Backup engines, Git LFS, and wiki history
 
 `BackupEngineFactory` selects an engine from `BackupType`, keeping orchestration independent of artifact format.
 
@@ -56,29 +58,35 @@ After the Git clone, `GitLfsPointerScanner` walks reachable mirror objects once 
 
 GitHub credentials are sent only to the GitHub Batch API endpoint. Object-action URLs receive only their returned headers; if a download redirects to another host, `Authorization` is removed before following the redirect. Any missing, unavailable, size-mismatched, or hash-mismatched referenced object fails the backup rather than allowing a silent incomplete success.
 
-The bare repository plus bundled LFS store is packaged as one `.mirror.zip` artifact. Both backup engines compute SHA-256 as the canonical integrity checksum plus MD5 for providers, such as Drive, that expose an independent MD5 checksum.
+For wiki coverage, `GithubGateway.repositoryHasWiki` reads GitHub repository metadata. When the wiki feature is enabled, `GithubWikiBackupService` attempts a mirror clone of `<owner>/<repo>.wiki.git`. GitHub only exposes a cloneable wiki after an initial page exists; an enabled but never-initialized wiki is therefore treated as having no wiki content. An initialized wiki is verified as a bare repository and stored inside the main artifact at `github-backup/wiki.git/`.
 
-`BackupArtifact` can carry non-fatal warnings for future completeness modules. Room schema v3 persists those warnings separately from `errorMessage`; older rows remain null rather than receiving inferred historical claims. Current Git mirror backups no longer need an LFS warning because referenced standard LFS objects are bundled and the GitHub recovery path uploads them.
+The main bare repository, bundled LFS store, and optional wiki mirror are packaged as one `.mirror.zip` artifact. Both backup engines compute SHA-256 as the canonical integrity checksum plus MD5 for providers, such as Drive, that expose an independent MD5 checksum.
 
-Wikis, release assets, issues, and pull-request metadata remain separate completeness modules.
+`BackupArtifact` can carry non-fatal warnings. Current Git mirror backups no longer need an LFS warning because referenced standard LFS objects are bundled and the GitHub recovery path uploads them. A mirror that actually contains wiki history records a warning that wiki bytes/history are preserved but automatic GitHub wiki publication is not implemented yet.
+
+Room schema v3 persists warnings separately from `errorMessage`; older rows remain null rather than receiving inferred historical claims. Release assets, issues, and pull-request metadata remain separate completeness modules.
 
 ### Mirror restore and GitHub recovery
 
-`GitMirrorRestoreService` rejects ZIP entries whose canonical path escapes the restore root, extracts the bare repository including any bundled LFS object store, opens it with JGit, and verifies every advertised ref tip exists in the Git object database.
+`GitMirrorRestoreService` rejects ZIP entries whose canonical path escapes the restore root, extracts the main bare repository including any bundled LFS object store, opens it with JGit, and verifies every advertised main-repository ref tip exists in the Git object database.
+
+If `github-backup/wiki.git/` exists, the same restore operation asks `GithubWikiBackupService` to open it independently as a bare repository and verify every advertised wiki ref tip exists in its object database. A damaged bundled wiki therefore fails local restore rather than being silently ignored.
 
 `MirrorRestoreCoordinator` imports a user-selected archive into private app storage, keeps lightweight metadata beside the restored repository, reloads valid restore records across app restarts, and exposes a validated repository directory only for a known restore ID.
 
-`GithubMirrorRestorePublisher` can publish to either a newly created repository or an existing repository selected by full name. LFS scanning/upload and Git transport execute on `Dispatchers.IO` rather than the UI thread.
+`GithubMirrorRestorePublisher` can publish the main repository to either a newly created repository or an existing repository selected by full name. LFS scanning/upload and Git transport execute on `Dispatchers.IO` rather than the UI thread.
 
-Recovery is deliberately LFS-first. `GitLfsPointerScanner` rescans reachable pointers from the restored mirror. `GitLfsObjectStore` requires every referenced bundled object to exist and pass its size/SHA-256 check. `GitLfsUploadService` requests `upload` plans from the target repository's LFS Batch API in groups of 100. An object with no returned actions is treated as already present; otherwise the raw object is PUT using the returned headers and an optional `verify` action is POSTed with OID and size.
+Recovery is deliberately LFS-first. `GitLfsPointerScanner` rescans reachable pointers from the restored main mirror. `GitLfsObjectStore` requires every referenced bundled object to exist and pass its size/SHA-256 check. `GitLfsUploadService` requests `upload` plans from the target repository's LFS Batch API in groups of 100. An object with no returned actions is treated as already present; otherwise the raw object is PUT using the returned headers and an optional `verify` action is POSTed with OID and size.
 
-Only after all referenced LFS objects are covered does `GitMirrorPushService` perform its authenticated remote-ref advertisement check. If the target advertises any Git refs, recovery is refused. Writable refs are then pushed without force, and every attempted remote update must finish as `OK` or `UP_TO_DATE`.
+Only after all referenced LFS objects are covered does `GitMirrorPushService` perform its authenticated remote-ref advertisement check. If the target advertises any Git refs, recovery is refused. Writable main-repository refs are then pushed without force, and every attempted remote update must finish as `OK` or `UP_TO_DATE`.
 
 This ordering prevents a recovered repository from advertising refs that point at known-missing LFS bytes. It also means older mirror artifacts that contain LFS pointer blobs but lack the corresponding local LFS object files fail recovery before Git refs are published.
 
 The empty-target preflight and non-forced refspecs intentionally protect live repositories. Destructive non-empty recovery would require explicit confirmation, remote-ref deletion semantics, and repository-rule handling.
 
 GitHub owns `refs/pull/*` as a read-only namespace. Those refs may be present in a mirror clone but cannot be pushed back; they are skipped explicitly and reported separately. Restoring pull-request metadata remains a future metadata module rather than pretending those refs are writable Git state.
+
+Bundled wiki history is currently a preservation/local-restore module only. GitHub documents cloning a wiki after an initial page exists but does not expose a documented wiki-page REST endpoint for safe target initialization. The app therefore does not try to auto-publish wiki refs or overwrite an existing wiki through undocumented behavior.
 
 ### Storage routing
 
@@ -114,8 +122,8 @@ QUEUED -> DOWNLOADING -> CHECKSUM -> UPLOADING -> VERIFYING -> COMPLETED
 Git mirror:
 
 ```text
-QUEUED -> DOWNLOADING (Git + LFS) -> PACKAGING -> CHECKSUM -> UPLOADING -> VERIFYING -> COMPLETED
-                 \-------------------------------------------------------------------> FAILED
+QUEUED -> DOWNLOADING (Git + LFS + optional wiki) -> PACKAGING -> CHECKSUM -> UPLOADING -> VERIFYING -> COMPLETED
+                 \-----------------------------------------------------------------------------------> FAILED
 ```
 
 After `COMPLETED`, an optional retention pass may delete older verified remote artifacts without changing their historical completion state.
@@ -124,7 +132,7 @@ Temporary archives and mirror working directories live below the app cache direc
 
 ## Test coverage
 
-Mirror restore tests create a real local repository, make a JGit mirror, package it, restore it, and assert branch/tag refs plus referenced objects survive. A separate regression test creates a malicious `../` ZIP entry and verifies it cannot write outside the restore directory.
+Mirror restore tests create a real local repository and a real wiki repository, make bare mirrors of both, package them together, restore them, and assert branch/tag refs plus referenced objects survive independently. A separate regression test creates a malicious `../` ZIP entry and verifies it cannot write outside the restore directory.
 
 `GitMirrorPushServiceTest` verifies writable branches/tags are pushed into an empty bare target while a synthetic `refs/pull/*` ref is skipped. A second regression creates a target that already has a commit and verifies recovery is refused before the mirror can add its branch or tag refs.
 
