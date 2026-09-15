@@ -43,6 +43,7 @@ class GithubRepositoryRestoreGateway @Inject constructor(
             url = CREATE_REPOSITORY_URL,
             method = "POST",
             body = body,
+            token = authManager.requireAccessToken(),
             failurePrefix = "GitHub repository creation failed",
         )
     }
@@ -57,6 +58,7 @@ class GithubRepositoryRestoreGateway @Inject constructor(
             url = "$API_BASE/repos/${path(parts[0])}/${path(parts[1])}",
             method = "GET",
             body = null,
+            token = authManager.requireAccessToken(),
             failurePrefix = "GitHub repository lookup failed",
         )
     }
@@ -65,9 +67,9 @@ class GithubRepositoryRestoreGateway @Inject constructor(
         url: String,
         method: String,
         body: JSONObject?,
+        token: String,
         failurePrefix: String,
     ): GithubRestoreRepository {
-        val token = authManager.requireAccessTokenBlocking()
         val connection = (URL(url).openConnection() as HttpURLConnection).apply {
             requestMethod = method
             doOutput = body != null
@@ -112,9 +114,6 @@ class GithubRepositoryRestoreGateway @Inject constructor(
         htmlUrl = json.getString("html_url"),
         isPrivate = json.optBoolean("private", false),
     )
-
-    private fun GithubAuthManager.requireAccessTokenBlocking(): String =
-        kotlinx.coroutines.runBlocking { requireAccessToken() }
 
     private fun path(value: String): String =
         URLEncoder.encode(value, StandardCharsets.UTF_8.name()).replace("+", "%20")
