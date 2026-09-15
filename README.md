@@ -21,10 +21,12 @@ GitHub device authorization
 Mirror ZIP
   -> safe private import
   -> validate main Git, LFS, wiki, and release data
-  -> create a new GitHub repository OR select an existing empty repository
-  -> verify/upload Git LFS objects
+  -> bind recovery transaction to one GitHub repository ID
   -> verify target advertises no Git refs
+  -> verify/upload Git LFS objects
+  -> verify target is still empty immediately before Git publication
   -> push writable main-repository refs without force
+  -> persist resumable recovery phase
 ```
 
 ### Backup formats
@@ -92,7 +94,7 @@ Mirror mode scans reachable Git blobs for standard LFS pointers. Unique OIDs are
 lfs/objects/<first 2 hex>/<next 2 hex>/<full sha256 oid>
 ```
 
-During GitHub recovery, bundled objects are revalidated locally, the target LFS Batch API is queried for upload actions, missing objects are uploaded, and optional server verify actions are executed. Only after LFS coverage succeeds does the app publish Git refs.
+During GitHub recovery, bundled objects are revalidated locally and the target LFS Batch API is queried for upload actions. Before any LFS object can be uploaded, the target Git remote must still advertise no refs. Missing LFS objects are then uploaded and optional server verify actions are executed. The Git remote is checked again immediately before refs are published, protecting against a concurrent writer between the LFS and Git phases.
 
 See [`docs/LFS_BACKUP.md`](docs/LFS_BACKUP.md).
 
@@ -128,9 +130,23 @@ Every asset must match GitHub's reported size and a locally computed SHA-256. Wh
 
 Local mirror restore revalidates the manifest, safe relative paths, file sizes, and SHA-256 values. Releases with no binary assets are still preserved in the manifest.
 
-Automatic release recreation/upload is intentionally deferred. Releases depend on Git refs already existing; a failure after the Git push would leave a partially recovered non-empty target. A resumable, target-bound recovery transaction is required before enabling that publication path.
+Automatic release recreation/upload is intentionally deferred. Releases depend on Git refs already existing, so publication needs the resumable transaction mechanism described below before it can be made retry-safe.
 
 See [`docs/RELEASE_BACKUP.md`](docs/RELEASE_BACKUP.md).
+
+## Resumable GitHub recovery
+
+Every GitHub recovery is bound to a private app-side transaction keyed by the restored mirror ID. The transaction records the exact GitHub repository ID/full name plus the recovery phase:
+
+```text
+TARGET_BOUND -> LFS_PUBLISHED -> GIT_PUBLISHED
+```
+
+Retries cannot silently switch to another target. A new-repository retry reuses the previously created repository instead of creating a duplicate, and an existing-target retry verifies that the GitHub repository ID still matches the transaction.
+
+A crash after GitHub accepted the Git push but before the local `GIT_PUBLISHED` phase was written is reconciled narrowly: the app compares every advertised writable remote ref name and object ID with the local mirror. Only an exact match is accepted as already published; any extra or mismatched ref still fails safely.
+
+The recovery transaction does **not** enable arbitrary non-empty overwrite. First-time Git publication still requires an empty target, and the target is checked before LFS transfer and again immediately before Git refs are pushed.
 
 ## Mirror restoration
 
@@ -142,7 +158,7 @@ The app imports a Git mirror ZIP through Android's document picker and validates
 4. Verify any bundled wiki mirror independently.
 5. Verify any bundled release manifest and every asset's size/SHA-256.
 
-A validated main mirror can be published to either a **new** GitHub repository or an **existing repository that is still empty**. Git LFS is uploaded before Git refs. Immediately before the Git write, the app checks that the target still advertises no refs. Main refs are then pushed without force. GitHub's read-only `refs/pull/*` namespace is skipped and reported.
+A validated main mirror can be published to either a **new** GitHub repository or an **existing repository that is still empty**. GitHub's read-only `refs/pull/*` namespace is skipped and reported. Main refs are never force-pushed in this flow.
 
 Destructive overwrite of an arbitrary non-empty repository remains intentionally unavailable.
 
@@ -151,6 +167,8 @@ Destructive overwrite of an arbitrary non-empty repository remains intentionally
 Do **not** commit OAuth client secrets, access/refresh tokens, signing keys, or generated `local.properties`. Git credentials are passed to JGit's transport layer rather than embedded in repository URLs. Temporary source/mirror artifacts live below app cache and are removed after each backup attempt.
 
 For redirected GitHub archive, LFS, and release-asset downloads, authentication is deliberately not forwarded to unrelated hosts.
+
+Recovery transaction files live in app-private storage, bind a restore to a stable GitHub repository ID, and are written through a temporary file before replacement.
 
 ## Architecture
 
@@ -164,7 +182,8 @@ Key boundaries:
 - `GithubWikiBackupService` — wiki mirror preservation/validation
 - `GithubReleaseBackupService` — release manifest/asset preservation/validation
 - `GitMirrorRestoreService` / `MirrorRestoreCoordinator` — safe local restore
-- `GitMirrorPushService` / `GithubMirrorRestorePublisher` — safe main-repository publication
+- `RecoveryTransactionStore` — stable target binding and resumable recovery phase persistence
+- `GitMirrorPushService` / `GithubMirrorRestorePublisher` — preflight, exact-resume reconciliation, and safe main-repository publication
 - `StorageRouter` — provider-aware upload, verification, deletion
 - `BackupScheduler` / `ScheduledBackupWorker` — manual and periodic scheduling
 - `BackupRetentionManager` — keep-last-N pruning
@@ -174,7 +193,7 @@ See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ## Next implementation slice
 
-1. Add a resumable recovery transaction so release recreation/asset upload can safely continue after the main Git push.
+1. Use the recovery transaction to add idempotent release recreation and asset upload after `GIT_PUBLISHED`.
 2. Design separately confirmed destructive recovery for non-empty repositories with explicit ref-deletion and repository-rule handling.
 3. Add issues and pull-request metadata backup/recovery modules.
 4. Add richer backup/restore audit and export reporting.
