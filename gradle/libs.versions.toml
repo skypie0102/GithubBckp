@@ -16,6 +16,7 @@ documentFile = "1.1.0"
 jgit = "6.10.1.202505221210-r"
 desugarJdkLibsNio = "2.1.5"
 junit = "4.13.2"
+json = "20260814"
 
 [libraries]
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "coreKtx" }
@@ -41,6 +42,7 @@ google-play-services-auth = { module = "com.google.android.gms:play-services-aut
 jgit = { module = "org.eclipse.jgit:org.eclipse.jgit", version.ref = "jgit" }
 desugar-jdk-libs-nio = { module = "com.android.tools:desugar_jdk_libs_nio", version.ref = "desugarJdkLibsNio" }
 junit = { module = "junit:junit", version.ref = "junit" }
+json = { module = "org.json:json", version.ref = "json" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
