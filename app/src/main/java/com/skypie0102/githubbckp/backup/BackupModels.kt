@@ -41,4 +41,5 @@ data class BackupArtifact(
     val checksumSha256: String,
     val checksumMd5: String,
     val createdAtEpochMs: Long,
+    val warnings: List<String> = emptyList(),
 )
