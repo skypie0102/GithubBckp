@@ -231,7 +231,7 @@ fun HomeScreen(viewModel: HomeViewModel) {
             item {
                 Text(
                     text = if (state.backupType == BackupType.GIT_MIRROR) {
-                        "Git mirror preserves Git refs/history and bundles every detected Git LFS object after size + SHA-256 verification. GitHub restore does not upload bundled LFS objects yet."
+                        "Git mirror preserves Git refs/history and bundles every detected Git LFS object after size + SHA-256 verification. Recovery uploads and verifies bundled LFS objects before publishing Git refs."
                     } else {
                         "Source snapshot is smaller, but contains only the selected branch snapshot and is not a full Git backup."
                     },
@@ -419,7 +419,7 @@ private fun GithubPublishCard(
         ) {
             Text("Restore mirror to GitHub", style = MaterialTheme.typography.titleMedium)
             Text(
-                "Recovery only writes to an empty Git repository. The app verifies the remote advertises no refs first, never force-pushes, and skips GitHub read-only refs/pull/*.",
+                "Recovery only writes to an empty Git repository. It restores bundled Git LFS objects first, verifies the remote advertises no Git refs, never force-pushes, and skips GitHub read-only refs/pull/*.",
                 style = MaterialTheme.typography.bodySmall,
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
