@@ -24,7 +24,7 @@ class BackupScheduler @Inject constructor(
     ) {
         repositoryIds.forEach { repositoryId ->
             val request = OneTimeWorkRequestBuilder<RepositoryBackupWorker>()
-                .setConstraints(defaultConstraints())
+                .setConstraints(manualConstraints())
                 .setInputData(
                     workDataOf(
                         RepositoryBackupWorker.KEY_REPOSITORY_ID to repositoryId,
@@ -42,9 +42,17 @@ class BackupScheduler @Inject constructor(
         }
     }
 
-    private fun defaultConstraints(): Constraints = Constraints.Builder()
-        .setRequiredNetworkType(NetworkType.UNMETERED)
+    private fun manualConstraints(): Constraints = Constraints.Builder()
+        .setRequiredNetworkType(NetworkType.CONNECTED)
         .setRequiresBatteryNotLow(true)
         .setRequiresStorageNotLow(true)
         .build()
+
+    companion object {
+        fun scheduledConstraints(): Constraints = Constraints.Builder()
+            .setRequiredNetworkType(NetworkType.UNMETERED)
+            .setRequiresBatteryNotLow(true)
+            .setRequiresStorageNotLow(true)
+            .build()
+    }
 }

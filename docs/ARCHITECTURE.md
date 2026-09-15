@@ -1,43 +1,54 @@
 # Architecture
 
-GithubBckp is an Android backup orchestrator. It should not require a server to handle repository data; a small auth broker may be introduced later only where an OAuth provider requires a confidential client secret.
+GithubBckp is an Android backup orchestrator. Repository archives are transferred directly from GitHub to a storage provider; the app does not require an application server to handle repository data.
 
 ## Boundaries
 
 ```text
 Compose UI
    |
-ViewModels / use cases
+HomeViewModel
    |
-Backup coordinator
+WorkManager scheduler
+   |
+BackupCoordinator
    +-- GithubGateway
    +-- BackupEngine
    +-- StorageProvider
    +-- Room history
-   +-- WorkManager scheduler
 ```
 
-### GitHub
+### GitHub authentication and API
 
-`GithubGateway` owns repository discovery and GitHub API calls. OAuth tokens must be stored using Android Keystore-backed storage. A production GitHub App/native OAuth flow should use PKCE.
+`GithubAuthManager` uses GitHub OAuth Device Flow. This is a deliberate native-client tradeoff: the Android package carries only an OAuth client ID and does not embed a confidential client secret. Access and refresh material returned by GitHub is encrypted with an Android Keystore-backed AES-GCM key before being placed in SharedPreferences.
+
+`GithubGateway` owns repository discovery and authenticated source-archive transfer. Redirects from GitHub's API to archive storage are followed without forwarding the GitHub bearer token to the redirected host.
+
+A future GitHub App/PKCE architecture may still be preferable if the product gains a backend that can safely hold confidential credentials.
 
 ### Backup engines
 
-Start with a source archive engine for the MVP. Add a mirror engine behind the same `BackupEngine` interface for full branch/tag/history backups. Git LFS must be handled separately before a backup is described as complete for LFS repositories.
+`SourceArchiveBackupEngine` downloads the repository default branch as a GitHub TAR archive and computes SHA-256 plus MD5 locally. SHA-256 is the canonical app checksum; MD5 is retained because Google Drive exposes an `md5Checksum` that can be used for independent post-upload verification.
+
+A source archive is not a complete Git backup. `GIT_MIRROR` remains behind the same `BackupEngine` boundary and should preserve refs, branches, tags, and full history. Git LFS, wikis, releases, issues, and pull-request metadata remain separate completeness modules.
 
 ### Storage
 
-`StorageProvider` makes cloud destinations replaceable. The first implementation is Google Drive with the `drive.file` scope and resumable uploads. Future providers can include OneDrive, Dropbox, and S3-compatible object storage.
+`StorageProvider` keeps destinations replaceable. `GoogleDriveStorageProvider` currently uses the narrow `drive.file` scope, a resumable upload session, and a post-upload read that verifies remote size, Drive's MD5, and the SHA-256 stored as a Drive app property.
+
+Google's current Workspace API user-data policy lists generic backup of app/user content to Drive as a disallowed use case for public applications. The Drive provider should therefore be treated as a personal/internal adapter unless policy guidance changes. A Storage Access Framework provider for a user-selected document-tree destination is the preferred policy-safe next provider.
 
 ### Background execution
 
-A scheduler enqueues one repository per unit of work. Scheduled jobs should default to unmetered connectivity and avoid low battery/storage states. User-initiated "Back up now" transfers may need a foreground/user-initiated transfer path rather than relying on one long WorkManager job.
+One repository is one WorkManager job. A manual backup requires a connected network plus adequate battery/storage. Future scheduled backups should use `BackupScheduler.scheduledConstraints()`, which defaults to unmetered connectivity plus the same battery/storage constraints.
+
+Very large transfers may eventually need Android's user-initiated/foreground transfer path rather than relying on a single long WorkManager execution window.
 
 ## Backup state machine
 
 ```text
-QUEUED -> DOWNLOADING -> PACKAGING -> CHECKSUM -> UPLOADING -> VERIFYING -> COMPLETED
-                                     \-------------------------------------> FAILED
+QUEUED -> DOWNLOADING -> CHECKSUM -> UPLOADING -> VERIFYING -> COMPLETED
+                 \-------------------------------------------> FAILED
 ```
 
-Persist transitions so process death can be distinguished from a completed upload.
+Every state transition is persisted in Room. Temporary archives live below the app cache directory and are deleted after success or failure.
