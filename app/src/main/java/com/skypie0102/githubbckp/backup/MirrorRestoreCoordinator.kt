@@ -74,6 +74,14 @@ class MirrorRestoreCoordinator @Inject constructor(
             .sortedByDescending { it.createdAtEpochMs }
     }
 
+    suspend fun requireRepositoryDirectory(id: String): File = withContext(Dispatchers.IO) {
+        val root = restoresRoot.canonicalFile
+        val entry = File(root, id).canonicalFile
+        check(entry.parentFile == root) { "Invalid restore identifier" }
+        check(readMetadata(entry) != null) { "Restored mirror is missing or invalid" }
+        File(entry, REPOSITORY_DIRECTORY_NAME).canonicalFile
+    }
+
     suspend fun deleteRestore(id: String) = withContext(Dispatchers.IO) {
         val root = restoresRoot.canonicalFile
         val candidate = File(root, id).canonicalFile

@@ -4,7 +4,7 @@ Android app for backing up repositories from a GitHub account to external storag
 
 ## Status
 
-The core backup, scheduling, retention, and local restore flows are implemented:
+The core backup, scheduling, retention, local restore, and new-repository recovery flows are implemented:
 
 ```text
 GitHub device authorization
@@ -24,7 +24,8 @@ Mirror ZIP
   -> Android document picker
   -> safe private import
   -> validate bare Git repository refs/objects
-  -> keep/delete restored copy on device
+  -> create a new GitHub repository
+  -> push all writable refs
 ```
 
 ### Backup formats
@@ -81,11 +82,7 @@ Google Drive authorization uses Google Play services `AuthorizationClient` with 
 
 ## Automatic backups
 
-Automatic backup settings support:
-
-- disabled, daily, or weekly execution;
-- source snapshot or Git mirror format; and
-- persisted settings across app restarts.
+Automatic backup settings support disabled, daily, or weekly execution, source snapshot or Git mirror format, and persisted settings across app restarts.
 
 WorkManager periodic execution is opportunistic rather than an exact alarm. The periodic controller reads the repositories selected when it runs and fans out one backup job per repository. Scheduled work requires unmetered connectivity, battery-not-low, and storage-not-low constraints.
 
@@ -93,7 +90,7 @@ WorkManager periodic execution is opportunistic rather than an exact alarm. The 
 
 Retention is opt-in. The default is **Keep all**. Users can instead keep the newest 3, 5, or 10 verified artifacts per repository and backup format.
 
-Room schema v2 persists the provider plus immutable remote artifact metadata required to reconstruct deletion requests. Deletion is therefore routed through the provider that originally created the artifact, even if the user later switches destinations. Successful deletion records `remoteDeletedAtEpochMs` while keeping local history.
+Room schema v2 persists the provider plus immutable remote artifact metadata required to reconstruct deletion requests. Deletion is routed through the provider that originally created the artifact, even if the user later switches destinations. Successful deletion records `remoteDeletedAtEpochMs` while keeping local history.
 
 Rows migrated from schema v1 have unknown provider metadata and are deliberately excluded from automatic deletion. Retention is best-effort: a pruning failure is logged and never changes a newly verified backup from `COMPLETED` to `FAILED`.
 
@@ -107,7 +104,9 @@ The app can import a Git mirror ZIP through Android's document picker. The archi
 4. Verify every advertised ref tip exists in the object database.
 5. Persist lightweight restore metadata so valid restores survive app restarts.
 
-Restored copies can be deleted from the app. The next recovery slice is pushing a validated restored mirror into a newly created or existing GitHub repository.
+A validated restore can then be published into a **new** GitHub repository. The new repository defaults to private. `GithubRepositoryRestoreGateway` creates an empty repository for the authenticated user, then `GitMirrorPushService` force-pushes every writable ref and validates every remote update result. GitHub's read-only `refs/pull/*` namespace is intentionally skipped and reported to the user; pull-request objects/metadata are not part of Git restoration.
+
+Existing-repository overwrite is intentionally not exposed yet because making a remote exactly match a mirror can delete branches/tags and may be blocked by repository rules or GitHub push policies.
 
 ## Security
 
@@ -119,8 +118,10 @@ Key boundaries:
 
 - `GithubAuthManager` — GitHub device flow, encrypted token persistence and refresh
 - `GithubGateway` / `GithubRestGateway` — repository discovery and source archive transfer
+- `GithubRepositoryRestoreGateway` — create a new GitHub recovery target
 - `BackupEngineFactory` — selects source snapshot or Git mirror engine
 - `GitMirrorRestoreService` / `MirrorRestoreCoordinator` — safe mirror import and persistent local restores
+- `GitMirrorPushService` / `GithubMirrorRestorePublisher` — validated mirror publication to a new GitHub repository
 - `StorageRouter` — provider-aware upload, verification, and deletion routing
 - `DocumentTreeStorageProvider` — SAF streaming upload/readback verification
 - `GoogleDriveStorageProvider` — Drive resumable upload/remote verification
@@ -132,7 +133,7 @@ See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for component details.
 
 ## Next implementation slice
 
-1. Push a validated restored mirror to a new or existing GitHub repository with explicit destructive-overwrite confirmation.
+1. Add a separately confirmed existing-repository overwrite flow with explicit remote-ref deletion semantics and repository-rule checks.
 2. Add Git LFS object backup/restore and clearly report repository completeness.
 3. Add optional wiki, release assets, issues, and pull-request metadata modules.
 4. Add richer backup/restore audit and export reporting.
