@@ -15,13 +15,15 @@ import org.eclipse.jgit.api.Git
 import org.eclipse.jgit.transport.UsernamePasswordCredentialsProvider
 
 /**
- * Creates the on-device equivalent of `git clone --mirror`, then packages the
- * bare repository into one portable artifact. Credentials are supplied only to
- * JGit's transport layer and are never written into the mirror's remote URL.
+ * Creates the on-device equivalent of `git clone --mirror`, downloads every
+ * standard Git LFS object referenced by reachable mirror refs, then packages
+ * the bare repository and its local LFS object store into one portable artifact.
  */
 @Singleton
 class GitMirrorBackupEngine @Inject constructor(
     private val githubAuthManager: GithubAuthManager,
+    private val lfsPointerScanner: GitLfsPointerScanner,
+    private val lfsDownloadService: GitLfsDownloadService,
 ) : BackupEngine {
     override suspend fun createBackup(
         request: BackupRequest,
@@ -52,6 +54,14 @@ class GitMirrorBackupEngine @Inject constructor(
                 check(git.repository.isBare) { "Mirror clone did not produce a bare repository" }
             }
 
+        val lfsPointers = lfsPointerScanner.scan(mirrorDirectory)
+        val lfsObjectCount = lfsDownloadService.downloadAll(
+            repositoryFullName = request.repository.fullName,
+            accessToken = token,
+            pointers = lfsPointers,
+            repositoryDirectory = mirrorDirectory,
+        )
+
         onProgress(BackupStatus.PACKAGING)
         zipBareRepository(mirrorDirectory, archive)
         mirrorDirectory.deleteRecursively()
@@ -65,7 +75,13 @@ class GitMirrorBackupEngine @Inject constructor(
             checksumSha256 = digests.sha256,
             checksumMd5 = digests.md5,
             createdAtEpochMs = createdAt,
-            warnings = listOf(GIT_LFS_WARNING),
+            warnings = if (lfsObjectCount > 0) {
+                listOf(
+                    "This mirror includes $lfsObjectCount verified Git LFS object${if (lfsObjectCount == 1) "" else "s"}, but GitHub restore does not upload bundled LFS objects yet.",
+                )
+            } else {
+                emptyList()
+            },
         )
     }
 
@@ -81,10 +97,5 @@ class GitMirrorBackupEngine @Inject constructor(
                 }
         }
         check(destination.length() > 0L) { "Mirror archive is empty" }
-    }
-
-    private companion object {
-        const val GIT_LFS_WARNING =
-            "Git LFS object content is not included in this mirror backup. Git refs and history are preserved, but LFS-managed file bytes require a separate LFS backup."
     }
 }
