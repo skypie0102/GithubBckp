@@ -14,22 +14,31 @@ class BackupRetentionManager @Inject constructor(
     private val storageProvider: StorageProvider,
     private val preferences: RetentionPreferences,
 ) {
+    /**
+     * Best-effort cleanup. Retention must never turn a newly verified backup
+     * into a failed backup, so all pruning failures are logged and left for a
+     * later successful backup to retry.
+     */
     suspend fun prune(repositoryId: Long, type: BackupType) {
-        val keepCount = preferences.keepCount()
-        if (keepCount == RetentionPreferences.KEEP_ALL) return
+        try {
+            val keepCount = preferences.keepCount()
+            if (keepCount == RetentionPreferences.KEEP_ALL) return
 
-        val expired = retentionCandidates(
-            backups = backupDao.getRetainableBackups(repositoryId, type),
-            keepCount = keepCount,
-        )
-        expired.forEach { backup ->
-            runCatching {
-                val remote = backup.toRemoteBackup()
-                storageProvider.delete(remote)
-                backupDao.markRemoteDeleted(backup.id, System.currentTimeMillis())
-            }.onFailure { throwable ->
-                Log.w(TAG, "Could not prune backup ${backup.id}", throwable)
+            val expired = retentionCandidates(
+                backups = backupDao.getRetainableBackups(repositoryId, type),
+                keepCount = keepCount,
+            )
+            expired.forEach { backup ->
+                runCatching {
+                    val remote = backup.toRemoteBackup()
+                    storageProvider.delete(remote)
+                    backupDao.markRemoteDeleted(backup.id, System.currentTimeMillis())
+                }.onFailure { throwable ->
+                    Log.w(TAG, "Could not prune backup ${backup.id}", throwable)
+                }
             }
+        } catch (throwable: Throwable) {
+            Log.w(TAG, "Retention pass failed for repository $repositoryId", throwable)
         }
     }
 
