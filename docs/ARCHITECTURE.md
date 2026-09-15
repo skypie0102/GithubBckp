@@ -1,6 +1,6 @@
 # Architecture
 
-GithubBckp is an Android backup orchestrator. Repository archives are transferred directly from GitHub to a storage provider; the app does not require an application server to handle repository data.
+GithubBckp is an Android backup orchestrator. Repository data moves directly between GitHub, temporary app storage, and the user-selected destination. The app does not require an application server to handle repository contents.
 
 ## Boundaries
 
@@ -12,9 +12,12 @@ HomeViewModel
 WorkManager scheduler
    |
 BackupCoordinator
-   +-- GithubGateway
-   +-- BackupEngine
-   +-- StorageProvider
+   +-- BackupEngineFactory
+   |     +-- SourceArchiveBackupEngine
+   |     +-- GitMirrorBackupEngine
+   +-- StorageRouter
+   |     +-- DocumentTreeStorageProvider
+   |     +-- GoogleDriveStorageProvider
    +-- Room history
 ```
 
@@ -28,15 +31,50 @@ A future GitHub App/PKCE architecture may still be preferable if the product gai
 
 ### Backup engines
 
-`SourceArchiveBackupEngine` downloads the repository default branch as a GitHub TAR archive and computes SHA-256 plus MD5 locally. SHA-256 is the canonical app checksum; MD5 is retained because Google Drive exposes an `md5Checksum` that can be used for independent post-upload verification.
+`BackupEngineFactory` selects an engine from `BackupType`, keeping orchestration independent of the artifact format.
 
-A source archive is not a complete Git backup. `GIT_MIRROR` remains behind the same `BackupEngine` boundary and should preserve refs, branches, tags, and full history. Git LFS, wikis, releases, issues, and pull-request metadata remain separate completeness modules.
+`SourceArchiveBackupEngine` downloads the repository default branch as a GitHub TAR.GZ archive. This is a source snapshot only; it does not preserve arbitrary refs or full history.
 
-### Storage
+`GitMirrorBackupEngine` uses JGit mirror-clone semantics, equivalent in intent to `git clone --mirror`: all refs are fetched into a bare repository. GitHub credentials are supplied to JGit's transport layer and are not written into the clone URL. The bare repository is packaged as one `.mirror.zip` artifact for hashing, storage, and restore portability.
 
-`StorageProvider` keeps destinations replaceable. `GoogleDriveStorageProvider` currently uses the narrow `drive.file` scope, a resumable upload session, and a post-upload read that verifies remote size, Drive's MD5, and the SHA-256 stored as a Drive app property.
+Both engines compute SHA-256 as the canonical integrity checksum plus MD5 for providers, such as Drive, that expose an independent MD5 checksum.
 
-Google's current Workspace API user-data policy lists generic backup of app/user content to Drive as a disallowed use case for public applications. The Drive provider should therefore be treated as a personal/internal adapter unless policy guidance changes. A Storage Access Framework provider for a user-selected document-tree destination is the preferred policy-safe next provider.
+Git LFS objects are not part of normal Git object storage and are **not included yet**. Wikis, release assets, issues, and pull-request metadata remain separate completeness modules.
+
+### Mirror restore validation
+
+`GitMirrorRestoreService` is the low-level restore primitive. It:
+
+- rejects ZIP entries whose canonical path escapes the restore root;
+- extracts the artifact into a bare-repository directory;
+- opens that repository with JGit; and
+- verifies every ref tip advertised under `refs/` exists in the object database.
+
+A future restore UI can build on this primitive to push the restored bare repository to a destination with mirror semantics.
+
+### Storage routing
+
+`StorageProvider` stays destination-agnostic. `StorageRouter` delegates new uploads to the persisted `StorageDestination`, while verification/deletion route according to the provider recorded on `RemoteBackup`. This avoids a destination switch during a running operation causing verification to hit the wrong backend.
+
+#### Storage Access Framework
+
+`DocumentTreeStorageProvider` is the preferred public-app destination. The user grants access through Android's `ACTION_OPEN_DOCUMENT_TREE` flow. `StoragePreferences` persists the URI grant with `takePersistableUriPermission`, so no broad filesystem permission is required.
+
+The provider creates:
+
+```text
+GitHub Backups/<owner>/<repository>/<artifact>
+```
+
+It streams the artifact through `ContentResolver`, then reopens the resulting document and recomputes size, SHA-256, and MD5. `COMPLETED` is recorded only after that readback matches the local artifact.
+
+Because SAF works through Android `DocumentsProvider`s, the selected tree can live on local storage, removable storage, or a compatible third-party cloud provider.
+
+#### Google Drive
+
+`GoogleDriveStorageProvider` uses the narrow `drive.file` scope, a resumable upload session, and a post-upload metadata read that verifies remote size, Drive's MD5, and the SHA-256 stored as a Drive app property.
+
+Google's current Workspace API user-data policy restricts generic backup of app/user content to Drive for public applications. Treat this adapter as personal/internal unless written permission or policy guidance changes.
 
 ### Background execution
 
@@ -46,9 +84,22 @@ Very large transfers may eventually need Android's user-initiated/foreground tra
 
 ## Backup state machine
 
+Source snapshot:
+
 ```text
 QUEUED -> DOWNLOADING -> CHECKSUM -> UPLOADING -> VERIFYING -> COMPLETED
                  \-------------------------------------------> FAILED
 ```
 
-Every state transition is persisted in Room. Temporary archives live below the app cache directory and are deleted after success or failure.
+Git mirror:
+
+```text
+QUEUED -> DOWNLOADING -> PACKAGING -> CHECKSUM -> UPLOADING -> VERIFYING -> COMPLETED
+                 \------------------------------------------------------> FAILED
+```
+
+Every state transition is persisted in Room. Temporary archives and mirror working directories live below the app cache directory and are removed after success or failure.
+
+## Test coverage
+
+The mirror restore tests create a real local repository, make a JGit mirror, package it, restore it, and assert branch/tag refs plus referenced objects survive. A separate regression test creates a malicious `../` ZIP entry and verifies it cannot write outside the restore directory.
