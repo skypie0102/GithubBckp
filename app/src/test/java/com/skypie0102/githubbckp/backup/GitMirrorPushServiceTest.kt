@@ -51,6 +51,34 @@ class GitMirrorPushServiceTest {
     }
 
     @Test
+    fun resumeAcceptsOnlyExactAlreadyPublishedMirror() = runBlocking {
+        val root = Files.createTempDirectory("mirror-resume-test").toFile()
+        try {
+            val mirror = createSourceMirror(root)
+            val target = File(root, "target.git")
+            Git.init().setBare(true).setDirectory(target).call().close()
+            val first = service.push(mirror, target.toURI().toString())
+
+            val resumed = service.pushOrReconcilePublished(mirror, target.toURI().toString())
+            assertEquals(first.pushedRefCount, resumed.pushedRefCount)
+
+            FileRepositoryBuilder().setGitDir(target).setBare().build().use { repository ->
+                val head = repository.resolve("refs/heads/master")
+                val extra = repository.updateRef("refs/heads/unexpected")
+                extra.setNewObjectId(head)
+                assertTrue(extra.update().name in setOf("NEW", "FORCED", "FAST_FORWARD", "NO_CHANGE"))
+            }
+            val failure = runCatching {
+                service.pushOrReconcilePublished(mirror, target.toURI().toString())
+            }.exceptionOrNull()
+            assertTrue(failure is IOException)
+            assertTrue(failure?.message.orEmpty().contains("not empty"))
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
     fun refusesNonEmptyTargetWithoutChangingIt() = runBlocking {
         val root = Files.createTempDirectory("mirror-non-empty-target-test").toFile()
         try {

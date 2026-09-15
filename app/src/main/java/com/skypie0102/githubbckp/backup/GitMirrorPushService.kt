@@ -24,6 +24,35 @@ class GitMirrorPushService @Inject constructor() {
         repositoryDirectory: File,
         remoteUri: String,
         credentialsProvider: CredentialsProvider? = null,
+    ): MirrorPushResult = pushInternal(
+        repositoryDirectory = repositoryDirectory,
+        remoteUri = remoteUri,
+        credentialsProvider = credentialsProvider,
+        allowExactAlreadyPublished = false,
+    )
+
+    /**
+     * Resume-only path. A non-empty remote is accepted only when every writable
+     * ref name and object ID exactly matches the local mirror and no unexpected
+     * advertised refs exist. This closes the crash window after a successful
+     * push but before the recovery transaction phase is persisted.
+     */
+    suspend fun pushOrReconcilePublished(
+        repositoryDirectory: File,
+        remoteUri: String,
+        credentialsProvider: CredentialsProvider? = null,
+    ): MirrorPushResult = pushInternal(
+        repositoryDirectory = repositoryDirectory,
+        remoteUri = remoteUri,
+        credentialsProvider = credentialsProvider,
+        allowExactAlreadyPublished = true,
+    )
+
+    private suspend fun pushInternal(
+        repositoryDirectory: File,
+        remoteUri: String,
+        credentialsProvider: CredentialsProvider?,
+        allowExactAlreadyPublished: Boolean,
     ): MirrorPushResult = withContext(Dispatchers.IO) {
         require(repositoryDirectory.isDirectory) { "Restored mirror directory is missing" }
         FileRepositoryBuilder()
@@ -32,7 +61,12 @@ class GitMirrorPushService @Inject constructor() {
             .build()
             .use { repository ->
                 check(repository.isBare) { "Restore source is not a bare Git repository" }
-                pushRepository(repository, remoteUri, credentialsProvider)
+                pushRepository(
+                    repository = repository,
+                    remoteUri = remoteUri,
+                    credentialsProvider = credentialsProvider,
+                    allowExactAlreadyPublished = allowExactAlreadyPublished,
+                )
             }
     }
 
@@ -40,15 +74,30 @@ class GitMirrorPushService @Inject constructor() {
         repository: Repository,
         remoteUri: String,
         credentialsProvider: CredentialsProvider?,
+        allowExactAlreadyPublished: Boolean,
     ): MirrorPushResult {
-        requireRemoteIsEmpty(remoteUri, credentialsProvider)
-
         val allRefs = repository.refDatabase.getRefsByPrefix("refs/")
         val skipped = allRefs
             .map { it.name }
             .filter(::isGithubReadOnlyRef)
             .sorted()
         val pushRefs = allRefs.filterNot { isGithubReadOnlyRef(it.name) }
+        val expectedRefs = pushRefs.associate { it.name to it.objectId.name }
+
+        val advertised = listRemoteRefs(remoteUri, credentialsProvider)
+        if (advertised.isNotEmpty()) {
+            if (allowExactAlreadyPublished && remoteExactlyMatches(advertised, expectedRefs)) {
+                return MirrorPushResult(
+                    pushedRefCount = pushRefs.size,
+                    skippedReadOnlyRefs = skipped,
+                )
+            }
+            val preview = advertised.map { it.first }.distinct().sorted().take(5).joinToString()
+            throw IOException(
+                "Restore target is not empty; found ${advertised.size} advertised Git ref(s): $preview",
+            )
+        }
+
         if (pushRefs.isEmpty()) {
             return MirrorPushResult(pushedRefCount = 0, skippedReadOnlyRefs = skipped)
         }
@@ -80,22 +129,28 @@ class GitMirrorPushService @Inject constructor() {
         )
     }
 
-    private fun requireRemoteIsEmpty(
+    private fun listRemoteRefs(
         remoteUri: String,
         credentialsProvider: CredentialsProvider?,
-    ) {
+    ): List<Pair<String, String>> {
         val command = Git.lsRemoteRepository().setRemote(remoteUri)
         if (credentialsProvider != null) command.setCredentialsProvider(credentialsProvider)
-        val advertisedRefs = command.call()
-            .map { it.name }
-            .distinct()
-            .sorted()
-        if (advertisedRefs.isNotEmpty()) {
-            val preview = advertisedRefs.take(5).joinToString()
-            throw IOException(
-                "Restore target is not empty; found ${advertisedRefs.size} advertised Git ref(s): $preview",
-            )
+        return command.call().mapNotNull { ref ->
+            ref.objectId?.name?.let { ref.name to it }
         }
+    }
+
+    private fun remoteExactlyMatches(
+        advertised: List<Pair<String, String>>,
+        expectedRefs: Map<String, String>,
+    ): Boolean {
+        val relevant = advertised.filterNot { (name, _) -> name == "HEAD" }
+        if (relevant.any { (name, _) -> isGithubReadOnlyRef(name) }) return false
+        val remoteRefs = relevant
+            .filter { (name, _) -> name.startsWith("refs/") }
+            .associate { it }
+        if (remoteRefs.size != relevant.size) return false
+        return remoteRefs == expectedRefs
     }
 
     private fun isGithubReadOnlyRef(name: String): Boolean =
