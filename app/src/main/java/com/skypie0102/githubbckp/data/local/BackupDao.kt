@@ -43,6 +43,7 @@ interface BackupDao {
             remoteFileName = :remoteFileName,
             remoteSizeBytes = :remoteSizeBytes,
             remoteChecksumMd5 = :remoteChecksumMd5,
+            warningMessage = :warningMessage,
             errorMessage = NULL
         WHERE id = :backupId
         """,
@@ -57,6 +58,7 @@ interface BackupDao {
         remoteFileName: String,
         remoteSizeBytes: Long,
         remoteChecksumMd5: String,
+        warningMessage: String?,
     )
 
     @Query(

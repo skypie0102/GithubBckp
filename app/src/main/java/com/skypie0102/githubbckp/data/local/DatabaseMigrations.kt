@@ -13,4 +13,10 @@ object DatabaseMigrations {
             db.execSQL("ALTER TABLE backups ADD COLUMN remoteDeletedAtEpochMs INTEGER")
         }
     }
+
+    val MIGRATION_2_3 = object : Migration(2, 3) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE backups ADD COLUMN warningMessage TEXT")
+        }
+    }
 }

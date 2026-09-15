@@ -549,6 +549,9 @@ private fun BackupRow(backup: BackupEntity) {
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
+            backup.warningMessage?.let { warning ->
+                Text("Completeness: $warning", style = MaterialTheme.typography.bodySmall)
+            }
             backup.errorMessage?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         }
     }

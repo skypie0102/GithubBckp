@@ -32,5 +32,6 @@ data class BackupEntity(
     val remoteSizeBytes: Long? = null,
     val remoteChecksumMd5: String? = null,
     val remoteDeletedAtEpochMs: Long? = null,
+    val warningMessage: String? = null,
     val errorMessage: String? = null,
 )

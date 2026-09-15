@@ -65,6 +65,7 @@ class GitMirrorBackupEngine @Inject constructor(
             checksumSha256 = digests.sha256,
             checksumMd5 = digests.md5,
             createdAtEpochMs = createdAt,
+            warnings = listOf(GIT_LFS_WARNING),
         )
     }
 
@@ -80,5 +81,10 @@ class GitMirrorBackupEngine @Inject constructor(
                 }
         }
         check(destination.length() > 0L) { "Mirror archive is empty" }
+    }
+
+    private companion object {
+        const val GIT_LFS_WARNING =
+            "Git LFS object content is not included in this mirror backup. Git refs and history are preserved, but LFS-managed file bytes require a separate LFS backup."
     }
 }

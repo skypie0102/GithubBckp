@@ -13,7 +13,7 @@ GitHub device authorization
   -> checksum artifact
   -> user-selected folder or Google Drive
   -> upload + verify
-  -> persist provider-aware backup history
+  -> persist provider-aware backup history + completeness warnings
   -> optional keep-last-N retention
 
 Periodic WorkManager controller
@@ -34,7 +34,9 @@ Mirror ZIP
 - **Source snapshot** — downloads the repository default branch as GitHub's TAR.GZ archive. It is compact, but is not a full Git-history backup.
 - **Git mirror** — uses JGit mirror-clone semantics to fetch all Git refs into a bare repository, packages that repository as a `.mirror.zip`, and computes SHA-256 + MD5. This preserves Git refs/history for restoration.
 
-Git LFS objects are **not included yet** in mirror mode. Wikis, release assets, issues, and pull-request metadata are separate future completeness modules.
+Git LFS object content is **not included yet** in mirror mode. Every newly completed Git-mirror backup therefore carries a persisted completeness warning in Room and displays that warning in Recent backups. A successful mirror remains `COMPLETED`; the warning records that LFS-managed file bytes require a separate LFS backup. Older database rows are left without a warning rather than inventing historical completeness metadata.
+
+Wikis, release assets, issues, and pull-request metadata are also separate future completeness modules.
 
 ### Destinations
 
@@ -91,7 +93,9 @@ WorkManager periodic execution is opportunistic rather than an exact alarm. The 
 
 Retention is opt-in. The default is **Keep all**. Users can instead keep the newest 3, 5, or 10 verified artifacts per repository and backup format.
 
-Room schema v2 persists the provider plus immutable remote artifact metadata required to reconstruct deletion requests. Deletion is routed through the provider that originally created the artifact, even if the user later switches destinations. Successful deletion records `remoteDeletedAtEpochMs` while keeping local history.
+Room schema v2 persists the provider plus immutable remote artifact metadata required to reconstruct deletion requests. Schema v3 adds a nullable per-backup completeness warning. The v2-to-v3 migration leaves existing rows null instead of retroactively claiming what their artifacts contain.
+
+Deletion is routed through the provider that originally created the artifact, even if the user later switches destinations. Successful deletion records `remoteDeletedAtEpochMs` while keeping local history, including any completeness warning.
 
 Rows migrated from schema v1 have unknown provider metadata and are deliberately excluded from automatic deletion. Retention is best-effort: a pruning failure is logged and never changes a newly verified backup from `COMPLETED` to `FAILED`.
 
@@ -108,6 +112,8 @@ The app can import a Git mirror ZIP through Android's document picker. The archi
 A validated restore can then be published either into a **new** GitHub repository or an **existing repository that is still empty**. New repositories default to private. For an existing target, the user enters `owner/repository`, which also supports organization-owned recovery repositories the connected account can access.
 
 Before any Git write, `GitMirrorPushService` runs an authenticated remote-ref advertisement check. If the target advertises any Git refs, restoration is refused. Writable refs are then pushed without force and every remote update result must be `OK` or `UP_TO_DATE`. GitHub's read-only `refs/pull/*` namespace is intentionally skipped and reported to the user; pull-request objects/metadata are not part of Git restoration.
+
+Restoring a mirror preserves its backed-up Git refs/history, but cannot restore Git LFS object bytes because those bytes are not yet part of the mirror artifact.
 
 Destructive overwrite of a non-empty repository remains intentionally unavailable. Exact mirror overwrite can delete branches/tags and may conflict with repository rules or GitHub push policies, so that requires a separate confirmation/rules-aware design.
 
@@ -130,13 +136,13 @@ Key boundaries:
 - `GoogleDriveStorageProvider` — Drive resumable upload/remote verification
 - `BackupScheduler` / `ScheduledBackupWorker` — manual and periodic fan-out scheduling
 - `BackupRetentionManager` — opt-in keep-last-N pruning
-- `BackupCoordinator` — durable Room state transitions around one backup attempt
+- `BackupCoordinator` — durable Room state transitions, remote verification, and completeness-warning persistence
 
 See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for component details.
 
 ## Next implementation slice
 
-1. Design a separately confirmed non-empty repository recovery flow with explicit remote-ref deletion semantics and repository-rule checks.
-2. Add Git LFS object backup/restore and clearly report repository completeness.
+1. Add actual Git LFS object backup/restore and promote the mirror completeness state when those objects are covered.
+2. Design a separately confirmed non-empty repository recovery flow with explicit remote-ref deletion semantics and repository-rule checks.
 3. Add optional wiki, release assets, issues, and pull-request metadata modules.
 4. Add richer backup/restore audit and export reporting.
