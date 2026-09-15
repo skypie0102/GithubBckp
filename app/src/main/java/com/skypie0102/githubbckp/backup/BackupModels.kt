@@ -1,7 +1,6 @@
 package com.skypie0102.githubbckp.backup
 
 import java.io.File
-import java.time.Instant
 
 data class RepositoryRef(
     val id: Long,
@@ -40,5 +39,5 @@ data class BackupArtifact(
     val type: BackupType,
     val file: File,
     val checksumSha256: String,
-    val createdAt: Instant,
+    val createdAtEpochMs: Long,
 )
