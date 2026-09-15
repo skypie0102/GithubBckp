@@ -10,6 +10,7 @@ The core backup, scheduling, retention, local restore, and safe GitHub recovery 
 GitHub device authorization
   -> discover/select repositories
   -> source snapshot or Git mirror
+  -> mirror: scan/download/verify referenced Git LFS objects
   -> checksum artifact
   -> user-selected folder or Google Drive
   -> upload + verify
@@ -32,11 +33,11 @@ Mirror ZIP
 ### Backup formats
 
 - **Source snapshot** — downloads the repository default branch as GitHub's TAR.GZ archive. It is compact, but is not a full Git-history backup.
-- **Git mirror** — uses JGit mirror-clone semantics to fetch all Git refs into a bare repository, packages that repository as a `.mirror.zip`, and computes SHA-256 + MD5. This preserves Git refs/history for restoration.
+- **Git mirror** — uses JGit mirror-clone semantics to fetch all Git refs into a bare repository. It scans reachable blobs for standard Git LFS pointers, downloads every referenced LFS object through the Git LFS Batch API, verifies size + SHA-256, stores those objects under the standard `lfs/objects` layout, then packages the repository as one `.mirror.zip` and computes SHA-256 + MD5.
 
-Git LFS object content is **not included yet** in mirror mode. Every newly completed Git-mirror backup therefore carries a persisted completeness warning in Room and displays that warning in Recent backups. A successful mirror remains `COMPLETED`; the warning records that LFS-managed file bytes require a separate LFS backup. Older database rows are left without a warning rather than inventing historical completeness metadata.
+If any detected LFS object cannot be authorized, downloaded, or verified, the mirror backup fails rather than silently producing an incomplete successful artifact. Mirrors with bundled LFS objects carry a persisted non-fatal warning only because GitHub **restore publication** does not upload those bundled LFS objects yet.
 
-Wikis, release assets, issues, and pull-request metadata are also separate future completeness modules.
+Wikis, release assets, issues, and pull-request metadata are separate future completeness modules.
 
 ### Destinations
 
@@ -99,12 +100,24 @@ Deletion is routed through the provider that originally created the artifact, ev
 
 Rows migrated from schema v1 have unknown provider metadata and are deliberately excluded from automatic deletion. Retention is best-effort: a pruning failure is logged and never changes a newly verified backup from `COMPLETED` to `FAILED`.
 
+## Git LFS backup
+
+Mirror mode scans reachable Git blobs for standard LFS pointer files. Unique OIDs are requested from the Git LFS Batch API in groups of 100. Object download URLs and headers come from the server response; GitHub credentials are sent only to the GitHub batch endpoint, and `Authorization` is dropped on cross-host redirects. Every object must pass declared-size and SHA-256 verification before it is accepted into the mirror.
+
+Bundled objects use the standard layout:
+
+```text
+lfs/objects/<first 2 hex>/<next 2 hex>/<full sha256 oid>
+```
+
+See [`docs/LFS_BACKUP.md`](docs/LFS_BACKUP.md) for protocol and security details.
+
 ## Mirror restoration
 
 The app can import a Git mirror ZIP through Android's document picker. The archive is copied into private app storage and restored with these checks:
 
 1. Reject ZIP entries that escape the restore directory.
-2. Extract into a bare-repository directory.
+2. Extract into a bare-repository directory, including any bundled `lfs/objects` content.
 3. Open it with JGit.
 4. Verify every advertised ref tip exists in the object database.
 5. Persist lightweight restore metadata so valid restores survive app restarts.
@@ -113,7 +126,7 @@ A validated restore can then be published either into a **new** GitHub repositor
 
 Before any Git write, `GitMirrorPushService` runs an authenticated remote-ref advertisement check. If the target advertises any Git refs, restoration is refused. Writable refs are then pushed without force and every remote update result must be `OK` or `UP_TO_DATE`. GitHub's read-only `refs/pull/*` namespace is intentionally skipped and reported to the user; pull-request objects/metadata are not part of Git restoration.
 
-Restoring a mirror preserves its backed-up Git refs/history, but cannot restore Git LFS object bytes because those bytes are not yet part of the mirror artifact.
+Local mirror restore preserves bundled LFS bytes, but GitHub publication currently pushes Git refs only. Uploading bundled LFS objects to the target repository is the next recovery slice.
 
 Destructive overwrite of a non-empty repository remains intentionally unavailable. Exact mirror overwrite can delete branches/tags and may conflict with repository rules or GitHub push policies, so that requires a separate confirmation/rules-aware design.
 
@@ -129,6 +142,7 @@ Key boundaries:
 - `GithubGateway` / `GithubRestGateway` — repository discovery and source archive transfer
 - `GithubRepositoryRestoreGateway` — create or resolve a GitHub recovery target
 - `BackupEngineFactory` — selects source snapshot or Git mirror engine
+- `GitLfsPointerScanner` / `GitLfsDownloadService` — discover, download, and verify mirror LFS objects
 - `GitMirrorRestoreService` / `MirrorRestoreCoordinator` — safe mirror import and persistent local restores
 - `GitMirrorPushService` / `GithubMirrorRestorePublisher` — empty-target validation and non-forced Git recovery publication
 - `StorageRouter` — provider-aware upload, verification, and deletion routing
@@ -142,7 +156,7 @@ See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for component details.
 
 ## Next implementation slice
 
-1. Add actual Git LFS object backup/restore and promote the mirror completeness state when those objects are covered.
+1. Upload bundled Git LFS objects during GitHub mirror recovery, including upload/verify actions from the LFS Batch API.
 2. Design a separately confirmed non-empty repository recovery flow with explicit remote-ref deletion semantics and repository-rule checks.
 3. Add optional wiki, release assets, issues, and pull-request metadata modules.
 4. Add richer backup/restore audit and export reporting.
