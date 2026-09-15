@@ -4,7 +4,7 @@ Android app for backing up repositories from a GitHub account to external storag
 
 ## Status
 
-The core backup, scheduling, retention, local restore, and new-repository recovery flows are implemented:
+The core backup, scheduling, retention, local restore, and safe GitHub recovery flows are implemented:
 
 ```text
 GitHub device authorization
@@ -24,8 +24,9 @@ Mirror ZIP
   -> Android document picker
   -> safe private import
   -> validate bare Git repository refs/objects
-  -> create a new GitHub repository
-  -> push all writable refs
+  -> create a new GitHub repository OR select an existing empty repository
+  -> verify target advertises no Git refs
+  -> push all writable refs without force
 ```
 
 ### Backup formats
@@ -104,9 +105,11 @@ The app can import a Git mirror ZIP through Android's document picker. The archi
 4. Verify every advertised ref tip exists in the object database.
 5. Persist lightweight restore metadata so valid restores survive app restarts.
 
-A validated restore can then be published into a **new** GitHub repository. The new repository defaults to private. `GithubRepositoryRestoreGateway` creates an empty repository for the authenticated user, then `GitMirrorPushService` force-pushes every writable ref and validates every remote update result. GitHub's read-only `refs/pull/*` namespace is intentionally skipped and reported to the user; pull-request objects/metadata are not part of Git restoration.
+A validated restore can then be published either into a **new** GitHub repository or an **existing repository that is still empty**. New repositories default to private. For an existing target, the user enters `owner/repository`, which also supports organization-owned recovery repositories the connected account can access.
 
-Existing-repository overwrite is intentionally not exposed yet because making a remote exactly match a mirror can delete branches/tags and may be blocked by repository rules or GitHub push policies.
+Before any Git write, `GitMirrorPushService` runs an authenticated remote-ref advertisement check. If the target advertises any Git refs, restoration is refused. Writable refs are then pushed without force and every remote update result must be `OK` or `UP_TO_DATE`. GitHub's read-only `refs/pull/*` namespace is intentionally skipped and reported to the user; pull-request objects/metadata are not part of Git restoration.
+
+Destructive overwrite of a non-empty repository remains intentionally unavailable. Exact mirror overwrite can delete branches/tags and may conflict with repository rules or GitHub push policies, so that requires a separate confirmation/rules-aware design.
 
 ## Security
 
@@ -118,10 +121,10 @@ Key boundaries:
 
 - `GithubAuthManager` — GitHub device flow, encrypted token persistence and refresh
 - `GithubGateway` / `GithubRestGateway` — repository discovery and source archive transfer
-- `GithubRepositoryRestoreGateway` — create a new GitHub recovery target
+- `GithubRepositoryRestoreGateway` — create or resolve a GitHub recovery target
 - `BackupEngineFactory` — selects source snapshot or Git mirror engine
 - `GitMirrorRestoreService` / `MirrorRestoreCoordinator` — safe mirror import and persistent local restores
-- `GitMirrorPushService` / `GithubMirrorRestorePublisher` — validated mirror publication to a new GitHub repository
+- `GitMirrorPushService` / `GithubMirrorRestorePublisher` — empty-target validation and non-forced Git recovery publication
 - `StorageRouter` — provider-aware upload, verification, and deletion routing
 - `DocumentTreeStorageProvider` — SAF streaming upload/readback verification
 - `GoogleDriveStorageProvider` — Drive resumable upload/remote verification
@@ -133,7 +136,7 @@ See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for component details.
 
 ## Next implementation slice
 
-1. Add a separately confirmed existing-repository overwrite flow with explicit remote-ref deletion semantics and repository-rule checks.
+1. Design a separately confirmed non-empty repository recovery flow with explicit remote-ref deletion semantics and repository-rule checks.
 2. Add Git LFS object backup/restore and clearly report repository completeness.
 3. Add optional wiki, release assets, issues, and pull-request metadata modules.
 4. Add richer backup/restore audit and export reporting.
