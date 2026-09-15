@@ -9,7 +9,8 @@ import org.junit.Assert.assertThrows
 import org.junit.Test
 
 class GitLfsDownloadServiceTest {
-    private val service = GitLfsDownloadService()
+    private val objectStore = GitLfsObjectStore()
+    private val service = GitLfsDownloadService(objectStore)
 
     @Test
     fun parsesBasicDownloadActionAndHeaders() {
@@ -75,7 +76,7 @@ class GitLfsDownloadServiceTest {
                 sizeBytes = bytes.size.toLong(),
             )
 
-            service.verifyObject(file, pointer)
+            objectStore.verify(file, pointer)
         } finally {
             root.deleteRecursively()
         }
@@ -91,7 +92,7 @@ class GitLfsDownloadServiceTest {
                 sizeBytes = file.length(),
             )
 
-            assertThrows(IOException::class.java) { service.verifyObject(file, pointer) }
+            assertThrows(IOException::class.java) { objectStore.verify(file, pointer) }
         } finally {
             root.deleteRecursively()
         }
