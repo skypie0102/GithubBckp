@@ -73,7 +73,7 @@ class GitMirrorPushService @Inject constructor() {
             throw IOException("Mirror push did not restore every writable ref: $detail")
         }
 
-        MirrorPushResult(
+        return MirrorPushResult(
             pushedRefCount = pushRefs.size,
             skippedReadOnlyRefs = skipped,
         )
