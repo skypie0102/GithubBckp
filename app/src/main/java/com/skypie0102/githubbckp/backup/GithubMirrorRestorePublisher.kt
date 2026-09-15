@@ -6,6 +6,8 @@ import com.skypie0102.githubbckp.github.GithubRestoreRepository
 import java.io.IOException
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import org.eclipse.jgit.transport.UsernamePasswordCredentialsProvider
 
 data class GithubRestorePublishResult(
@@ -58,34 +60,33 @@ class GithubMirrorRestorePublisher @Inject constructor(
         val repositoryDirectory = restoreCoordinator.requireRepositoryDirectory(restoreId)
         val token = authManager.requireAccessToken()
 
-        val lfsObjectCount: Int
-        val push: MirrorPushResult
-        try {
-            val lfsPointers = lfsPointerScanner.scan(repositoryDirectory)
-            lfsObjectCount = lfsUploadService.uploadAll(
-                repositoryFullName = repository.fullName,
-                accessToken = token,
-                pointers = lfsPointers,
-                repositoryDirectory = repositoryDirectory,
-            )
-            push = pushService.push(
-                repositoryDirectory = repositoryDirectory,
-                remoteUri = repository.cloneUrl,
-                credentialsProvider = UsernamePasswordCredentialsProvider("x-access-token", token),
-            )
+        return try {
+            withContext(Dispatchers.IO) {
+                val lfsPointers = lfsPointerScanner.scan(repositoryDirectory)
+                val lfsObjectCount = lfsUploadService.uploadAll(
+                    repositoryFullName = repository.fullName,
+                    accessToken = token,
+                    pointers = lfsPointers,
+                    repositoryDirectory = repositoryDirectory,
+                )
+                val push = pushService.push(
+                    repositoryDirectory = repositoryDirectory,
+                    remoteUri = repository.cloneUrl,
+                    credentialsProvider = UsernamePasswordCredentialsProvider("x-access-token", token),
+                )
+                GithubRestorePublishResult(
+                    repositoryFullName = repository.fullName,
+                    repositoryUrl = repository.htmlUrl,
+                    pushedRefCount = push.pushedRefCount,
+                    restoredLfsObjectCount = lfsObjectCount,
+                    skippedReadOnlyRefs = push.skippedReadOnlyRefs,
+                )
+            }
         } catch (throwable: Throwable) {
             throw IOException(
                 "$failurePrefix: ${throwable.message ?: throwable.javaClass.simpleName}",
                 throwable,
             )
         }
-
-        return GithubRestorePublishResult(
-            repositoryFullName = repository.fullName,
-            repositoryUrl = repository.htmlUrl,
-            pushedRefCount = push.pushedRefCount,
-            restoredLfsObjectCount = lfsObjectCount,
-            skippedReadOnlyRefs = push.skippedReadOnlyRefs,
-        )
     }
 }
