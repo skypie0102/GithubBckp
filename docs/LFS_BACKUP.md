@@ -1,4 +1,4 @@
-# Git LFS backup
+# Git LFS backup and recovery
 
 Git mirror backups scan every reachable blob in the bare mirror for standard Git LFS pointer files. Unique SHA-256 OIDs and declared sizes are collected once per backup.
 
@@ -16,10 +16,20 @@ For repositories with LFS pointers, `GitLfsDownloadService`:
 lfs/objects/<first 2 hex>/<next 2 hex>/<full sha256 oid>
 ```
 
-The bare repository and its `lfs/objects` directory are then packaged together into the existing `.mirror.zip` artifact.
+The bare repository and its `lfs/objects` directory are then packaged together into the existing `.mirror.zip` artifact. If any referenced LFS object cannot be authorized, downloaded, size-checked, or SHA-256-verified, the mirror backup fails instead of silently producing an incomplete successful backup.
 
-If any referenced LFS object cannot be authorized, downloaded, size-checked, or SHA-256-verified, the mirror backup fails instead of silently producing an incomplete successful backup.
+## GitHub recovery
 
-## Current restore boundary
+A restored mirror retains the bundled `lfs/objects` store. Before Git refs are published to a new or provably empty GitHub target, recovery:
 
-Local mirror restoration preserves the bundled LFS object files because they are inside the mirror ZIP. GitHub publication currently pushes Git refs only; it does not yet upload bundled LFS objects to the target repository's LFS store. Completed backups that contain LFS objects therefore persist a non-fatal warning describing this restore limitation.
+1. Rescans reachable Git LFS pointer OIDs from the restored bare repository.
+2. Requires every referenced local LFS object to exist and pass size + SHA-256 verification.
+3. Requests `upload` plans from the target repository's Git LFS Batch API, again in batches of 100.
+4. Treats an object with no returned `actions` as already present on the target.
+5. PUTs raw object bytes to each returned upload action using only its server-provided headers.
+6. Executes the optional LFS `verify` action with the object's OID and size.
+7. Only after all LFS objects are covered does the existing empty-remote preflight run and Git refs get pushed without force.
+
+That order is deliberate: recovery never publishes Git refs that would point at known-missing bundled LFS data. If an older mirror contains LFS pointers but does not contain the corresponding LFS object files, recovery fails before Git refs are published.
+
+Destructive restoration into a non-empty Git repository remains a separate, intentionally unsupported flow.
