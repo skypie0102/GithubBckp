@@ -12,6 +12,7 @@ data class GithubRestorePublishResult(
     val repositoryFullName: String,
     val repositoryUrl: String,
     val pushedRefCount: Int,
+    val restoredLfsObjectCount: Int,
     val skippedReadOnlyRefs: List<String>,
 )
 
@@ -20,6 +21,8 @@ class GithubMirrorRestorePublisher @Inject constructor(
     private val restoreCoordinator: MirrorRestoreCoordinator,
     private val repositoryGateway: GithubRepositoryRestoreGateway,
     private val authManager: GithubAuthManager,
+    private val lfsPointerScanner: GitLfsPointerScanner,
+    private val lfsUploadService: GitLfsUploadService,
     private val pushService: GitMirrorPushService,
 ) {
     suspend fun publishToNewRepository(
@@ -31,7 +34,7 @@ class GithubMirrorRestorePublisher @Inject constructor(
         return publish(
             restoreId = restoreId,
             repository = created,
-            failurePrefix = "${created.fullName} was created, but the mirror push failed",
+            failurePrefix = "${created.fullName} was created, but recovery failed",
         )
     }
 
@@ -54,8 +57,18 @@ class GithubMirrorRestorePublisher @Inject constructor(
     ): GithubRestorePublishResult {
         val repositoryDirectory = restoreCoordinator.requireRepositoryDirectory(restoreId)
         val token = authManager.requireAccessToken()
-        val push = try {
-            pushService.push(
+
+        val lfsObjectCount: Int
+        val push: MirrorPushResult
+        try {
+            val lfsPointers = lfsPointerScanner.scan(repositoryDirectory)
+            lfsObjectCount = lfsUploadService.uploadAll(
+                repositoryFullName = repository.fullName,
+                accessToken = token,
+                pointers = lfsPointers,
+                repositoryDirectory = repositoryDirectory,
+            )
+            push = pushService.push(
                 repositoryDirectory = repositoryDirectory,
                 remoteUri = repository.cloneUrl,
                 credentialsProvider = UsernamePasswordCredentialsProvider("x-access-token", token),
@@ -71,6 +84,7 @@ class GithubMirrorRestorePublisher @Inject constructor(
             repositoryFullName = repository.fullName,
             repositoryUrl = repository.htmlUrl,
             pushedRefCount = push.pushedRefCount,
+            restoredLfsObjectCount = lfsObjectCount,
             skippedReadOnlyRefs = push.skippedReadOnlyRefs,
         )
     }
