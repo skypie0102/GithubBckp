@@ -6,6 +6,8 @@ data class RemoteBackup(
     val id: String,
     val name: String,
     val sizeBytes: Long,
+    val checksumSha256: String,
+    val checksumMd5: String,
 )
 
 interface StorageProvider {

@@ -3,23 +3,176 @@ package com.skypie0102.githubbckp.storage.drive
 import com.skypie0102.githubbckp.backup.BackupArtifact
 import com.skypie0102.githubbckp.storage.RemoteBackup
 import com.skypie0102.githubbckp.storage.StorageProvider
+import java.io.FileInputStream
+import java.io.IOException
+import java.net.HttpURLConnection
+import java.net.URL
+import java.net.URLEncoder
+import java.nio.charset.StandardCharsets
 import javax.inject.Inject
+import javax.inject.Singleton
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import org.json.JSONObject
 
-/**
- * Google Drive adapter boundary.
- *
- * TODO: Implement OAuth with the narrow drive.file scope and resumable uploads.
- * Keep access/refresh tokens in Keystore-backed storage, never BuildConfig/source.
- */
-class GoogleDriveStorageProvider @Inject constructor() : StorageProvider {
+@Singleton
+class GoogleDriveStorageProvider @Inject constructor(
+    private val authManager: GoogleDriveAuthManager,
+) : StorageProvider {
     override suspend fun upload(
         artifact: BackupArtifact,
         onProgress: suspend (uploadedBytes: Long, totalBytes: Long) -> Unit,
-    ): RemoteBackup = error("Google Drive authentication is not configured yet")
+    ): RemoteBackup = withContext(Dispatchers.IO) {
+        val token = authManager.requireAccessToken()
+        val metadata = JSONObject()
+            .put("name", artifact.file.name)
+            .put("mimeType", MIME_TYPE)
+            .put(
+                "appProperties",
+                JSONObject()
+                    .put("sha256", artifact.checksumSha256)
+                    .put("repository", artifact.repository.fullName)
+                    .put("backupType", artifact.type.name),
+            )
 
-    override suspend fun verify(remoteBackup: RemoteBackup): Boolean = false
+        val sessionUrl = createResumableSession(token, metadata, artifact.file.length())
+        uploadToSession(
+            sessionUrl = sessionUrl,
+            token = token,
+            artifact = artifact,
+            onProgress = onProgress,
+        )
+    }
 
-    override suspend fun delete(remoteBackup: RemoteBackup) {
-        error("Google Drive authentication is not configured yet")
+    override suspend fun verify(remoteBackup: RemoteBackup): Boolean = withContext(Dispatchers.IO) {
+        val token = authManager.requireAccessToken()
+        val fields = "id,name,size,md5Checksum,appProperties"
+        val url = "$FILES_URL/${path(remoteBackup.id)}?fields=${query(fields)}"
+        val connection = open(url, "GET", token)
+        try {
+            val json = readJson(connection)
+            val sha256 = json.optJSONObject("appProperties")?.optString("sha256")
+            val md5 = json.optString("md5Checksum")
+            val size = json.optString("size").toLongOrNull()
+            sha256 == remoteBackup.checksumSha256 &&
+                md5.equals(remoteBackup.checksumMd5, ignoreCase = true) &&
+                size == remoteBackup.sizeBytes
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    override suspend fun delete(remoteBackup: RemoteBackup) = withContext(Dispatchers.IO) {
+        val token = authManager.requireAccessToken()
+        val connection = open("$FILES_URL/${path(remoteBackup.id)}", "DELETE", token)
+        try {
+            val code = connection.responseCode
+            if (code !in 200..299) {
+                val error = connection.errorStream?.bufferedReader()?.use { it.readText() }.orEmpty()
+                throw IOException("Drive delete HTTP $code: ${error.take(300)}")
+            }
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    private fun createResumableSession(
+        token: String,
+        metadata: JSONObject,
+        fileLength: Long,
+    ): String {
+        val connection = open(RESUMABLE_CREATE_URL, "POST", token).apply {
+            doOutput = true
+            setRequestProperty("Content-Type", "application/json; charset=UTF-8")
+            setRequestProperty("X-Upload-Content-Type", MIME_TYPE)
+            setRequestProperty("X-Upload-Content-Length", fileLength.toString())
+        }
+        return try {
+            val payload = metadata.toString().toByteArray(StandardCharsets.UTF_8)
+            connection.outputStream.use { it.write(payload) }
+            val code = connection.responseCode
+            if (code !in 200..299) {
+                val error = connection.errorStream?.bufferedReader()?.use { it.readText() }.orEmpty()
+                throw IOException("Drive resumable-session HTTP $code: ${error.take(300)}")
+            }
+            connection.getHeaderField("Location")
+                ?: throw IOException("Drive did not return a resumable upload URL")
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    private suspend fun uploadToSession(
+        sessionUrl: String,
+        token: String,
+        artifact: BackupArtifact,
+        onProgress: suspend (uploadedBytes: Long, totalBytes: Long) -> Unit,
+    ): RemoteBackup {
+        val totalBytes = artifact.file.length()
+        val connection = open(sessionUrl, "PUT", token).apply {
+            doOutput = true
+            setRequestProperty("Content-Type", MIME_TYPE)
+            setFixedLengthStreamingMode(totalBytes)
+        }
+        try {
+            var uploaded = 0L
+            connection.outputStream.buffered().use { output ->
+                FileInputStream(artifact.file).use { input ->
+                    val buffer = ByteArray(BUFFER_SIZE)
+                    while (true) {
+                        val count = input.read(buffer)
+                        if (count < 0) break
+                        output.write(buffer, 0, count)
+                        uploaded += count
+                        onProgress(uploaded, totalBytes)
+                    }
+                }
+            }
+            val json = readJson(connection)
+            return RemoteBackup(
+                id = json.getString("id"),
+                name = json.optString("name", artifact.file.name),
+                sizeBytes = json.optString("size").toLongOrNull() ?: totalBytes,
+                checksumSha256 = artifact.checksumSha256,
+                checksumMd5 = artifact.checksumMd5,
+            )
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    private fun readJson(connection: HttpURLConnection): JSONObject {
+        val code = connection.responseCode
+        val stream = if (code in 200..299) connection.inputStream else connection.errorStream
+        val text = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+        if (code !in 200..299) {
+            throw IOException("Drive API HTTP $code: ${text.take(300)}")
+        }
+        if (text.isBlank()) throw IOException("Drive API returned an empty response")
+        return JSONObject(text)
+    }
+
+    private fun open(url: String, method: String, token: String): HttpURLConnection =
+        (URL(url).openConnection() as HttpURLConnection).apply {
+            requestMethod = method
+            connectTimeout = CONNECT_TIMEOUT_MS
+            readTimeout = READ_TIMEOUT_MS
+            setRequestProperty("Authorization", "Bearer $token")
+        }
+
+    private fun path(value: String): String =
+        URLEncoder.encode(value, StandardCharsets.UTF_8.name()).replace("+", "%20")
+
+    private fun query(value: String): String =
+        URLEncoder.encode(value, StandardCharsets.UTF_8.name())
+
+    private companion object {
+        const val FILES_URL = "https://www.googleapis.com/drive/v3/files"
+        const val RESUMABLE_CREATE_URL =
+            "https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id,name,size,md5Checksum,appProperties"
+        const val MIME_TYPE = "application/gzip"
+        const val CONNECT_TIMEOUT_MS = 30_000
+        const val READ_TIMEOUT_MS = 120_000
+        const val BUFFER_SIZE = 256 * 1024
     }
 }

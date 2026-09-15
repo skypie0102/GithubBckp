@@ -1,0 +1,192 @@
+package com.skypie0102.githubbckp.github
+
+import com.skypie0102.githubbckp.BuildConfig
+import com.skypie0102.githubbckp.auth.SecureStore
+import java.io.IOException
+import java.net.HttpURLConnection
+import java.net.URL
+import java.net.URLEncoder
+import java.nio.charset.StandardCharsets
+import javax.inject.Inject
+import javax.inject.Singleton
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
+import org.json.JSONObject
+
+data class GithubDeviceSession(
+    val deviceCode: String,
+    val userCode: String,
+    val verificationUri: String,
+    val expiresInSeconds: Long,
+    val intervalSeconds: Long,
+)
+
+@Singleton
+class GithubAuthManager @Inject constructor(
+    private val secureStore: SecureStore,
+) {
+    fun isConfigured(): Boolean = BuildConfig.GITHUB_CLIENT_ID.isNotBlank()
+
+    fun isAuthenticated(): Boolean = secureStore.get(KEY_ACCESS_TOKEN) != null
+
+    suspend fun startDeviceFlow(): GithubDeviceSession = withContext(Dispatchers.IO) {
+        requireConfigured()
+        val response = postForm(
+            DEVICE_CODE_URL,
+            mapOf(
+                "client_id" to BuildConfig.GITHUB_CLIENT_ID,
+                "scope" to "repo offline_access",
+            ),
+        )
+        GithubDeviceSession(
+            deviceCode = response.getString("device_code"),
+            userCode = response.getString("user_code"),
+            verificationUri = response.getString("verification_uri"),
+            expiresInSeconds = response.getLong("expires_in"),
+            intervalSeconds = response.optLong("interval", 5L).coerceAtLeast(1L),
+        )
+    }
+
+    suspend fun pollUntilAuthorized(session: GithubDeviceSession): String = withContext(Dispatchers.IO) {
+        requireConfigured()
+        val deadline = System.currentTimeMillis() + session.expiresInSeconds * 1_000L
+        var intervalSeconds = session.intervalSeconds
+
+        while (System.currentTimeMillis() < deadline) {
+            val response = postForm(
+                ACCESS_TOKEN_URL,
+                mapOf(
+                    "client_id" to BuildConfig.GITHUB_CLIENT_ID,
+                    "device_code" to session.deviceCode,
+                    "grant_type" to DEVICE_GRANT_TYPE,
+                ),
+            )
+
+            response.optString("access_token").takeIf { it.isNotBlank() }?.let { accessToken ->
+                persistTokenResponse(response)
+                return@withContext accessToken
+            }
+
+            when (response.optString("error")) {
+                "authorization_pending" -> Unit
+                "slow_down" -> intervalSeconds += 5L
+                "access_denied" -> throw IOException("GitHub authorization was denied")
+                "expired_token" -> throw IOException("GitHub device code expired")
+                else -> throw IOException(response.optString("error_description", "GitHub authorization failed"))
+            }
+            delay(intervalSeconds * 1_000L)
+        }
+
+        throw IOException("GitHub device authorization expired")
+    }
+
+    suspend fun requireAccessToken(): String = withContext(Dispatchers.IO) {
+        val accessToken = secureStore.get(KEY_ACCESS_TOKEN)
+            ?: throw IOException("GitHub is not connected")
+        val expiresAt = secureStore.get(KEY_ACCESS_EXPIRES_AT)?.toLongOrNull() ?: Long.MAX_VALUE
+        if (expiresAt > System.currentTimeMillis() + TOKEN_EXPIRY_SKEW_MS) {
+            return@withContext accessToken
+        }
+
+        val refreshToken = secureStore.get(KEY_REFRESH_TOKEN)
+            ?: throw IOException("GitHub authorization expired; reconnect GitHub")
+        refresh(refreshToken)
+    }
+
+    fun disconnect() {
+        secureStore.remove(KEY_ACCESS_TOKEN)
+        secureStore.remove(KEY_ACCESS_EXPIRES_AT)
+        secureStore.remove(KEY_REFRESH_TOKEN)
+        secureStore.remove(KEY_REFRESH_EXPIRES_AT)
+    }
+
+    private fun refresh(refreshToken: String): String {
+        requireConfigured()
+        val response = postForm(
+            ACCESS_TOKEN_URL,
+            mapOf(
+                "client_id" to BuildConfig.GITHUB_CLIENT_ID,
+                "grant_type" to "refresh_token",
+                "refresh_token" to refreshToken,
+            ),
+        )
+        val token = response.optString("access_token")
+        if (token.isBlank()) {
+            disconnect()
+            throw IOException(response.optString("error_description", "GitHub token refresh failed"))
+        }
+        persistTokenResponse(response)
+        return token
+    }
+
+    private fun persistTokenResponse(response: JSONObject) {
+        val now = System.currentTimeMillis()
+        val expiresIn = response.optLong("expires_in", 0L)
+        val refreshExpiresIn = response.optLong("refresh_token_expires_in", 0L)
+
+        secureStore.put(KEY_ACCESS_TOKEN, response.getString("access_token"))
+        secureStore.put(
+            KEY_ACCESS_EXPIRES_AT,
+            if (expiresIn > 0) (now + expiresIn * 1_000L).toString() else Long.MAX_VALUE.toString(),
+        )
+        response.optString("refresh_token").takeIf { it.isNotBlank() }?.let {
+            secureStore.put(KEY_REFRESH_TOKEN, it)
+        }
+        if (refreshExpiresIn > 0) {
+            secureStore.put(KEY_REFRESH_EXPIRES_AT, (now + refreshExpiresIn * 1_000L).toString())
+        }
+    }
+
+    private fun requireConfigured() {
+        check(isConfigured()) {
+            "Set the GITHUB_CLIENT_ID Gradle property or environment variable before connecting GitHub"
+        }
+    }
+
+    private fun postForm(endpoint: String, fields: Map<String, String>): JSONObject {
+        val connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"
+            doOutput = true
+            connectTimeout = CONNECT_TIMEOUT_MS
+            readTimeout = READ_TIMEOUT_MS
+            setRequestProperty("Accept", "application/json")
+            setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
+        }
+        val body = fields.entries.joinToString("&") { (key, value) ->
+            "${encode(key)}=${encode(value)}"
+        }.toByteArray(StandardCharsets.UTF_8)
+
+        return try {
+            connection.outputStream.use { it.write(body) }
+            val stream = if (connection.responseCode in 200..299) {
+                connection.inputStream
+            } else {
+                connection.errorStream
+            }
+            val text = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+            if (text.isBlank()) {
+                throw IOException("GitHub returned HTTP ${connection.responseCode}")
+            }
+            JSONObject(text)
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    private fun encode(value: String): String =
+        URLEncoder.encode(value, StandardCharsets.UTF_8.name())
+
+    private companion object {
+        const val DEVICE_CODE_URL = "https://github.com/login/device/code"
+        const val ACCESS_TOKEN_URL = "https://github.com/login/oauth/access_token"
+        const val DEVICE_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:device_code"
+        const val KEY_ACCESS_TOKEN = "github.access-token"
+        const val KEY_ACCESS_EXPIRES_AT = "github.access-token-expires-at"
+        const val KEY_REFRESH_TOKEN = "github.refresh-token"
+        const val KEY_REFRESH_EXPIRES_AT = "github.refresh-token-expires-at"
+        const val TOKEN_EXPIRY_SKEW_MS = 60_000L
+        const val CONNECT_TIMEOUT_MS = 30_000
+        const val READ_TIMEOUT_MS = 30_000
+    }
+}

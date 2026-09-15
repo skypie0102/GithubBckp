@@ -39,5 +39,6 @@ data class BackupArtifact(
     val type: BackupType,
     val file: File,
     val checksumSha256: String,
+    val checksumMd5: String,
     val createdAtEpochMs: Long,
 )

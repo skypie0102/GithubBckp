@@ -1,0 +1,20 @@
+package com.skypie0102.githubbckp.data.local
+
+import com.skypie0102.githubbckp.backup.RepositoryRef
+
+fun RepositoryEntity.toRepositoryRef(): RepositoryRef = RepositoryRef(
+    id = githubId,
+    owner = owner,
+    name = name,
+    defaultBranch = defaultBranch,
+    isPrivate = isPrivate,
+)
+
+fun RepositoryRef.toEntity(selectedForBackup: Boolean = true): RepositoryEntity = RepositoryEntity(
+    githubId = id,
+    owner = owner,
+    name = name,
+    defaultBranch = defaultBranch,
+    isPrivate = isPrivate,
+    selectedForBackup = selectedForBackup,
+)
