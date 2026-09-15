@@ -30,6 +30,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -44,6 +45,7 @@ import com.skypie0102.githubbckp.backup.MirrorRestoreRecord
 import com.skypie0102.githubbckp.data.local.BackupEntity
 import com.skypie0102.githubbckp.data.local.RepositoryEntity
 import com.skypie0102.githubbckp.storage.StorageDestination
+import com.skypie0102.githubbckp.worker.BackupCadence
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -53,11 +55,8 @@ fun HomeScreen(viewModel: HomeViewModel) {
     val driveLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartIntentSenderForResult(),
     ) { result ->
-        if (result.resultCode == Activity.RESULT_OK) {
-            viewModel.completeDriveAuthorization(result.data)
-        } else {
-            viewModel.driveAuthorizationCancelled()
-        }
+        if (result.resultCode == Activity.RESULT_OK) viewModel.completeDriveAuthorization(result.data)
+        else viewModel.driveAuthorizationCancelled()
     }
     val folderLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocumentTree(),
@@ -259,6 +258,64 @@ fun HomeScreen(viewModel: HomeViewModel) {
                         Text("Back up selected repositories")
                     }
                 }
+            }
+
+            item { Text("Automatic backups", style = MaterialTheme.typography.titleLarge) }
+            item {
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Scheduled backups", style = MaterialTheme.typography.titleMedium)
+                            Text(
+                                "Uses the repositories selected when the schedule runs.",
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                        Switch(
+                            checked = state.scheduleEnabled,
+                            onCheckedChange = viewModel::setScheduleEnabled,
+                            enabled = !state.busy,
+                        )
+                    }
+                }
+            }
+            item {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(
+                        selected = state.scheduleCadence == BackupCadence.DAILY,
+                        onClick = { viewModel.setScheduleCadence(BackupCadence.DAILY) },
+                        label = { Text("Daily") },
+                    )
+                    FilterChip(
+                        selected = state.scheduleCadence == BackupCadence.WEEKLY,
+                        onClick = { viewModel.setScheduleCadence(BackupCadence.WEEKLY) },
+                        label = { Text("Weekly") },
+                    )
+                }
+            }
+            item {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(
+                        selected = state.scheduledBackupType == BackupType.SOURCE_ARCHIVE,
+                        onClick = { viewModel.setScheduledBackupType(BackupType.SOURCE_ARCHIVE) },
+                        label = { Text("Snapshot schedule") },
+                    )
+                    FilterChip(
+                        selected = state.scheduledBackupType == BackupType.GIT_MIRROR,
+                        onClick = { viewModel.setScheduledBackupType(BackupType.GIT_MIRROR) },
+                        label = { Text("Mirror schedule") },
+                    )
+                }
+            }
+            item {
+                Text(
+                    "Android runs periodic work opportunistically rather than at an exact clock time. Scheduled backups require unmetered connectivity and adequate battery/storage.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
             }
 
             item { Text("Restore Git mirror", style = MaterialTheme.typography.titleLarge) }

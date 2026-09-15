@@ -18,6 +18,8 @@ import com.skypie0102.githubbckp.github.GithubGateway
 import com.skypie0102.githubbckp.storage.StorageDestination
 import com.skypie0102.githubbckp.storage.StoragePreferences
 import com.skypie0102.githubbckp.storage.drive.GoogleDriveAuthManager
+import com.skypie0102.githubbckp.worker.BackupCadence
+import com.skypie0102.githubbckp.worker.BackupScheduleSettings
 import com.skypie0102.githubbckp.worker.BackupScheduler
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
@@ -35,6 +37,9 @@ data class HomeUiState(
     val documentTreeConfigured: Boolean = false,
     val documentTreeName: String? = null,
     val backupType: BackupType = BackupType.SOURCE_ARCHIVE,
+    val scheduleEnabled: Boolean = false,
+    val scheduleCadence: BackupCadence = BackupCadence.DAILY,
+    val scheduledBackupType: BackupType = BackupType.GIT_MIRROR,
     val githubDeviceSession: GithubDeviceSession? = null,
     val repositories: List<RepositoryEntity> = emptyList(),
     val recentBackups: List<BackupEntity> = emptyList(),
@@ -53,6 +58,7 @@ class HomeViewModel @Inject constructor(
     private val backupScheduler: BackupScheduler,
     private val mirrorRestoreCoordinator: MirrorRestoreCoordinator,
 ) : ViewModel() {
+    private val initialSchedule = backupScheduler.scheduleSettings()
     private val _state = MutableStateFlow(
         HomeUiState(
             githubConfigured = githubAuthManager.isConfigured(),
@@ -61,11 +67,15 @@ class HomeViewModel @Inject constructor(
             storageDestination = storagePreferences.destination(),
             documentTreeConfigured = storagePreferences.isDocumentTreeConfigured(),
             documentTreeName = storagePreferences.documentTreeDisplayName(),
+            scheduleEnabled = initialSchedule.enabled,
+            scheduleCadence = initialSchedule.cadence,
+            scheduledBackupType = initialSchedule.backupType,
         ),
     )
     val state: StateFlow<HomeUiState> = _state.asStateFlow()
 
     init {
+        backupScheduler.reconcileSchedule()
         viewModelScope.launch {
             backupDao.observeRepositories().collect { repositories ->
                 _state.update { it.copy(repositories = repositories) }
@@ -108,6 +118,70 @@ class HomeViewModel @Inject constructor(
 
     fun setBackupType(type: BackupType) {
         _state.update { it.copy(backupType = type) }
+    }
+
+    fun setScheduleEnabled(enabled: Boolean) {
+        val state = _state.value
+        if (enabled) {
+            when {
+                !state.githubConnected -> {
+                    _state.update { it.copy(message = "Connect GitHub before enabling automatic backups") }
+                    return
+                }
+                state.storageDestination == StorageDestination.GOOGLE_DRIVE && !state.driveConnected -> {
+                    _state.update { it.copy(message = "Connect Google Drive or choose a backup folder first") }
+                    return
+                }
+                state.storageDestination == StorageDestination.DOCUMENT_TREE && !state.documentTreeConfigured -> {
+                    _state.update { it.copy(message = "Choose a backup folder before enabling automatic backups") }
+                    return
+                }
+            }
+        }
+        saveSchedule(
+            BackupScheduleSettings(
+                enabled = enabled,
+                cadence = state.scheduleCadence,
+                backupType = state.scheduledBackupType,
+            ),
+            message = if (enabled) "Automatic backups enabled" else "Automatic backups disabled",
+        )
+    }
+
+    fun setScheduleCadence(cadence: BackupCadence) {
+        val state = _state.value
+        saveSchedule(
+            BackupScheduleSettings(
+                enabled = state.scheduleEnabled,
+                cadence = cadence,
+                backupType = state.scheduledBackupType,
+            ),
+            message = "Automatic backup cadence set to ${cadence.displayName()}",
+        )
+    }
+
+    fun setScheduledBackupType(type: BackupType) {
+        val state = _state.value
+        saveSchedule(
+            BackupScheduleSettings(
+                enabled = state.scheduleEnabled,
+                cadence = state.scheduleCadence,
+                backupType = type,
+            ),
+            message = "Automatic backups will use ${type.displayName()}",
+        )
+    }
+
+    private fun saveSchedule(settings: BackupScheduleSettings, message: String) {
+        backupScheduler.updateSchedule(settings)
+        _state.update {
+            it.copy(
+                scheduleEnabled = settings.enabled,
+                scheduleCadence = settings.cadence,
+                scheduledBackupType = settings.backupType,
+                message = message,
+            )
+        }
     }
 
     fun connectDrive(onResolution: (PendingIntent) -> Unit) {
@@ -227,9 +301,7 @@ class HomeViewModel @Inject constructor(
                 val record = mirrorRestoreCoordinator.restore(uri)
                 refreshRestores()
                 _state.update {
-                    it.copy(
-                        message = "Restored ${record.archiveName}: ${record.refCount} refs verified",
-                    )
+                    it.copy(message = "Restored ${record.archiveName}: ${record.refCount} refs verified")
                 }
             }
         }
@@ -282,4 +354,9 @@ class HomeViewModel @Inject constructor(
 private fun BackupType.displayName(): String = when (this) {
     BackupType.SOURCE_ARCHIVE -> "source snapshot"
     BackupType.GIT_MIRROR -> "Git mirror"
+}
+
+private fun BackupCadence.displayName(): String = when (this) {
+    BackupCadence.DAILY -> "daily"
+    BackupCadence.WEEKLY -> "weekly"
 }
