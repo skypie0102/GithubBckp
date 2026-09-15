@@ -56,6 +56,10 @@ class BackupCoordinator @Inject constructor(
                 remoteFileName = remoteBackup.name,
                 remoteSizeBytes = remoteBackup.sizeBytes,
                 remoteChecksumMd5 = remoteBackup.checksumMd5,
+                warningMessage = artifact.warnings
+                    .takeIf { it.isNotEmpty() }
+                    ?.joinToString("\n")
+                    ?.take(MAX_WARNING_LENGTH),
             )
             retentionManager.prune(request.repository.id, request.type)
             true
@@ -71,5 +75,9 @@ class BackupCoordinator @Inject constructor(
             artifact?.file?.delete()
             artifact?.file?.parentFile?.deleteRecursively()
         }
+    }
+
+    private companion object {
+        const val MAX_WARNING_LENGTH = 2_000
     }
 }
