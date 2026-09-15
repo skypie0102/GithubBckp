@@ -16,16 +16,19 @@ data class MirrorRestoreResult(
     val referencedObjectsVerified: Int,
     val wikiRefNames: List<String> = emptyList(),
     val wikiReferencedObjectsVerified: Int = 0,
+    val releaseCount: Int = 0,
+    val releaseAssetCount: Int = 0,
 )
 
 /**
  * Restore primitive for GIT_MIRROR artifacts. It extracts the bare repository,
- * opens it with JGit, verifies advertised main-repository ref tips, and also
- * verifies the bundled wiki mirror when one is present.
+ * verifies advertised main-repository ref tips, bundled wiki history, and any
+ * bundled release metadata/assets before retaining the local restore.
  */
 @Singleton
 class GitMirrorRestoreService @Inject constructor(
     private val wikiBackupService: GithubWikiBackupService,
+    private val releaseBackupService: GithubReleaseBackupService,
 ) {
     suspend fun restore(
         archive: File,
@@ -57,12 +60,15 @@ class GitMirrorRestoreService @Inject constructor(
                 refs.map { it.name }.sorted() to objectIds.size
             }
         val wikiResult = wikiBackupService.validateBundledWiki(destination)
+        val releaseResult = releaseBackupService.validateBundledReleases(destination)
 
         MirrorRestoreResult(
             refNames = mainResult.first,
             referencedObjectsVerified = mainResult.second,
             wikiRefNames = wikiResult?.refNames.orEmpty(),
             wikiReferencedObjectsVerified = wikiResult?.referencedObjectsVerified ?: 0,
+            releaseCount = releaseResult?.releaseCount ?: 0,
+            releaseAssetCount = releaseResult?.assetCount ?: 0,
         )
     }
 

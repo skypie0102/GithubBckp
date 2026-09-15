@@ -18,8 +18,8 @@ import org.eclipse.jgit.transport.UsernamePasswordCredentialsProvider
 /**
  * Creates the on-device equivalent of `git clone --mirror`, downloads every
  * standard Git LFS object referenced by reachable mirror refs, optionally
- * mirrors an initialized GitHub wiki, then packages everything into one
- * portable artifact.
+ * mirrors an initialized GitHub wiki, bundles release metadata/assets, then
+ * packages everything into one portable artifact.
  */
 @Singleton
 class GitMirrorBackupEngine @Inject constructor(
@@ -28,6 +28,7 @@ class GitMirrorBackupEngine @Inject constructor(
     private val lfsPointerScanner: GitLfsPointerScanner,
     private val lfsDownloadService: GitLfsDownloadService,
     private val wikiBackupService: GithubWikiBackupService,
+    private val releaseBackupService: GithubReleaseBackupService,
 ) : BackupEngine {
     override suspend fun createBackup(
         request: BackupRequest,
@@ -76,6 +77,12 @@ class GitMirrorBackupEngine @Inject constructor(
             null
         }
 
+        val releases = releaseBackupService.backup(
+            repository = request.repository,
+            accessToken = token,
+            destination = File(mirrorDirectory, GithubReleaseBackupService.BUNDLED_RELEASES_DIRECTORY),
+        )
+
         onProgress(BackupStatus.PACKAGING)
         zipBareRepository(mirrorDirectory, archive)
         mirrorDirectory.deleteRecursively()
@@ -89,12 +96,17 @@ class GitMirrorBackupEngine @Inject constructor(
             checksumSha256 = digests.sha256,
             checksumMd5 = digests.md5,
             createdAtEpochMs = createdAt,
-            warnings = if (wiki != null) {
-                listOf(
-                    "Wiki history is bundled and validated in this mirror backup, but automatic GitHub wiki publication is not implemented yet.",
-                )
-            } else {
-                emptyList()
+            warnings = buildList {
+                if (wiki != null) {
+                    add(
+                        "Wiki history is bundled and validated in this mirror backup, but automatic GitHub wiki publication is not implemented yet.",
+                    )
+                }
+                if (releases != null) {
+                    add(
+                        "Release metadata and ${releases.assetCount} release asset${if (releases.assetCount == 1) "" else "s"} are bundled and verified, but automatic GitHub release publication is not implemented yet.",
+                    )
+                }
             },
         )
     }

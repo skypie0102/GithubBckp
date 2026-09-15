@@ -5,20 +5,26 @@ import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.nio.file.Files
+import java.security.MessageDigest
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 import kotlinx.coroutines.runBlocking
 import org.eclipse.jgit.api.Git
+import org.json.JSONArray
+import org.json.JSONObject
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
 
 class GitMirrorRestoreServiceTest {
-    private val service = GitMirrorRestoreService(GithubWikiBackupService())
+    private val service = GitMirrorRestoreService(
+        GithubWikiBackupService(),
+        GithubReleaseBackupService(),
+    )
 
     @Test
-    fun restoresMirrorAndVerifiesAdvertisedRefsAndBundledWiki() = runBlocking {
+    fun restoresMirrorAndVerifiesAdvertisedRefsWikiAndReleases() = runBlocking {
         val root = Files.createTempDirectory("mirror-restore-test").toFile()
         try {
             val source = File(root, "source")
@@ -60,6 +66,8 @@ class GitMirrorRestoreServiceTest {
                 .call()
                 .close()
 
+            addBundledRelease(mirror)
+
             val archive = File(root, "source.mirror.zip")
             zipDirectory(mirror, archive)
             val restored = File(root, "restored.git")
@@ -70,9 +78,12 @@ class GitMirrorRestoreServiceTest {
             assertTrue(result.referencedObjectsVerified >= 2)
             assertTrue(result.wikiRefNames.any { it.startsWith("refs/heads/") })
             assertTrue(result.wikiReferencedObjectsVerified >= 1)
+            assertTrue(result.releaseCount == 1)
+            assertTrue(result.releaseAssetCount == 1)
             assertTrue(File(restored, "HEAD").isFile)
             assertTrue(File(restored, "objects").isDirectory)
             assertTrue(File(restored, "${GithubWikiBackupService.BUNDLED_WIKI_DIRECTORY}/HEAD").isFile)
+            assertTrue(File(restored, "${GithubReleaseBackupService.BUNDLED_RELEASES_DIRECTORY}/${GithubReleaseBackupService.MANIFEST_FILE_NAME}").isFile)
         } finally {
             root.deleteRecursively()
         }
@@ -100,6 +111,42 @@ class GitMirrorRestoreServiceTest {
         } finally {
             root.deleteRecursively()
         }
+    }
+
+    private fun addBundledRelease(mirror: File) {
+        val releases = File(mirror, GithubReleaseBackupService.BUNDLED_RELEASES_DIRECTORY)
+        val bytes = "release binary".toByteArray()
+        val relativePath = "assets/release-1/10-release.bin"
+        File(releases, relativePath).apply {
+            parentFile?.mkdirs()
+            writeBytes(bytes)
+        }
+        val sha256 = MessageDigest.getInstance("SHA-256")
+            .digest(bytes)
+            .joinToString("") { "%02x".format(it) }
+        val manifest = JSONObject()
+            .put("formatVersion", 1)
+            .put(
+                "releases",
+                JSONArray().put(
+                    JSONObject()
+                        .put("sourceId", 1)
+                        .put("tagName", "v1")
+                        .put(
+                            "assets",
+                            JSONArray().put(
+                                JSONObject()
+                                    .put("sourceId", 10)
+                                    .put("name", "release.bin")
+                                    .put("size", bytes.size)
+                                    .put("sha256", sha256)
+                                    .put("relativePath", relativePath),
+                            ),
+                        ),
+                ),
+            )
+        releases.mkdirs()
+        File(releases, GithubReleaseBackupService.MANIFEST_FILE_NAME).writeText(manifest.toString())
     }
 
     private fun zipDirectory(source: File, destination: File) {
