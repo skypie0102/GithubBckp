@@ -18,12 +18,14 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Cloud
 import androidx.compose.material.icons.outlined.Code
+import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Security
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -37,8 +39,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.unit.dp
+import com.skypie0102.githubbckp.backup.BackupType
 import com.skypie0102.githubbckp.data.local.BackupEntity
 import com.skypie0102.githubbckp.data.local.RepositoryEntity
+import com.skypie0102.githubbckp.storage.StorageDestination
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -53,6 +57,12 @@ fun HomeScreen(viewModel: HomeViewModel) {
         } else {
             viewModel.driveAuthorizationCancelled()
         }
+    }
+    val folderLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocumentTree(),
+    ) { uri ->
+        if (uri != null) viewModel.chooseBackupFolder(uri)
+        else viewModel.backupFolderSelectionCancelled()
     }
 
     Scaffold(
@@ -116,17 +126,59 @@ fun HomeScreen(viewModel: HomeViewModel) {
             }
 
             item {
+                Text("Backup destination", style = MaterialTheme.typography.titleLarge)
+            }
+
+            item {
+                val driveSelected = state.storageDestination == StorageDestination.GOOGLE_DRIVE
                 ConnectionCard(
                     title = "Google Drive",
-                    detail = if (state.driveConnected) "Connected" else "Not connected",
+                    detail = buildString {
+                        append(if (state.driveConnected) "Connected" else "Not connected")
+                        if (driveSelected) append(" • selected")
+                    },
                     icon = { Icon(Icons.Outlined.Cloud, contentDescription = null) },
-                    action = if (state.driveConnected) "Refresh Drive access" else "Connect Drive",
+                    action = when {
+                        !state.driveConnected -> "Connect Drive"
+                        !driveSelected -> "Use Google Drive"
+                        else -> "Refresh Drive access"
+                    },
                     enabled = !state.busy,
                     onClick = {
-                        viewModel.connectDrive { pendingIntent ->
-                            driveLauncher.launch(
-                                IntentSenderRequest.Builder(pendingIntent.intentSender).build(),
-                            )
+                        when {
+                            !state.driveConnected || driveSelected -> {
+                                viewModel.connectDrive { pendingIntent ->
+                                    driveLauncher.launch(
+                                        IntentSenderRequest.Builder(pendingIntent.intentSender).build(),
+                                    )
+                                }
+                            }
+                            else -> viewModel.useGoogleDrive()
+                        }
+                    },
+                )
+            }
+
+            item {
+                val folderSelected = state.storageDestination == StorageDestination.DOCUMENT_TREE
+                ConnectionCard(
+                    title = "Backup folder",
+                    detail = buildString {
+                        append(state.documentTreeName ?: if (state.documentTreeConfigured) "Configured" else "Not selected")
+                        if (folderSelected) append(" • selected")
+                    },
+                    icon = { Icon(Icons.Outlined.Folder, contentDescription = null) },
+                    action = when {
+                        state.documentTreeConfigured && !folderSelected -> "Use backup folder"
+                        state.documentTreeConfigured -> "Change backup folder"
+                        else -> "Choose backup folder"
+                    },
+                    enabled = !state.busy,
+                    onClick = {
+                        if (state.documentTreeConfigured && !folderSelected) {
+                            viewModel.useBackupFolder()
+                        } else {
+                            folderLauncher.launch(null)
                         }
                     },
                 )
@@ -142,7 +194,7 @@ fun HomeScreen(viewModel: HomeViewModel) {
                         Column {
                             Text("Credential safety", style = MaterialTheme.typography.titleMedium)
                             Spacer(Modifier.height(4.dp))
-                            Text("GitHub tokens are encrypted with Android Keystore. Google access tokens are refreshed through Google Play services.")
+                            Text("GitHub tokens are encrypted with Android Keystore. Folder access is granted by Android's system picker and can persist across restarts.")
                         }
                     }
                 }
@@ -157,6 +209,34 @@ fun HomeScreen(viewModel: HomeViewModel) {
                         CircularProgressIndicator()
                     }
                 }
+            }
+
+            item {
+                Text("Backup format", style = MaterialTheme.typography.titleLarge)
+            }
+            item {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(
+                        selected = state.backupType == BackupType.SOURCE_ARCHIVE,
+                        onClick = { viewModel.setBackupType(BackupType.SOURCE_ARCHIVE) },
+                        label = { Text("Source snapshot") },
+                    )
+                    FilterChip(
+                        selected = state.backupType == BackupType.GIT_MIRROR,
+                        onClick = { viewModel.setBackupType(BackupType.GIT_MIRROR) },
+                        label = { Text("Git mirror") },
+                    )
+                }
+            }
+            item {
+                Text(
+                    text = if (state.backupType == BackupType.GIT_MIRROR) {
+                        "Git mirror preserves Git refs and history. Git LFS objects are not included yet."
+                    } else {
+                        "Source snapshot is smaller, but contains only the selected branch snapshot and is not a full Git backup."
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                )
             }
 
             item {

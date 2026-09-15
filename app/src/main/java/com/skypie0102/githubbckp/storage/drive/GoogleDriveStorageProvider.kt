@@ -2,6 +2,7 @@ package com.skypie0102.githubbckp.storage.drive
 
 import com.skypie0102.githubbckp.backup.BackupArtifact
 import com.skypie0102.githubbckp.storage.RemoteBackup
+import com.skypie0102.githubbckp.storage.StorageDestination
 import com.skypie0102.githubbckp.storage.StorageProvider
 import java.io.FileInputStream
 import java.io.IOException
@@ -24,9 +25,10 @@ class GoogleDriveStorageProvider @Inject constructor(
         onProgress: suspend (uploadedBytes: Long, totalBytes: Long) -> Unit,
     ): RemoteBackup = withContext(Dispatchers.IO) {
         val token = authManager.requireAccessToken()
+        val mimeType = mimeType(artifact)
         val metadata = JSONObject()
             .put("name", artifact.file.name)
-            .put("mimeType", MIME_TYPE)
+            .put("mimeType", mimeType)
             .put(
                 "appProperties",
                 JSONObject()
@@ -35,11 +37,17 @@ class GoogleDriveStorageProvider @Inject constructor(
                     .put("backupType", artifact.type.name),
             )
 
-        val sessionUrl = createResumableSession(token, metadata, artifact.file.length())
+        val sessionUrl = createResumableSession(
+            token = token,
+            metadata = metadata,
+            fileLength = artifact.file.length(),
+            mimeType = mimeType,
+        )
         uploadToSession(
             sessionUrl = sessionUrl,
             token = token,
             artifact = artifact,
+            mimeType = mimeType,
             onProgress = onProgress,
         )
     }
@@ -80,11 +88,12 @@ class GoogleDriveStorageProvider @Inject constructor(
         token: String,
         metadata: JSONObject,
         fileLength: Long,
+        mimeType: String,
     ): String {
         val connection = open(RESUMABLE_CREATE_URL, "POST", token).apply {
             doOutput = true
             setRequestProperty("Content-Type", "application/json; charset=UTF-8")
-            setRequestProperty("X-Upload-Content-Type", MIME_TYPE)
+            setRequestProperty("X-Upload-Content-Type", mimeType)
             setRequestProperty("X-Upload-Content-Length", fileLength.toString())
         }
         return try {
@@ -106,12 +115,13 @@ class GoogleDriveStorageProvider @Inject constructor(
         sessionUrl: String,
         token: String,
         artifact: BackupArtifact,
+        mimeType: String,
         onProgress: suspend (uploadedBytes: Long, totalBytes: Long) -> Unit,
     ): RemoteBackup {
         val totalBytes = artifact.file.length()
         val connection = open(sessionUrl, "PUT", token).apply {
             doOutput = true
-            setRequestProperty("Content-Type", MIME_TYPE)
+            setRequestProperty("Content-Type", mimeType)
             setFixedLengthStreamingMode(totalBytes)
         }
         try {
@@ -135,6 +145,7 @@ class GoogleDriveStorageProvider @Inject constructor(
                 sizeBytes = json.optString("size").toLongOrNull() ?: totalBytes,
                 checksumSha256 = artifact.checksumSha256,
                 checksumMd5 = artifact.checksumMd5,
+                provider = StorageDestination.GOOGLE_DRIVE,
             )
         } finally {
             connection.disconnect()
@@ -160,6 +171,12 @@ class GoogleDriveStorageProvider @Inject constructor(
             setRequestProperty("Authorization", "Bearer $token")
         }
 
+    private fun mimeType(artifact: BackupArtifact): String = when {
+        artifact.file.name.endsWith(".zip", ignoreCase = true) -> "application/zip"
+        artifact.file.name.endsWith(".gz", ignoreCase = true) -> "application/gzip"
+        else -> "application/octet-stream"
+    }
+
     private fun path(value: String): String =
         URLEncoder.encode(value, StandardCharsets.UTF_8.name()).replace("+", "%20")
 
@@ -170,7 +187,6 @@ class GoogleDriveStorageProvider @Inject constructor(
         const val FILES_URL = "https://www.googleapis.com/drive/v3/files"
         const val RESUMABLE_CREATE_URL =
             "https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id,name,size,md5Checksum,appProperties"
-        const val MIME_TYPE = "application/gzip"
         const val CONNECT_TIMEOUT_MS = 30_000
         const val READ_TIMEOUT_MS = 120_000
         const val BUFFER_SIZE = 256 * 1024
