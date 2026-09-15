@@ -5,7 +5,6 @@ import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 import java.nio.charset.StandardCharsets
-import java.security.MessageDigest
 import java.util.Base64
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -13,7 +12,9 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 @Singleton
-class GitLfsDownloadService @Inject constructor() {
+class GitLfsDownloadService @Inject constructor(
+    private val objectStore: GitLfsObjectStore,
+) {
     fun downloadAll(
         repositoryFullName: String,
         accessToken: String,
@@ -79,12 +80,10 @@ class GitLfsDownloadService @Inject constructor() {
                 ?: throw IOException("Git LFS object $oid did not include a download action")
             val href = download.optString("href")
             if (href.isBlank()) throw IOException("Git LFS object $oid returned an empty download URL")
-            val headersJson = download.optJSONObject("header")
-            val headers = linkedMapOf<String, String>()
-            if (headersJson != null) {
-                headersJson.keys().forEach { key -> headers[key] = headersJson.getString(key) }
-            }
-            result[oid] = GitLfsDownloadAction(href = href, headers = headers)
+            result[oid] = GitLfsDownloadAction(
+                href = href,
+                headers = parseHeaders(download.optJSONObject("header")),
+            )
         }
 
         if (result.size != requested.size) {
@@ -94,44 +93,12 @@ class GitLfsDownloadService @Inject constructor() {
         return result
     }
 
-    internal fun verifyObject(file: File, pointer: GitLfsPointer) {
-        if (file.length() != pointer.sizeBytes) {
-            throw IOException(
-                "Git LFS object ${pointer.oidSha256} size mismatch: expected ${pointer.sizeBytes}, got ${file.length()}",
-            )
-        }
-        val digest = MessageDigest.getInstance("SHA-256")
-        file.inputStream().buffered(BUFFER_SIZE).use { input ->
-            val buffer = ByteArray(BUFFER_SIZE)
-            while (true) {
-                val read = input.read(buffer)
-                if (read < 0) break
-                if (read > 0) digest.update(buffer, 0, read)
-            }
-        }
-        val actual = digest.digest().toHex()
-        if (!actual.equals(pointer.oidSha256, ignoreCase = true)) {
-            throw IOException("Git LFS object ${pointer.oidSha256} failed SHA-256 verification")
-        }
-    }
-
     private fun requestDownloadActions(
         batchUrl: String,
         authorization: String,
         pointers: List<GitLfsPointer>,
     ): Map<String, GitLfsDownloadAction> {
-        val objects = JSONArray()
-        pointers.forEach { pointer ->
-            objects.put(JSONObject().put("oid", pointer.oidSha256).put("size", pointer.sizeBytes))
-        }
-        val requestBody = JSONObject()
-            .put("operation", "download")
-            .put("transfers", JSONArray().put("basic"))
-            .put("hash_algo", "sha256")
-            .put("objects", objects)
-            .toString()
-            .toByteArray(StandardCharsets.UTF_8)
-
+        val requestBody = lfsBatchRequestBody("download", pointers)
         val connection = openConnection(batchUrl).apply {
             requestMethod = "POST"
             doOutput = true
@@ -164,10 +131,10 @@ class GitLfsDownloadService @Inject constructor() {
         action: GitLfsDownloadAction,
         repositoryDirectory: File,
     ) {
-        val target = lfsObjectFile(repositoryDirectory, pointer.oidSha256)
+        val target = objectStore.objectFile(repositoryDirectory, pointer.oidSha256)
         target.parentFile?.mkdirs()
         if (target.isFile) {
-            verifyObject(target, pointer)
+            objectStore.verify(target, pointer)
             return
         }
 
@@ -175,12 +142,12 @@ class GitLfsDownloadService @Inject constructor() {
         temp.delete()
         try {
             downloadAction(action, temp, redirectsRemaining = MAX_REDIRECTS)
-            verifyObject(temp, pointer)
+            objectStore.verify(temp, pointer)
             if (!temp.renameTo(target)) {
                 temp.copyTo(target, overwrite = true)
                 temp.delete()
             }
-            verifyObject(target, pointer)
+            objectStore.verify(target, pointer)
         } finally {
             temp.delete()
         }
@@ -236,18 +203,8 @@ class GitLfsDownloadService @Inject constructor() {
         }
     }
 
-    private fun lfsObjectFile(repositoryDirectory: File, oid: String): File =
-        File(repositoryDirectory, "lfs/objects/${oid.substring(0, 2)}/${oid.substring(2, 4)}/$oid")
-
-    private fun basicAuthorization(accessToken: String): String {
-        val credential = "x-access-token:$accessToken".toByteArray(StandardCharsets.UTF_8)
-        return "Basic ${Base64.getEncoder().encodeToString(credential)}"
-    }
-
     private fun openConnection(url: String): HttpURLConnection =
         URL(url).openConnection() as HttpURLConnection
-
-    private fun ByteArray.toHex(): String = joinToString("") { byte -> "%02x".format(byte) }
 
     private companion object {
         const val BATCH_SIZE = 100
@@ -256,7 +213,6 @@ class GitLfsDownloadService @Inject constructor() {
         const val READ_TIMEOUT_MS = 30_000
         const val LFS_READ_TIMEOUT_MS = 5 * 60_000
         const val MAX_REDIRECTS = 5
-        const val LFS_JSON_MEDIA_TYPE = "application/vnd.git-lfs+json"
         val REDIRECT_CODES = setOf(301, 302, 303, 307, 308)
     }
 }
@@ -265,3 +221,31 @@ data class GitLfsDownloadAction(
     val href: String,
     val headers: Map<String, String>,
 )
+
+internal const val LFS_JSON_MEDIA_TYPE = "application/vnd.git-lfs+json"
+
+internal fun basicAuthorization(accessToken: String): String {
+    val credential = "x-access-token:$accessToken".toByteArray(StandardCharsets.UTF_8)
+    return "Basic ${Base64.getEncoder().encodeToString(credential)}"
+}
+
+internal fun lfsBatchRequestBody(operation: String, pointers: List<GitLfsPointer>): ByteArray {
+    val objects = JSONArray()
+    pointers.forEach { pointer ->
+        objects.put(JSONObject().put("oid", pointer.oidSha256).put("size", pointer.sizeBytes))
+    }
+    return JSONObject()
+        .put("operation", operation)
+        .put("transfers", JSONArray().put("basic"))
+        .put("hash_algo", "sha256")
+        .put("objects", objects)
+        .toString()
+        .toByteArray(StandardCharsets.UTF_8)
+}
+
+internal fun parseHeaders(json: JSONObject?): Map<String, String> {
+    if (json == null) return emptyMap()
+    val result = linkedMapOf<String, String>()
+    json.keys().forEach { key -> result[key] = json.getString(key) }
+    return result
+}
