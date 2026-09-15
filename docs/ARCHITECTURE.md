@@ -26,6 +26,10 @@ BackupCoordinator
 MirrorRestoreCoordinator
    |
 GitMirrorRestoreService
+   |
+GithubMirrorRestorePublisher
+   +-- GithubRepositoryRestoreGateway
+   +-- GitMirrorPushService
 ```
 
 ### GitHub authentication and API
@@ -33,6 +37,8 @@ GitMirrorRestoreService
 `GithubAuthManager` uses GitHub OAuth Device Flow. The Android package carries only an OAuth client ID and does not embed a confidential client secret. Access and refresh material returned by GitHub is encrypted with an Android Keystore-backed AES-GCM key before being placed in SharedPreferences.
 
 `GithubGateway` owns repository discovery and authenticated source-archive transfer. Redirects from GitHub's API to archive storage are followed without forwarding the GitHub bearer token to the redirected host.
+
+`GithubRepositoryRestoreGateway` creates a new empty repository for the authenticated user during disaster recovery. Existing repositories are not modified by this flow.
 
 ### Backup engines
 
@@ -46,13 +52,17 @@ Both engines compute SHA-256 as the canonical integrity checksum plus MD5 for pr
 
 Git LFS objects are not included yet. Wikis, release assets, issues, and pull-request metadata remain separate completeness modules.
 
-### Mirror restore
+### Mirror restore and GitHub recovery
 
 `GitMirrorRestoreService` rejects ZIP entries whose canonical path escapes the restore root, extracts the bare repository, opens it with JGit, and verifies every advertised ref tip exists in the object database.
 
-`MirrorRestoreCoordinator` imports a user-selected archive into private app storage, keeps lightweight metadata beside the restored repository, reloads valid restore records across app restarts, and deletes restored copies on request.
+`MirrorRestoreCoordinator` imports a user-selected archive into private app storage, keeps lightweight metadata beside the restored repository, reloads valid restore records across app restarts, and exposes a validated repository directory only for a known restore ID.
 
-The next recovery boundary will create/select a destination repository and mirror-push a validated local restore into it.
+`GithubMirrorRestorePublisher` creates a new GitHub repository, obtains the current GitHub token, and delegates Git transport to `GitMirrorPushService`. The push service enumerates every ref in the validated bare repository, force-pushes writable refs, and fails if any attempted remote update is not `OK` or `UP_TO_DATE`.
+
+GitHub owns `refs/pull/*` as a read-only namespace. Those refs may be present in a mirror clone but cannot be pushed back; they are skipped explicitly and reported separately. Restoring pull-request metadata remains a future metadata module rather than pretending those refs are writable Git state.
+
+Publishing to an existing repository is deliberately separate because mirror-style recovery can delete remote refs and can conflict with branch protection/rulesets or repository push policies.
 
 ### Storage routing
 
@@ -99,5 +109,7 @@ Temporary archives and mirror working directories live below the app cache direc
 ## Test coverage
 
 Mirror restore tests create a real local repository, make a JGit mirror, package it, restore it, and assert branch/tag refs plus referenced objects survive. A separate regression test creates a malicious `../` ZIP entry and verifies it cannot write outside the restore directory.
+
+`GitMirrorPushServiceTest` creates a real source repository and local bare target, then verifies writable branches/tags are pushed while a synthetic `refs/pull/*` ref is skipped.
 
 Retention tests verify keep-all selects nothing for deletion and keep-last-N selects only older artifacts.
