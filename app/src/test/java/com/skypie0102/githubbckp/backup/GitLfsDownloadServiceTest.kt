@@ -5,7 +5,7 @@ import java.io.IOException
 import java.nio.file.Files
 import java.security.MessageDigest
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFailsWith
+import org.junit.Assert.assertThrows
 import org.junit.Test
 
 class GitLfsDownloadServiceTest {
@@ -59,7 +59,7 @@ class GitLfsDownloadServiceTest {
             }
         """.trimIndent()
 
-        assertFailsWith<IOException> {
+        assertThrows(IOException::class.java) {
             service.parseBatchResponse(response, listOf(pointer))
         }
     }
@@ -91,7 +91,7 @@ class GitLfsDownloadServiceTest {
                 sizeBytes = file.length(),
             )
 
-            assertFailsWith<IOException> { service.verifyObject(file, pointer) }
+            assertThrows(IOException::class.java) { service.verifyObject(file, pointer) }
         } finally {
             root.deleteRecursively()
         }
