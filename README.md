@@ -26,6 +26,7 @@ Mirror ZIP
   -> safe private import
   -> validate bare Git repository refs/objects
   -> create a new GitHub repository OR select an existing empty repository
+  -> verify/upload bundled Git LFS objects
   -> verify target advertises no Git refs
   -> push all writable refs without force
 ```
@@ -35,7 +36,7 @@ Mirror ZIP
 - **Source snapshot** — downloads the repository default branch as GitHub's TAR.GZ archive. It is compact, but is not a full Git-history backup.
 - **Git mirror** — uses JGit mirror-clone semantics to fetch all Git refs into a bare repository. It scans reachable blobs for standard Git LFS pointers, downloads every referenced LFS object through the Git LFS Batch API, verifies size + SHA-256, stores those objects under the standard `lfs/objects` layout, then packages the repository as one `.mirror.zip` and computes SHA-256 + MD5.
 
-If any detected LFS object cannot be authorized, downloaded, or verified, the mirror backup fails rather than silently producing an incomplete successful artifact. Mirrors with bundled LFS objects carry a persisted non-fatal warning only because GitHub **restore publication** does not upload those bundled LFS objects yet.
+If any detected LFS object cannot be authorized, downloaded, or verified, the mirror backup fails rather than silently producing an incomplete successful artifact. GitHub recovery now validates and uploads bundled LFS objects before Git refs are published.
 
 Wikis, release assets, issues, and pull-request metadata are separate future completeness modules.
 
@@ -100,15 +101,17 @@ Deletion is routed through the provider that originally created the artifact, ev
 
 Rows migrated from schema v1 have unknown provider metadata and are deliberately excluded from automatic deletion. Retention is best-effort: a pruning failure is logged and never changes a newly verified backup from `COMPLETED` to `FAILED`.
 
-## Git LFS backup
+## Git LFS backup and recovery
 
-Mirror mode scans reachable Git blobs for standard LFS pointer files. Unique OIDs are requested from the Git LFS Batch API in groups of 100. Object download URLs and headers come from the server response; GitHub credentials are sent only to the GitHub batch endpoint, and `Authorization` is dropped on cross-host redirects. Every object must pass declared-size and SHA-256 verification before it is accepted into the mirror.
+Mirror mode scans reachable Git blobs for standard LFS pointer files. Unique OIDs are requested from the Git LFS Batch API in groups of 100. Object download URLs and headers come from the server response; GitHub credentials are sent only to the GitHub batch endpoint, and `Authorization` is dropped on cross-host download redirects. Every object must pass declared-size and SHA-256 verification before it is accepted into the mirror.
 
 Bundled objects use the standard layout:
 
 ```text
 lfs/objects/<first 2 hex>/<next 2 hex>/<full sha256 oid>
 ```
+
+During GitHub recovery, every referenced bundled object is revalidated locally first. The target repository's LFS Batch API is then asked for upload actions; already-present objects require no upload, while missing objects are PUT to the server-provided upload URL and any returned verify action is executed. Only after LFS coverage succeeds does the app perform the empty-remote Git preflight and publish refs.
 
 See [`docs/LFS_BACKUP.md`](docs/LFS_BACKUP.md) for protocol and security details.
 
@@ -124,9 +127,7 @@ The app can import a Git mirror ZIP through Android's document picker. The archi
 
 A validated restore can then be published either into a **new** GitHub repository or an **existing repository that is still empty**. New repositories default to private. For an existing target, the user enters `owner/repository`, which also supports organization-owned recovery repositories the connected account can access.
 
-Before any Git write, `GitMirrorPushService` runs an authenticated remote-ref advertisement check. If the target advertises any Git refs, restoration is refused. Writable refs are then pushed without force and every remote update result must be `OK` or `UP_TO_DATE`. GitHub's read-only `refs/pull/*` namespace is intentionally skipped and reported to the user; pull-request objects/metadata are not part of Git restoration.
-
-Local mirror restore preserves bundled LFS bytes, but GitHub publication currently pushes Git refs only. Uploading bundled LFS objects to the target repository is the next recovery slice.
+Recovery verifies/uploads referenced LFS objects before any Git refs are published. Immediately before the Git write, `GitMirrorPushService` runs an authenticated remote-ref advertisement check. If the target advertises any Git refs, restoration is refused. Writable refs are then pushed without force and every remote update result must be `OK` or `UP_TO_DATE`. GitHub's read-only `refs/pull/*` namespace is intentionally skipped and reported to the user; pull-request objects/metadata are not part of Git restoration.
 
 Destructive overwrite of a non-empty repository remains intentionally unavailable. Exact mirror overwrite can delete branches/tags and may conflict with repository rules or GitHub push policies, so that requires a separate confirmation/rules-aware design.
 
@@ -143,8 +144,9 @@ Key boundaries:
 - `GithubRepositoryRestoreGateway` — create or resolve a GitHub recovery target
 - `BackupEngineFactory` — selects source snapshot or Git mirror engine
 - `GitLfsPointerScanner` / `GitLfsDownloadService` — discover, download, and verify mirror LFS objects
+- `GitLfsObjectStore` / `GitLfsUploadService` — revalidate and publish bundled LFS objects during recovery
 - `GitMirrorRestoreService` / `MirrorRestoreCoordinator` — safe mirror import and persistent local restores
-- `GitMirrorPushService` / `GithubMirrorRestorePublisher` — empty-target validation and non-forced Git recovery publication
+- `GitMirrorPushService` / `GithubMirrorRestorePublisher` — LFS-first recovery, empty-target validation, and non-forced Git publication
 - `StorageRouter` — provider-aware upload, verification, and deletion routing
 - `DocumentTreeStorageProvider` — SAF streaming upload/readback verification
 - `GoogleDriveStorageProvider` — Drive resumable upload/remote verification
@@ -156,7 +158,7 @@ See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for component details.
 
 ## Next implementation slice
 
-1. Upload bundled Git LFS objects during GitHub mirror recovery, including upload/verify actions from the LFS Batch API.
+1. Add optional wiki and release-asset backup/restore modules with explicit completeness reporting.
 2. Design a separately confirmed non-empty repository recovery flow with explicit remote-ref deletion semantics and repository-rule checks.
-3. Add optional wiki, release assets, issues, and pull-request metadata modules.
+3. Add issues and pull-request metadata backup/restore modules.
 4. Add richer backup/restore audit and export reporting.
