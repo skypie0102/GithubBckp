@@ -31,6 +31,11 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
+enum class GithubRestoreTargetMode {
+    NEW_REPOSITORY,
+    EXISTING_EMPTY_REPOSITORY,
+}
+
 data class HomeUiState(
     val githubConfigured: Boolean = false,
     val githubConnected: Boolean = false,
@@ -48,7 +53,9 @@ data class HomeUiState(
     val recentBackups: List<BackupEntity> = emptyList(),
     val restoredMirrors: List<MirrorRestoreRecord> = emptyList(),
     val githubPublishRestoreId: String? = null,
+    val githubRestoreTargetMode: GithubRestoreTargetMode = GithubRestoreTargetMode.NEW_REPOSITORY,
     val githubPublishRepositoryName: String = "",
+    val githubPublishExistingRepository: String = "",
     val githubPublishPrivate: Boolean = true,
     val lastPublishedRepositoryUrl: String? = null,
     val busy: Boolean = false,
@@ -343,7 +350,9 @@ class HomeViewModel @Inject constructor(
         _state.update {
             it.copy(
                 githubPublishRestoreId = restore.id,
+                githubRestoreTargetMode = GithubRestoreTargetMode.NEW_REPOSITORY,
                 githubPublishRepositoryName = suggested,
+                githubPublishExistingRepository = "",
                 githubPublishPrivate = true,
                 lastPublishedRepositoryUrl = null,
                 message = null,
@@ -351,8 +360,16 @@ class HomeViewModel @Inject constructor(
         }
     }
 
+    fun setGithubRestoreTargetMode(mode: GithubRestoreTargetMode) {
+        _state.update { it.copy(githubRestoreTargetMode = mode, message = null) }
+    }
+
     fun setGithubPublishRepositoryName(value: String) {
         _state.update { it.copy(githubPublishRepositoryName = value.take(100)) }
+    }
+
+    fun setGithubPublishExistingRepository(value: String) {
+        _state.update { it.copy(githubPublishExistingRepository = value.take(200)) }
     }
 
     fun setGithubPublishPrivate(value: Boolean) {
@@ -363,7 +380,9 @@ class HomeViewModel @Inject constructor(
         _state.update {
             it.copy(
                 githubPublishRestoreId = null,
+                githubRestoreTargetMode = GithubRestoreTargetMode.NEW_REPOSITORY,
                 githubPublishRepositoryName = "",
+                githubPublishExistingRepository = "",
                 lastPublishedRepositoryUrl = null,
             )
         }
@@ -376,21 +395,42 @@ class HomeViewModel @Inject constructor(
             _state.update { it.copy(message = "Connect GitHub before publishing a restored mirror") }
             return
         }
-        if (state.githubPublishRepositoryName.isBlank()) {
-            _state.update { it.copy(message = "Enter a repository name") }
-            return
+        when (state.githubRestoreTargetMode) {
+            GithubRestoreTargetMode.NEW_REPOSITORY -> {
+                if (state.githubPublishRepositoryName.isBlank()) {
+                    _state.update { it.copy(message = "Enter a repository name") }
+                    return
+                }
+            }
+            GithubRestoreTargetMode.EXISTING_EMPTY_REPOSITORY -> {
+                if (!isRepositoryFullName(state.githubPublishExistingRepository)) {
+                    _state.update { it.copy(message = "Enter the existing target as owner/repository") }
+                    return
+                }
+            }
         }
+
         viewModelScope.launch {
             runBusy {
-                val result = githubRestorePublisher.publishToNewRepository(
-                    restoreId = restoreId,
-                    repositoryName = state.githubPublishRepositoryName,
-                    isPrivate = state.githubPublishPrivate,
-                )
+                val result = when (state.githubRestoreTargetMode) {
+                    GithubRestoreTargetMode.NEW_REPOSITORY -> githubRestorePublisher.publishToNewRepository(
+                        restoreId = restoreId,
+                        repositoryName = state.githubPublishRepositoryName,
+                        isPrivate = state.githubPublishPrivate,
+                    )
+                    GithubRestoreTargetMode.EXISTING_EMPTY_REPOSITORY ->
+                        githubRestorePublisher.publishToExistingEmptyRepository(
+                            restoreId = restoreId,
+                            repositoryFullName = state.githubPublishExistingRepository,
+                        )
+                }
+                refreshRepositoriesInternal()
                 _state.update {
                     it.copy(
                         githubPublishRestoreId = null,
+                        githubRestoreTargetMode = GithubRestoreTargetMode.NEW_REPOSITORY,
                         githubPublishRepositoryName = "",
+                        githubPublishExistingRepository = "",
                         lastPublishedRepositoryUrl = result.repositoryUrl,
                         message = buildString {
                             append("Restored ${result.pushedRefCount} Git refs to ${result.repositoryFullName}")
@@ -400,7 +440,6 @@ class HomeViewModel @Inject constructor(
                         },
                     )
                 }
-                refreshRepositoriesInternal()
             }
         }
     }
@@ -429,6 +468,11 @@ class HomeViewModel @Inject constructor(
         } finally {
             _state.update { it.copy(busy = false) }
         }
+    }
+
+    private fun isRepositoryFullName(value: String): Boolean {
+        val parts = value.trim().split('/')
+        return parts.size == 2 && parts.all { it.isNotBlank() }
     }
 }
 
