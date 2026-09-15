@@ -41,6 +41,8 @@ class GitMirrorPushService @Inject constructor() {
         remoteUri: String,
         credentialsProvider: CredentialsProvider?,
     ): MirrorPushResult {
+        requireRemoteIsEmpty(remoteUri, credentialsProvider)
+
         val allRefs = repository.refDatabase.getRefsByPrefix("refs/")
         val skipped = allRefs
             .map { it.name }
@@ -51,11 +53,10 @@ class GitMirrorPushService @Inject constructor() {
             return MirrorPushResult(pushedRefCount = 0, skippedReadOnlyRefs = skipped)
         }
 
-        val refSpecs = pushRefs.map { ref -> RefSpec("+${ref.name}:${ref.name}") }
+        val refSpecs = pushRefs.map { ref -> RefSpec("${ref.name}:${ref.name}") }
         val command = Git(repository)
             .push()
             .setRemote(remoteUri)
-            .setForce(true)
             .setRefSpecs(refSpecs)
         if (credentialsProvider != null) command.setCredentialsProvider(credentialsProvider)
 
@@ -77,6 +78,24 @@ class GitMirrorPushService @Inject constructor() {
             pushedRefCount = pushRefs.size,
             skippedReadOnlyRefs = skipped,
         )
+    }
+
+    private fun requireRemoteIsEmpty(
+        remoteUri: String,
+        credentialsProvider: CredentialsProvider?,
+    ) {
+        val command = Git.lsRemoteRepository().setRemote(remoteUri)
+        if (credentialsProvider != null) command.setCredentialsProvider(credentialsProvider)
+        val advertisedRefs = command.call()
+            .map { it.name }
+            .distinct()
+            .sorted()
+        if (advertisedRefs.isNotEmpty()) {
+            val preview = advertisedRefs.take(5).joinToString()
+            throw IOException(
+                "Restore target is not empty; found ${advertisedRefs.size} advertised Git ref(s): $preview",
+            )
+        }
     }
 
     private fun isGithubReadOnlyRef(name: String): Boolean =

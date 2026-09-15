@@ -2,6 +2,7 @@ package com.skypie0102.githubbckp.backup
 
 import com.skypie0102.githubbckp.github.GithubAuthManager
 import com.skypie0102.githubbckp.github.GithubRepositoryRestoreGateway
+import com.skypie0102.githubbckp.github.GithubRestoreRepository
 import java.io.IOException
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -26,27 +27,49 @@ class GithubMirrorRestorePublisher @Inject constructor(
         repositoryName: String,
         isPrivate: Boolean,
     ): GithubRestorePublishResult {
-        val repositoryDirectory = restoreCoordinator.requireRepositoryDirectory(restoreId)
         val created = repositoryGateway.createRepository(repositoryName, isPrivate)
-        val token = authManager.requireAccessToken()
+        return publish(
+            restoreId = restoreId,
+            repository = created,
+            failurePrefix = "${created.fullName} was created, but the mirror push failed",
+        )
+    }
 
+    suspend fun publishToExistingEmptyRepository(
+        restoreId: String,
+        repositoryFullName: String,
+    ): GithubRestorePublishResult {
+        val existing = repositoryGateway.getRepository(repositoryFullName)
+        return publish(
+            restoreId = restoreId,
+            repository = existing,
+            failurePrefix = "Restore to ${existing.fullName} failed",
+        )
+    }
+
+    private suspend fun publish(
+        restoreId: String,
+        repository: GithubRestoreRepository,
+        failurePrefix: String,
+    ): GithubRestorePublishResult {
+        val repositoryDirectory = restoreCoordinator.requireRepositoryDirectory(restoreId)
+        val token = authManager.requireAccessToken()
         val push = try {
             pushService.push(
                 repositoryDirectory = repositoryDirectory,
-                remoteUri = created.cloneUrl,
+                remoteUri = repository.cloneUrl,
                 credentialsProvider = UsernamePasswordCredentialsProvider("x-access-token", token),
             )
         } catch (throwable: Throwable) {
             throw IOException(
-                "${created.fullName} was created, but the mirror push failed: " +
-                    (throwable.message ?: throwable.javaClass.simpleName),
+                "$failurePrefix: ${throwable.message ?: throwable.javaClass.simpleName}",
                 throwable,
             )
         }
 
         return GithubRestorePublishResult(
-            repositoryFullName = created.fullName,
-            repositoryUrl = created.htmlUrl,
+            repositoryFullName = repository.fullName,
+            repositoryUrl = repository.htmlUrl,
             pushedRefCount = push.pushedRefCount,
             skippedReadOnlyRefs = push.skippedReadOnlyRefs,
         )
