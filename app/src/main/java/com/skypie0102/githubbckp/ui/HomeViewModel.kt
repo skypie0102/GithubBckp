@@ -6,6 +6,8 @@ import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.skypie0102.githubbckp.backup.BackupType
+import com.skypie0102.githubbckp.backup.MirrorRestoreCoordinator
+import com.skypie0102.githubbckp.backup.MirrorRestoreRecord
 import com.skypie0102.githubbckp.data.local.BackupDao
 import com.skypie0102.githubbckp.data.local.BackupEntity
 import com.skypie0102.githubbckp.data.local.RepositoryEntity
@@ -36,6 +38,7 @@ data class HomeUiState(
     val githubDeviceSession: GithubDeviceSession? = null,
     val repositories: List<RepositoryEntity> = emptyList(),
     val recentBackups: List<BackupEntity> = emptyList(),
+    val restoredMirrors: List<MirrorRestoreRecord> = emptyList(),
     val busy: Boolean = false,
     val message: String? = null,
 )
@@ -48,6 +51,7 @@ class HomeViewModel @Inject constructor(
     private val driveAuthManager: GoogleDriveAuthManager,
     private val storagePreferences: StoragePreferences,
     private val backupScheduler: BackupScheduler,
+    private val mirrorRestoreCoordinator: MirrorRestoreCoordinator,
 ) : ViewModel() {
     private val _state = MutableStateFlow(
         HomeUiState(
@@ -72,6 +76,7 @@ class HomeViewModel @Inject constructor(
                 _state.update { it.copy(recentBackups = backups) }
             }
         }
+        viewModelScope.launch { refreshRestores() }
     }
 
     fun connectGithub() {
@@ -94,15 +99,11 @@ class HomeViewModel @Inject constructor(
     }
 
     fun refreshRepositories() {
-        viewModelScope.launch {
-            runBusy { refreshRepositoriesInternal() }
-        }
+        viewModelScope.launch { runBusy { refreshRepositoriesInternal() } }
     }
 
     fun setRepositorySelected(repositoryId: Long, selected: Boolean) {
-        viewModelScope.launch {
-            backupDao.setRepositorySelected(repositoryId, selected)
-        }
+        viewModelScope.launch { backupDao.setRepositorySelected(repositoryId, selected) }
     }
 
     fun setBackupType(type: BackupType) {
@@ -180,10 +181,7 @@ class HomeViewModel @Inject constructor(
         }
         storagePreferences.setDestination(StorageDestination.GOOGLE_DRIVE)
         _state.update {
-            it.copy(
-                storageDestination = StorageDestination.GOOGLE_DRIVE,
-                message = "Google Drive selected",
-            )
+            it.copy(storageDestination = StorageDestination.GOOGLE_DRIVE, message = "Google Drive selected")
         }
     }
 
@@ -194,10 +192,7 @@ class HomeViewModel @Inject constructor(
         }
         storagePreferences.setDestination(StorageDestination.DOCUMENT_TREE)
         _state.update {
-            it.copy(
-                storageDestination = StorageDestination.DOCUMENT_TREE,
-                message = "Backup folder selected",
-            )
+            it.copy(storageDestination = StorageDestination.DOCUMENT_TREE, message = "Backup folder selected")
         }
     }
 
@@ -205,18 +200,12 @@ class HomeViewModel @Inject constructor(
         val state = _state.value
         val selected = state.repositories.filter { it.selectedForBackup }
         when {
-            !state.githubConnected -> {
-                _state.update { it.copy(message = "Connect GitHub first") }
-            }
-            state.storageDestination == StorageDestination.GOOGLE_DRIVE && !state.driveConnected -> {
+            !state.githubConnected -> _state.update { it.copy(message = "Connect GitHub first") }
+            state.storageDestination == StorageDestination.GOOGLE_DRIVE && !state.driveConnected ->
                 _state.update { it.copy(message = "Connect Google Drive or choose a backup folder") }
-            }
-            state.storageDestination == StorageDestination.DOCUMENT_TREE && !state.documentTreeConfigured -> {
+            state.storageDestination == StorageDestination.DOCUMENT_TREE && !state.documentTreeConfigured ->
                 _state.update { it.copy(message = "Choose a backup folder first") }
-            }
-            selected.isEmpty() -> {
-                _state.update { it.copy(message = "Select at least one repository") }
-            }
+            selected.isEmpty() -> _state.update { it.copy(message = "Select at least one repository") }
             else -> {
                 backupScheduler.enqueue(
                     repositoryIds = selected.map { it.githubId },
@@ -229,6 +218,40 @@ class HomeViewModel @Inject constructor(
                 }
             }
         }
+    }
+
+    fun restoreMirrorArchive(uri: Uri) {
+        if (_state.value.busy) return
+        viewModelScope.launch {
+            runBusy {
+                val record = mirrorRestoreCoordinator.restore(uri)
+                refreshRestores()
+                _state.update {
+                    it.copy(
+                        message = "Restored ${record.archiveName}: ${record.refCount} refs verified",
+                    )
+                }
+            }
+        }
+    }
+
+    fun restoreArchiveSelectionCancelled() {
+        _state.update { it.copy(message = "Mirror restore selection was cancelled") }
+    }
+
+    fun deleteRestoredMirror(id: String) {
+        if (_state.value.busy) return
+        viewModelScope.launch {
+            runBusy {
+                mirrorRestoreCoordinator.deleteRestore(id)
+                refreshRestores()
+                _state.update { it.copy(message = "Restored mirror deleted") }
+            }
+        }
+    }
+
+    private suspend fun refreshRestores() {
+        _state.update { it.copy(restoredMirrors = mirrorRestoreCoordinator.listRestores()) }
     }
 
     private suspend fun refreshRepositoriesInternal() {
@@ -249,9 +272,7 @@ class HomeViewModel @Inject constructor(
         try {
             block()
         } catch (throwable: Throwable) {
-            _state.update {
-                it.copy(message = throwable.message ?: throwable.javaClass.simpleName)
-            }
+            _state.update { it.copy(message = throwable.message ?: throwable.javaClass.simpleName) }
         } finally {
             _state.update { it.copy(busy = false) }
         }
