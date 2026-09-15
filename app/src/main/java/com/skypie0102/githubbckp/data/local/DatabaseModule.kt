@@ -15,7 +15,9 @@ object DatabaseModule {
     @Provides
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): AppDatabase =
-        Room.databaseBuilder(context, AppDatabase::class.java, "github-backup.db").build()
+        Room.databaseBuilder(context, AppDatabase::class.java, "github-backup.db")
+            .addMigrations(DatabaseMigrations.MIGRATION_1_2)
+            .build()
 
     @Provides
     fun provideBackupDao(database: AppDatabase): BackupDao = database.backupDao()

@@ -15,6 +15,7 @@ class BackupCoordinator @Inject constructor(
     private val backupDao: BackupDao,
     private val backupEngineFactory: BackupEngineFactory,
     private val storageProvider: StorageProvider,
+    private val retentionManager: BackupRetentionManager,
 ) {
     suspend fun run(request: BackupRequest): Boolean {
         val startedAt = System.currentTimeMillis()
@@ -50,8 +51,13 @@ class BackupCoordinator @Inject constructor(
                 status = BackupStatus.COMPLETED,
                 completedAtEpochMs = System.currentTimeMillis(),
                 checksumSha256 = artifact.checksumSha256,
+                storageProvider = remoteBackup.provider.name,
                 remoteFileId = remoteBackup.id,
+                remoteFileName = remoteBackup.name,
+                remoteSizeBytes = remoteBackup.sizeBytes,
+                remoteChecksumMd5 = remoteBackup.checksumMd5,
             )
+            retentionManager.prune(request.repository.id, request.type)
             true
         } catch (throwable: Throwable) {
             backupDao.failBackup(

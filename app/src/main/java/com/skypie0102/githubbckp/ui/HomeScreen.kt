@@ -42,6 +42,7 @@ import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.unit.dp
 import com.skypie0102.githubbckp.backup.BackupType
 import com.skypie0102.githubbckp.backup.MirrorRestoreRecord
+import com.skypie0102.githubbckp.backup.RetentionPreferences
 import com.skypie0102.githubbckp.data.local.BackupEntity
 import com.skypie0102.githubbckp.data.local.RepositoryEntity
 import com.skypie0102.githubbckp.storage.StorageDestination
@@ -71,9 +72,7 @@ fun HomeScreen(viewModel: HomeViewModel) {
         else viewModel.restoreArchiveSelectionCancelled()
     }
 
-    Scaffold(
-        topBar = { TopAppBar(title = { Text("GitHub Backup") }) },
-    ) { padding ->
+    Scaffold(topBar = { TopAppBar(title = { Text("GitHub Backup") }) }) { padding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize().padding(padding),
             contentPadding = PaddingValues(20.dp),
@@ -270,10 +269,7 @@ fun HomeScreen(viewModel: HomeViewModel) {
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text("Scheduled backups", style = MaterialTheme.typography.titleMedium)
-                            Text(
-                                "Uses the repositories selected when the schedule runs.",
-                                style = MaterialTheme.typography.bodySmall,
-                            )
+                            Text("Uses the repositories selected when the schedule runs.", style = MaterialTheme.typography.bodySmall)
                         }
                         Switch(
                             checked = state.scheduleEnabled,
@@ -318,6 +314,22 @@ fun HomeScreen(viewModel: HomeViewModel) {
                 )
             }
 
+            item { Text("Retention", style = MaterialTheme.typography.titleLarge) }
+            item {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    RetentionChip("Keep all", RetentionPreferences.KEEP_ALL, state.retentionKeepCount, viewModel::setRetentionKeepCount)
+                    RetentionChip("Keep 3", 3, state.retentionKeepCount, viewModel::setRetentionKeepCount)
+                    RetentionChip("Keep 5", 5, state.retentionKeepCount, viewModel::setRetentionKeepCount)
+                    RetentionChip("Keep 10", 10, state.retentionKeepCount, viewModel::setRetentionKeepCount)
+                }
+            }
+            item {
+                Text(
+                    "Retention is applied per repository and backup format after a newly verified backup completes. Deletion is routed through the storage provider that created each artifact. Backups created before provider metadata existed are never deleted automatically.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+
             item { Text("Restore Git mirror", style = MaterialTheme.typography.titleLarge) }
             item {
                 Text(
@@ -328,9 +340,7 @@ fun HomeScreen(viewModel: HomeViewModel) {
             item {
                 OutlinedButton(
                     onClick = {
-                        restoreLauncher.launch(
-                            arrayOf("application/zip", "application/x-zip-compressed", "application/octet-stream"),
-                        )
+                        restoreLauncher.launch(arrayOf("application/zip", "application/x-zip-compressed", "application/octet-stream"))
                     },
                     enabled = !state.busy,
                     modifier = Modifier.fillMaxWidth(),
@@ -341,10 +351,7 @@ fun HomeScreen(viewModel: HomeViewModel) {
             if (state.restoredMirrors.isNotEmpty()) {
                 item { Text("Restored mirrors", style = MaterialTheme.typography.titleMedium) }
                 items(state.restoredMirrors, key = { it.id }) { restore ->
-                    RestoredMirrorRow(
-                        restore = restore,
-                        onDelete = { viewModel.deleteRestoredMirror(restore.id) },
-                    )
+                    RestoredMirrorRow(restore = restore, onDelete = { viewModel.deleteRestoredMirror(restore.id) })
                 }
             }
 
@@ -354,6 +361,20 @@ fun HomeScreen(viewModel: HomeViewModel) {
             }
         }
     }
+}
+
+@Composable
+private fun RetentionChip(
+    label: String,
+    count: Int,
+    selectedCount: Int,
+    onSelected: (Int) -> Unit,
+) {
+    FilterChip(
+        selected = count == selectedCount,
+        onClick = { onSelected(count) },
+        label = { Text(label) },
+    )
 }
 
 @Composable
@@ -385,16 +406,10 @@ private fun RestoredMirrorRow(
     onDelete: () -> Unit,
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier.padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
+        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(restore.archiveName, style = MaterialTheme.typography.titleSmall)
             Text("${restore.refCount} refs • ${restore.referencedObjectsVerified} ref-tip objects verified")
-            Text(
-                "Stored privately on this device for a future push/export step.",
-                style = MaterialTheme.typography.bodySmall,
-            )
+            Text("Stored privately on this device for a future push/export step.", style = MaterialTheme.typography.bodySmall)
             OutlinedButton(onClick = onDelete) { Text("Delete restored copy") }
         }
     }
@@ -403,15 +418,27 @@ private fun RestoredMirrorRow(
 @Composable
 private fun BackupRow(backup: BackupEntity) {
     Card(modifier = Modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier.padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
+        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text("Repository #${backup.repositoryId}", style = MaterialTheme.typography.titleSmall)
             Text("${backup.type.name.replace('_', ' ')} • ${backup.status.name}")
+            backup.storageProvider?.let { provider ->
+                Text(
+                    if (backup.remoteDeletedAtEpochMs == null) {
+                        "Stored via ${provider.displayName()}"
+                    } else {
+                        "Remote artifact pruned from ${provider.displayName()}"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
             backup.errorMessage?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         }
     }
+}
+
+private fun StorageDestination.displayName(): String = when (this) {
+    StorageDestination.GOOGLE_DRIVE -> "Google Drive"
+    StorageDestination.DOCUMENT_TREE -> "backup folder"
 }
 
 @Composable
@@ -424,10 +451,7 @@ private fun ConnectionCard(
     onClick: () -> Unit,
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 icon()
                 Column {

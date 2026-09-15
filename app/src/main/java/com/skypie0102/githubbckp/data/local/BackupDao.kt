@@ -6,6 +6,7 @@ import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Upsert
 import com.skypie0102.githubbckp.backup.BackupStatus
+import com.skypie0102.githubbckp.backup.BackupType
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -37,7 +38,11 @@ interface BackupDao {
         SET status = :status,
             completedAtEpochMs = :completedAtEpochMs,
             checksumSha256 = :checksumSha256,
+            storageProvider = :storageProvider,
             remoteFileId = :remoteFileId,
+            remoteFileName = :remoteFileName,
+            remoteSizeBytes = :remoteSizeBytes,
+            remoteChecksumMd5 = :remoteChecksumMd5,
             errorMessage = NULL
         WHERE id = :backupId
         """,
@@ -47,7 +52,11 @@ interface BackupDao {
         status: BackupStatus,
         completedAtEpochMs: Long,
         checksumSha256: String,
+        storageProvider: String,
         remoteFileId: String,
+        remoteFileName: String,
+        remoteSizeBytes: Long,
+        remoteChecksumMd5: String,
     )
 
     @Query(
@@ -65,6 +74,29 @@ interface BackupDao {
         completedAtEpochMs: Long,
         errorMessage: String,
     )
+
+    @Query(
+        """
+        SELECT * FROM backups
+        WHERE repositoryId = :repositoryId
+          AND type = :type
+          AND status = 'COMPLETED'
+          AND storageProvider IS NOT NULL
+          AND remoteFileId IS NOT NULL
+          AND remoteFileName IS NOT NULL
+          AND remoteSizeBytes IS NOT NULL
+          AND remoteChecksumMd5 IS NOT NULL
+          AND remoteDeletedAtEpochMs IS NULL
+        ORDER BY completedAtEpochMs DESC, id DESC
+        """,
+    )
+    suspend fun getRetainableBackups(
+        repositoryId: Long,
+        type: BackupType,
+    ): List<BackupEntity>
+
+    @Query("UPDATE backups SET remoteDeletedAtEpochMs = :deletedAtEpochMs WHERE id = :backupId")
+    suspend fun markRemoteDeleted(backupId: Long, deletedAtEpochMs: Long)
 
     @Query("SELECT * FROM backups ORDER BY startedAtEpochMs DESC LIMIT :limit")
     fun observeRecentBackups(limit: Int = 50): Flow<List<BackupEntity>>

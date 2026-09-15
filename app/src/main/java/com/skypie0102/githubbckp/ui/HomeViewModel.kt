@@ -8,6 +8,7 @@ import androidx.lifecycle.viewModelScope
 import com.skypie0102.githubbckp.backup.BackupType
 import com.skypie0102.githubbckp.backup.MirrorRestoreCoordinator
 import com.skypie0102.githubbckp.backup.MirrorRestoreRecord
+import com.skypie0102.githubbckp.backup.RetentionPreferences
 import com.skypie0102.githubbckp.data.local.BackupDao
 import com.skypie0102.githubbckp.data.local.BackupEntity
 import com.skypie0102.githubbckp.data.local.RepositoryEntity
@@ -40,6 +41,7 @@ data class HomeUiState(
     val scheduleEnabled: Boolean = false,
     val scheduleCadence: BackupCadence = BackupCadence.DAILY,
     val scheduledBackupType: BackupType = BackupType.GIT_MIRROR,
+    val retentionKeepCount: Int = RetentionPreferences.KEEP_ALL,
     val githubDeviceSession: GithubDeviceSession? = null,
     val repositories: List<RepositoryEntity> = emptyList(),
     val recentBackups: List<BackupEntity> = emptyList(),
@@ -57,6 +59,7 @@ class HomeViewModel @Inject constructor(
     private val storagePreferences: StoragePreferences,
     private val backupScheduler: BackupScheduler,
     private val mirrorRestoreCoordinator: MirrorRestoreCoordinator,
+    private val retentionPreferences: RetentionPreferences,
 ) : ViewModel() {
     private val initialSchedule = backupScheduler.scheduleSettings()
     private val _state = MutableStateFlow(
@@ -70,6 +73,7 @@ class HomeViewModel @Inject constructor(
             scheduleEnabled = initialSchedule.enabled,
             scheduleCadence = initialSchedule.cadence,
             scheduledBackupType = initialSchedule.backupType,
+            retentionKeepCount = retentionPreferences.keepCount(),
         ),
     )
     val state: StateFlow<HomeUiState> = _state.asStateFlow()
@@ -97,11 +101,7 @@ class HomeViewModel @Inject constructor(
                 _state.update { it.copy(githubDeviceSession = session, message = null) }
                 githubAuthManager.pollUntilAuthorized(session)
                 _state.update {
-                    it.copy(
-                        githubConnected = true,
-                        githubDeviceSession = null,
-                        message = "GitHub connected",
-                    )
+                    it.copy(githubConnected = true, githubDeviceSession = null, message = "GitHub connected")
                 }
                 refreshRepositoriesInternal()
             }
@@ -118,6 +118,20 @@ class HomeViewModel @Inject constructor(
 
     fun setBackupType(type: BackupType) {
         _state.update { it.copy(backupType = type) }
+    }
+
+    fun setRetentionKeepCount(count: Int) {
+        retentionPreferences.setKeepCount(count)
+        _state.update {
+            it.copy(
+                retentionKeepCount = count,
+                message = if (count == RetentionPreferences.KEEP_ALL) {
+                    "Automatic retention disabled; all verified backups will be kept"
+                } else {
+                    "Retention will keep the newest $count verified backups per repository and format"
+                },
+            )
+        }
     }
 
     fun setScheduleEnabled(enabled: Boolean) {
@@ -254,9 +268,7 @@ class HomeViewModel @Inject constructor(
             return
         }
         storagePreferences.setDestination(StorageDestination.GOOGLE_DRIVE)
-        _state.update {
-            it.copy(storageDestination = StorageDestination.GOOGLE_DRIVE, message = "Google Drive selected")
-        }
+        _state.update { it.copy(storageDestination = StorageDestination.GOOGLE_DRIVE, message = "Google Drive selected") }
     }
 
     fun useBackupFolder() {
@@ -265,9 +277,7 @@ class HomeViewModel @Inject constructor(
             return
         }
         storagePreferences.setDestination(StorageDestination.DOCUMENT_TREE)
-        _state.update {
-            it.copy(storageDestination = StorageDestination.DOCUMENT_TREE, message = "Backup folder selected")
-        }
+        _state.update { it.copy(storageDestination = StorageDestination.DOCUMENT_TREE, message = "Backup folder selected") }
     }
 
     fun backupSelectedRepositories() {
@@ -286,9 +296,7 @@ class HomeViewModel @Inject constructor(
                     type = state.backupType,
                 )
                 _state.update {
-                    it.copy(
-                        message = "Queued ${selected.size} ${state.backupType.displayName()} backup${if (selected.size == 1) "" else "s"}",
-                    )
+                    it.copy(message = "Queued ${selected.size} ${state.backupType.displayName()} backup${if (selected.size == 1) "" else "s"}")
                 }
             }
         }
@@ -300,9 +308,7 @@ class HomeViewModel @Inject constructor(
             runBusy {
                 val record = mirrorRestoreCoordinator.restore(uri)
                 refreshRestores()
-                _state.update {
-                    it.copy(message = "Restored ${record.archiveName}: ${record.refCount} refs verified")
-                }
+                _state.update { it.copy(message = "Restored ${record.archiveName}: ${record.refCount} refs verified") }
             }
         }
     }
@@ -331,9 +337,7 @@ class HomeViewModel @Inject constructor(
         val remote = githubGateway.listRepositories()
         backupDao.upsertRepositories(
             remote.map { repository ->
-                repository.toEntity(
-                    selectedForBackup = existing[repository.id]?.selectedForBackup ?: true,
-                )
+                repository.toEntity(selectedForBackup = existing[repository.id]?.selectedForBackup ?: true)
             },
         )
         _state.update { it.copy(githubConnected = true, message = "Found ${remote.size} repositories") }
