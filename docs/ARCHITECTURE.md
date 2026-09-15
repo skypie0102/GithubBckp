@@ -17,6 +17,8 @@ BackupCoordinator
    +-- BackupEngineFactory
    |     +-- SourceArchiveBackupEngine
    |     +-- GitMirrorBackupEngine
+   |            +-- GitLfsPointerScanner
+   |            +-- GitLfsDownloadService
    +-- StorageRouter
    |     +-- DocumentTreeStorageProvider
    |     +-- GoogleDriveStorageProvider
@@ -46,19 +48,23 @@ GithubMirrorRestorePublisher
 
 `SourceArchiveBackupEngine` downloads the repository default branch as a GitHub TAR.GZ archive. This is a source snapshot only; it does not preserve arbitrary refs or full history.
 
-`GitMirrorBackupEngine` uses JGit mirror-clone semantics: all refs are fetched into a bare repository. GitHub credentials are supplied to JGit's transport layer and are not written into the clone URL. The bare repository is packaged as one `.mirror.zip` artifact for hashing, storage, and restore portability.
+`GitMirrorBackupEngine` uses JGit mirror-clone semantics: all refs are fetched into a bare repository. GitHub credentials are supplied to JGit's transport layer and are not written into the clone URL.
 
-Both engines compute SHA-256 as the canonical integrity checksum plus MD5 for providers, such as Drive, that expose an independent MD5 checksum.
+After the Git clone, `GitLfsPointerScanner` walks reachable mirror objects once and identifies unique standard Git LFS pointer blobs by SHA-256 OID and declared size. `GitLfsDownloadService` requests download actions from the Git LFS Batch API in groups of 100, downloads the raw object bytes using only the headers supplied for each action, verifies declared size plus SHA-256, and stores them under the standard bare-repository `lfs/objects/<2>/<2>/<oid>` layout.
 
-`BackupArtifact` can carry non-fatal warnings. Every current `GIT_MIRROR` artifact carries an explicit warning that Git LFS object content is not included. `BackupCoordinator` writes those warnings only after the remote artifact has passed verification, so `COMPLETED` still means the stored bytes were verified while the warning describes repository-completeness limits.
+GitHub credentials are sent only to the GitHub Batch API endpoint. Object-action URLs receive only their returned headers; if a download redirects to another host, `Authorization` is removed before following the redirect. Any missing, unavailable, size-mismatched, or hash-mismatched referenced object fails the backup rather than allowing a silent incomplete success.
+
+The bare repository plus bundled LFS store is packaged as one `.mirror.zip` artifact. Both backup engines compute SHA-256 as the canonical integrity checksum plus MD5 for providers, such as Drive, that expose an independent MD5 checksum.
+
+`BackupArtifact` can carry non-fatal warnings. Mirrors with bundled LFS objects currently record a warning that those bytes are present in the backup but are not yet uploaded during GitHub recovery publication. `BackupCoordinator` writes warnings only after the remote artifact has passed verification, so `COMPLETED` still means the stored bytes were verified while the warning describes a recovery limitation.
 
 Room schema v3 persists the warning separately from `errorMessage`. The v2-to-v3 migration adds a nullable `warningMessage`; older rows remain null rather than receiving inferred historical completeness claims. Warning history remains even if retention later prunes the corresponding remote artifact.
 
-Git LFS object content is not included yet. Wikis, release assets, issues, and pull-request metadata remain separate completeness modules.
+Wikis, release assets, issues, and pull-request metadata remain separate completeness modules.
 
 ### Mirror restore and GitHub recovery
 
-`GitMirrorRestoreService` rejects ZIP entries whose canonical path escapes the restore root, extracts the bare repository, opens it with JGit, and verifies every advertised ref tip exists in the object database.
+`GitMirrorRestoreService` rejects ZIP entries whose canonical path escapes the restore root, extracts the bare repository (including any bundled LFS object store), opens it with JGit, and verifies every advertised ref tip exists in the Git object database.
 
 `MirrorRestoreCoordinator` imports a user-selected archive into private app storage, keeps lightweight metadata beside the restored repository, reloads valid restore records across app restarts, and exposes a validated repository directory only for a known restore ID.
 
@@ -70,7 +76,7 @@ The preflight empty check and non-forced refspecs intentionally protect live rep
 
 GitHub owns `refs/pull/*` as a read-only namespace. Those refs may be present in a mirror clone but cannot be pushed back; they are skipped explicitly and reported separately. Restoring pull-request metadata remains a future metadata module rather than pretending those refs are writable Git state.
 
-A restored Git mirror can recover the Git refs/history present in the artifact, but it cannot recover Git LFS-managed object bytes until an LFS backup/restore module is implemented.
+A restored mirror preserves bundled LFS object files locally, but `GithubMirrorRestorePublisher` currently pushes Git refs only. A follow-up LFS recovery phase must request upload/verify actions from the target repository's LFS Batch API and transfer bundled objects before recovery can be called LFS-complete.
 
 ### Storage routing
 
@@ -106,11 +112,11 @@ QUEUED -> DOWNLOADING -> CHECKSUM -> UPLOADING -> VERIFYING -> COMPLETED
 Git mirror:
 
 ```text
-QUEUED -> DOWNLOADING -> PACKAGING -> CHECKSUM -> UPLOADING -> VERIFYING -> COMPLETED
-                 \------------------------------------------------------> FAILED
+QUEUED -> DOWNLOADING (Git + LFS) -> PACKAGING -> CHECKSUM -> UPLOADING -> VERIFYING -> COMPLETED
+                 \-------------------------------------------------------------------> FAILED
 ```
 
-A completed artifact may also have a non-fatal completeness warning. After `COMPLETED`, an optional retention pass may delete older verified remote artifacts without changing their historical completion state or warning metadata.
+A completed artifact may also have a non-fatal recovery/completeness warning. After `COMPLETED`, an optional retention pass may delete older verified remote artifacts without changing their historical completion state or warning metadata.
 
 Temporary archives and mirror working directories live below the app cache directory and are removed after success or failure.
 
@@ -119,5 +125,7 @@ Temporary archives and mirror working directories live below the app cache direc
 Mirror restore tests create a real local repository, make a JGit mirror, package it, restore it, and assert branch/tag refs plus referenced objects survive. A separate regression test creates a malicious `../` ZIP entry and verifies it cannot write outside the restore directory.
 
 `GitMirrorPushServiceTest` verifies writable branches/tags are pushed into an empty bare target while a synthetic `refs/pull/*` ref is skipped. A second regression creates a target that already has a commit and verifies recovery is refused before the mirror can add its branch or tag refs.
+
+`GitLfsPointerScannerTest` creates a real repository containing an LFS pointer, mirrors it, and verifies the scanner discovers the expected unique OID and size. `GitLfsDownloadServiceTest` validates Batch API action parsing, per-object error handling, and size/SHA-256 integrity verification.
 
 Retention tests verify keep-all selects nothing for deletion and keep-last-N selects only older artifacts. Room/KSP compilation validates the nullable v3 warning column and DAO completion query against the entity schema in CI.
