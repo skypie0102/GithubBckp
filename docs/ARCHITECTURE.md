@@ -38,7 +38,7 @@ GithubMirrorRestorePublisher
 
 `GithubGateway` owns repository discovery and authenticated source-archive transfer. Redirects from GitHub's API to archive storage are followed without forwarding the GitHub bearer token to the redirected host.
 
-`GithubRepositoryRestoreGateway` creates a new empty repository for the authenticated user during disaster recovery. Existing repositories are not modified by this flow.
+`GithubRepositoryRestoreGateway` either creates a new empty repository for the authenticated user or resolves a user-supplied `owner/repository` target. The latter supports recovery repositories created ahead of time, including organization-owned repositories the connected account can access.
 
 ### Backup engines
 
@@ -58,11 +58,13 @@ Git LFS objects are not included yet. Wikis, release assets, issues, and pull-re
 
 `MirrorRestoreCoordinator` imports a user-selected archive into private app storage, keeps lightweight metadata beside the restored repository, reloads valid restore records across app restarts, and exposes a validated repository directory only for a known restore ID.
 
-`GithubMirrorRestorePublisher` creates a new GitHub repository, obtains the current GitHub token, and delegates Git transport to `GitMirrorPushService`. The push service enumerates every ref in the validated bare repository, force-pushes writable refs, and fails if any attempted remote update is not `OK` or `UP_TO_DATE`.
+`GithubMirrorRestorePublisher` can publish to either a newly created repository or an existing repository selected by full name. Both routes converge on the same `GitMirrorPushService` safety boundary.
+
+Before writing any Git ref, `GitMirrorPushService` performs an authenticated `ls-remote` style advertisement check and refuses the operation if the target advertises any refs. Only an empty remote can proceed. The service then enumerates every writable ref from the validated bare repository and pushes them without force. Every attempted remote update must finish as `OK` or `UP_TO_DATE`.
+
+The preflight empty check and non-forced refspecs intentionally protect live repositories. The empty check is not treated as permission to enable mirror-style deletion or force updates later in the call path. A separately designed non-empty recovery mode would need explicit destructive confirmation, remote-ref deletion semantics, and repository-rule handling.
 
 GitHub owns `refs/pull/*` as a read-only namespace. Those refs may be present in a mirror clone but cannot be pushed back; they are skipped explicitly and reported separately. Restoring pull-request metadata remains a future metadata module rather than pretending those refs are writable Git state.
-
-Publishing to an existing repository is deliberately separate because mirror-style recovery can delete remote refs and can conflict with branch protection/rulesets or repository push policies.
 
 ### Storage routing
 
@@ -110,6 +112,6 @@ Temporary archives and mirror working directories live below the app cache direc
 
 Mirror restore tests create a real local repository, make a JGit mirror, package it, restore it, and assert branch/tag refs plus referenced objects survive. A separate regression test creates a malicious `../` ZIP entry and verifies it cannot write outside the restore directory.
 
-`GitMirrorPushServiceTest` creates a real source repository and local bare target, then verifies writable branches/tags are pushed while a synthetic `refs/pull/*` ref is skipped.
+`GitMirrorPushServiceTest` verifies writable branches/tags are pushed into an empty bare target while a synthetic `refs/pull/*` ref is skipped. A second regression creates a target that already has a commit and verifies recovery is refused before the mirror can add its branch or tag refs.
 
 Retention tests verify keep-all selects nothing for deletion and keep-last-N selects only older artifacts.
