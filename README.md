@@ -4,32 +4,42 @@ Android app for backing up repositories from a GitHub account to external storag
 
 ## Status
 
-Two backup formats and two destination types are now implemented:
+The core backup, scheduling, retention, and local restore flows are implemented:
 
 ```text
 GitHub device authorization
-  -> discover repositories
-  -> select repositories
-  -> choose source snapshot or Git mirror
-  -> create + checksum artifact
-  -> choose user-selected folder or Google Drive
-  -> upload + verify saved bytes
-  -> persist COMPLETED/FAILED history in Room
+  -> discover/select repositories
+  -> source snapshot or Git mirror
+  -> checksum artifact
+  -> user-selected folder or Google Drive
+  -> upload + verify
+  -> persist provider-aware backup history
+  -> optional keep-last-N retention
+
+Periodic WorkManager controller
+  -> read repositories selected at execution time
+  -> fan out one constrained backup job per repository
+
+Mirror ZIP
+  -> Android document picker
+  -> safe private import
+  -> validate bare Git repository refs/objects
+  -> keep/delete restored copy on device
 ```
 
 ### Backup formats
 
 - **Source snapshot** — downloads the repository default branch as GitHub's TAR.GZ archive. It is compact, but is not a full Git-history backup.
-- **Git mirror** — uses JGit mirror-clone semantics to fetch all Git refs into a bare repository, packages that repository as a `.mirror.zip`, and computes SHA-256 + MD5. This preserves Git refs/history for later restoration.
+- **Git mirror** — uses JGit mirror-clone semantics to fetch all Git refs into a bare repository, packages that repository as a `.mirror.zip`, and computes SHA-256 + MD5. This preserves Git refs/history for restoration.
 
-Git LFS objects are **not included yet** in mirror mode. Wikis, release assets, issues, and pull-request metadata are also separate future completeness modules.
+Git LFS objects are **not included yet** in mirror mode. Wikis, release assets, issues, and pull-request metadata are separate future completeness modules.
 
 ### Destinations
 
 - **Backup folder (recommended)** — Android Storage Access Framework (SAF). The user chooses a folder with the system picker; the app persists the URI grant and can write to local storage, SD cards, or cloud apps that expose an Android DocumentsProvider. No broad storage permission is required.
-- **Google Drive** — direct Drive API adapter with `drive.file`, resumable upload, and remote checksum verification. Because Google's current Workspace API policy restricts generic backup-to-Drive use for public apps, this adapter should be treated as personal/internal unless written permission or policy guidance changes.
+- **Google Drive** — direct Drive API adapter with `drive.file`, resumable upload, and remote checksum verification. Because Google's Workspace API policy restricts generic backup-to-Drive use for public apps, this adapter should be treated as personal/internal unless written permission or policy guidance changes.
 
-Each selected repository is queued as its own constrained WorkManager job.
+Each repository runs as its own WorkManager job.
 
 ## Build
 
@@ -55,41 +65,49 @@ Or export `GITHUB_CLIENT_ID` in your local/CI environment. No GitHub client secr
 
 The app requests `repo` plus `offline_access`, stores GitHub access/refresh material encrypted by an Android Keystore AES-GCM key, and refreshes expiring device-flow tokens when possible.
 
-## Google Drive setup
+## Storage Access Framework
 
-Google Drive authorization uses Google Play services `AuthorizationClient` with the narrow `drive.file` scope. Configure an Android OAuth client in the Google Cloud project for package:
-
-```text
-com.skypie0102.githubbckp
-```
-
-and register the signing certificate SHA-1 used for your build. The app does not embed a Google client secret and does not persist Google access tokens; Play services refreshes authorization when possible.
-
-## Storage Access Framework setup
-
-No cloud API credentials are needed. Tap **Choose backup folder** in the app and pick a writable location from Android's system document picker. The app keeps only the persisted document-tree URI grant.
-
-Artifacts are written under:
+Tap **Choose backup folder** and select a writable location using Android's system document picker. Artifacts are written below:
 
 ```text
-GitHub Backups/
-  <owner>/
-    <repository>/
-      <artifact>
+GitHub Backups/<owner>/<repository>/<artifact>
 ```
 
-After writing, the app opens the saved document again and verifies its byte count, SHA-256, and MD5 against the local artifact before recording `COMPLETED`.
+After writing, the app reopens the saved document and verifies byte count, SHA-256, and MD5 before recording `COMPLETED`.
+
+## Google Drive
+
+Google Drive authorization uses Google Play services `AuthorizationClient` with the narrow `drive.file` scope. Configure an Android OAuth client for package `com.skypie0102.githubbckp` and register the signing certificate SHA-1. The app does not persist Google access tokens.
+
+## Automatic backups
+
+Automatic backup settings support:
+
+- disabled, daily, or weekly execution;
+- source snapshot or Git mirror format; and
+- persisted settings across app restarts.
+
+WorkManager periodic execution is opportunistic rather than an exact alarm. The periodic controller reads the repositories selected when it runs and fans out one backup job per repository. Scheduled work requires unmetered connectivity, battery-not-low, and storage-not-low constraints.
+
+## Retention
+
+Retention is opt-in. The default is **Keep all**. Users can instead keep the newest 3, 5, or 10 verified artifacts per repository and backup format.
+
+Room schema v2 persists the provider plus immutable remote artifact metadata required to reconstruct deletion requests. Deletion is therefore routed through the provider that originally created the artifact, even if the user later switches destinations. Successful deletion records `remoteDeletedAtEpochMs` while keeping local history.
+
+Rows migrated from schema v1 have unknown provider metadata and are deliberately excluded from automatic deletion. Retention is best-effort: a pruning failure is logged and never changes a newly verified backup from `COMPLETED` to `FAILED`.
 
 ## Mirror restoration
 
-A Git mirror artifact is a ZIP containing a bare Git repository. `GitMirrorRestoreService` provides the restore/validation primitive:
+The app can import a Git mirror ZIP through Android's document picker. The archive is copied into private app storage and restored with these checks:
 
-1. Reject unsafe ZIP entries that escape the restore directory.
-2. Extract the bare repository.
-3. Open it through JGit.
-4. Verify every advertised ref tip is present in the object database.
+1. Reject ZIP entries that escape the restore directory.
+2. Extract into a bare-repository directory.
+3. Open it with JGit.
+4. Verify every advertised ref tip exists in the object database.
+5. Persist lightweight restore metadata so valid restores survive app restarts.
 
-A future user-facing restore flow can use the restored bare repository as the source for a mirror push to a new GitHub repository.
+Restored copies can be deleted from the app. The next recovery slice is pushing a validated restored mirror into a newly created or existing GitHub repository.
 
 ## Security
 
@@ -102,21 +120,19 @@ Key boundaries:
 - `GithubAuthManager` — GitHub device flow, encrypted token persistence and refresh
 - `GithubGateway` / `GithubRestGateway` — repository discovery and source archive transfer
 - `BackupEngineFactory` — selects source snapshot or Git mirror engine
-- `SourceArchiveBackupEngine` — GitHub default-branch TAR.GZ artifact
-- `GitMirrorBackupEngine` — JGit mirror clone and portable bare-repository ZIP artifact
-- `GitMirrorRestoreService` — safe extraction and ref/object validation
-- `StorageRouter` — selects the persisted destination
+- `GitMirrorRestoreService` / `MirrorRestoreCoordinator` — safe mirror import and persistent local restores
+- `StorageRouter` — provider-aware upload, verification, and deletion routing
 - `DocumentTreeStorageProvider` — SAF streaming upload/readback verification
 - `GoogleDriveStorageProvider` — Drive resumable upload/remote verification
+- `BackupScheduler` / `ScheduledBackupWorker` — manual and periodic fan-out scheduling
+- `BackupRetentionManager` — opt-in keep-last-N pruning
 - `BackupCoordinator` — durable Room state transitions around one backup attempt
-- `RepositoryBackupWorker` — one repository per WorkManager job
-- `HomeViewModel` — connection, destination, format, repository selection, and queueing state
 
 See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for component details.
 
 ## Next implementation slice
 
-1. Add scheduled cadence/settings and retention pruning.
-2. Add a user-facing restore workflow that can create/select a destination repository and mirror-push into it.
-3. Add Git LFS object backup/restore and clearly report repository completeness.
-4. Add optional wiki, release assets, issues, and pull-request metadata modules.
+1. Push a validated restored mirror to a new or existing GitHub repository with explicit destructive-overwrite confirmation.
+2. Add Git LFS object backup/restore and clearly report repository completeness.
+3. Add optional wiki, release assets, issues, and pull-request metadata modules.
+4. Add richer backup/restore audit and export reporting.
