@@ -374,10 +374,14 @@ fun HomeScreen(viewModel: HomeViewModel) {
             if (state.githubPublishRestoreId != null) {
                 item {
                     GithubPublishCard(
+                        targetMode = state.githubRestoreTargetMode,
                         repositoryName = state.githubPublishRepositoryName,
+                        existingRepository = state.githubPublishExistingRepository,
                         isPrivate = state.githubPublishPrivate,
                         busy = state.busy,
+                        onTargetModeChange = viewModel::setGithubRestoreTargetMode,
                         onRepositoryNameChange = viewModel::setGithubPublishRepositoryName,
+                        onExistingRepositoryChange = viewModel::setGithubPublishExistingRepository,
                         onPrivateChange = viewModel::setGithubPublishPrivate,
                         onPublish = viewModel::publishRestoreToGithub,
                         onCancel = viewModel::cancelGithubPublish,
@@ -395,45 +399,79 @@ fun HomeScreen(viewModel: HomeViewModel) {
 
 @Composable
 private fun GithubPublishCard(
+    targetMode: GithubRestoreTargetMode,
     repositoryName: String,
+    existingRepository: String,
     isPrivate: Boolean,
     busy: Boolean,
+    onTargetModeChange: (GithubRestoreTargetMode) -> Unit,
     onRepositoryNameChange: (String) -> Unit,
+    onExistingRepositoryChange: (String) -> Unit,
     onPrivateChange: (Boolean) -> Unit,
     onPublish: () -> Unit,
     onCancel: () -> Unit,
 ) {
+    val creatingNew = targetMode == GithubRestoreTargetMode.NEW_REPOSITORY
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text("Restore to new GitHub repository", style = MaterialTheme.typography.titleMedium)
+            Text("Restore mirror to GitHub", style = MaterialTheme.typography.titleMedium)
             Text(
-                "A new empty repository will be created, then all writable Git refs from the validated mirror will be force-pushed. GitHub read-only refs/pull/* are skipped.",
+                "Recovery only writes to an empty Git repository. The app verifies the remote advertises no refs first, never force-pushes, and skips GitHub read-only refs/pull/*.",
                 style = MaterialTheme.typography.bodySmall,
             )
-            OutlinedTextField(
-                value = repositoryName,
-                onValueChange = onRepositoryNameChange,
-                label = { Text("New repository name") },
-                singleLine = true,
-                enabled = !busy,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text("Private repository")
-                    Text("Recommended for disaster recovery.", style = MaterialTheme.typography.bodySmall)
-                }
-                Switch(checked = isPrivate, onCheckedChange = onPrivateChange, enabled = !busy)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(
+                    selected = creatingNew,
+                    onClick = { onTargetModeChange(GithubRestoreTargetMode.NEW_REPOSITORY) },
+                    label = { Text("Create new") },
+                )
+                FilterChip(
+                    selected = !creatingNew,
+                    onClick = { onTargetModeChange(GithubRestoreTargetMode.EXISTING_EMPTY_REPOSITORY) },
+                    label = { Text("Use empty existing") },
+                )
             }
-            Button(onClick = onPublish, enabled = !busy && repositoryName.isNotBlank()) {
-                Text("Create repository and restore")
+
+            if (creatingNew) {
+                OutlinedTextField(
+                    value = repositoryName,
+                    onValueChange = onRepositoryNameChange,
+                    label = { Text("New repository name") },
+                    singleLine = true,
+                    enabled = !busy,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Private repository")
+                        Text("Recommended for disaster recovery.", style = MaterialTheme.typography.bodySmall)
+                    }
+                    Switch(checked = isPrivate, onCheckedChange = onPrivateChange, enabled = !busy)
+                }
+            } else {
+                OutlinedTextField(
+                    value = existingRepository,
+                    onValueChange = onExistingRepositoryChange,
+                    label = { Text("Existing owner/repository") },
+                    supportingText = {
+                        Text("The target must exist and contain no advertised Git refs. Non-empty targets are refused.")
+                    },
+                    singleLine = true,
+                    enabled = !busy,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+
+            val targetReady = if (creatingNew) repositoryName.isNotBlank() else existingRepository.isNotBlank()
+            Button(onClick = onPublish, enabled = !busy && targetReady) {
+                Text(if (creatingNew) "Create repository and restore" else "Verify empty target and restore")
             }
             OutlinedButton(onClick = onCancel, enabled = !busy) { Text("Cancel") }
         }
@@ -489,7 +527,7 @@ private fun RestoredMirrorRow(
             Text(restore.archiveName, style = MaterialTheme.typography.titleSmall)
             Text("${restore.refCount} refs • ${restore.referencedObjectsVerified} ref-tip objects verified")
             Text("Stored privately on this device.", style = MaterialTheme.typography.bodySmall)
-            Button(onClick = onPublish, enabled = !busy) { Text("Restore to new GitHub repository") }
+            Button(onClick = onPublish, enabled = !busy) { Text("Restore to GitHub") }
             OutlinedButton(onClick = onDelete, enabled = !busy) { Text("Delete restored copy") }
         }
     }
