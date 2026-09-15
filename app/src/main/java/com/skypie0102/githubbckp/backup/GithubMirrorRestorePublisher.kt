@@ -111,11 +111,19 @@ class GithubMirrorRestorePublisher @Inject constructor(
     ): GithubRestorePublishResult {
         val repositoryDirectory = restoreCoordinator.requireRepositoryDirectory(restoreId)
         val token = authManager.requireAccessToken()
+        val credentials = UsernamePasswordCredentialsProvider("x-access-token", token)
 
         return try {
             withContext(Dispatchers.IO) {
                 var transaction = initialTransaction
                 if (transaction.phase == RecoveryPhase.TARGET_BOUND) {
+                    // Refuse a non-empty target before any LFS object can be uploaded.
+                    // The Git push performs the same empty check again immediately
+                    // before publishing refs, which protects against a concurrent writer.
+                    pushService.requireRemoteEmpty(
+                        remoteUri = repository.cloneUrl,
+                        credentialsProvider = credentials,
+                    )
                     val lfsPointers = lfsPointerScanner.scan(repositoryDirectory)
                     val lfsObjectCount = lfsUploadService.uploadAll(
                         repositoryFullName = repository.fullName,
@@ -131,7 +139,6 @@ class GithubMirrorRestorePublisher @Inject constructor(
                 }
 
                 if (transaction.phase == RecoveryPhase.LFS_PUBLISHED) {
-                    val credentials = UsernamePasswordCredentialsProvider("x-access-token", token)
                     val push = if (isResume) {
                         pushService.pushOrReconcilePublished(
                             repositoryDirectory = repositoryDirectory,
