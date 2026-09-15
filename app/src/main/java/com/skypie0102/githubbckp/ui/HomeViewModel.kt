@@ -6,6 +6,7 @@ import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.skypie0102.githubbckp.backup.BackupType
+import com.skypie0102.githubbckp.backup.GithubMirrorRestorePublisher
 import com.skypie0102.githubbckp.backup.MirrorRestoreCoordinator
 import com.skypie0102.githubbckp.backup.MirrorRestoreRecord
 import com.skypie0102.githubbckp.backup.RetentionPreferences
@@ -46,6 +47,10 @@ data class HomeUiState(
     val repositories: List<RepositoryEntity> = emptyList(),
     val recentBackups: List<BackupEntity> = emptyList(),
     val restoredMirrors: List<MirrorRestoreRecord> = emptyList(),
+    val githubPublishRestoreId: String? = null,
+    val githubPublishRepositoryName: String = "",
+    val githubPublishPrivate: Boolean = true,
+    val lastPublishedRepositoryUrl: String? = null,
     val busy: Boolean = false,
     val message: String? = null,
 )
@@ -60,6 +65,7 @@ class HomeViewModel @Inject constructor(
     private val backupScheduler: BackupScheduler,
     private val mirrorRestoreCoordinator: MirrorRestoreCoordinator,
     private val retentionPreferences: RetentionPreferences,
+    private val githubRestorePublisher: GithubMirrorRestorePublisher,
 ) : ViewModel() {
     private val initialSchedule = backupScheduler.scheduleSettings()
     private val _state = MutableStateFlow(
@@ -100,9 +106,7 @@ class HomeViewModel @Inject constructor(
                 val session = githubAuthManager.startDeviceFlow()
                 _state.update { it.copy(githubDeviceSession = session, message = null) }
                 githubAuthManager.pollUntilAuthorized(session)
-                _state.update {
-                    it.copy(githubConnected = true, githubDeviceSession = null, message = "GitHub connected")
-                }
+                _state.update { it.copy(githubConnected = true, githubDeviceSession = null, message = "GitHub connected") }
                 refreshRepositoriesInternal()
             }
         }
@@ -324,6 +328,79 @@ class HomeViewModel @Inject constructor(
                 mirrorRestoreCoordinator.deleteRestore(id)
                 refreshRestores()
                 _state.update { it.copy(message = "Restored mirror deleted") }
+            }
+        }
+    }
+
+    fun beginGithubPublish(restore: MirrorRestoreRecord) {
+        val suggested = restore.archiveName
+            .removeSuffix(".mirror.zip")
+            .removeSuffix(".zip")
+            .replace(Regex("[^A-Za-z0-9._-]"), "-")
+            .trim('-')
+            .take(100)
+            .ifBlank { "restored-repository" }
+        _state.update {
+            it.copy(
+                githubPublishRestoreId = restore.id,
+                githubPublishRepositoryName = suggested,
+                githubPublishPrivate = true,
+                lastPublishedRepositoryUrl = null,
+                message = null,
+            )
+        }
+    }
+
+    fun setGithubPublishRepositoryName(value: String) {
+        _state.update { it.copy(githubPublishRepositoryName = value.take(100)) }
+    }
+
+    fun setGithubPublishPrivate(value: Boolean) {
+        _state.update { it.copy(githubPublishPrivate = value) }
+    }
+
+    fun cancelGithubPublish() {
+        _state.update {
+            it.copy(
+                githubPublishRestoreId = null,
+                githubPublishRepositoryName = "",
+                lastPublishedRepositoryUrl = null,
+            )
+        }
+    }
+
+    fun publishRestoreToGithub() {
+        val state = _state.value
+        val restoreId = state.githubPublishRestoreId ?: return
+        if (!state.githubConnected) {
+            _state.update { it.copy(message = "Connect GitHub before publishing a restored mirror") }
+            return
+        }
+        if (state.githubPublishRepositoryName.isBlank()) {
+            _state.update { it.copy(message = "Enter a repository name") }
+            return
+        }
+        viewModelScope.launch {
+            runBusy {
+                val result = githubRestorePublisher.publishToNewRepository(
+                    restoreId = restoreId,
+                    repositoryName = state.githubPublishRepositoryName,
+                    isPrivate = state.githubPublishPrivate,
+                )
+                _state.update {
+                    it.copy(
+                        githubPublishRestoreId = null,
+                        githubPublishRepositoryName = "",
+                        lastPublishedRepositoryUrl = result.repositoryUrl,
+                        message = buildString {
+                            append("Restored ${result.pushedRefCount} Git refs to ${result.repositoryFullName}")
+                            if (result.skippedReadOnlyRefs.isNotEmpty()) {
+                                append("; skipped ${result.skippedReadOnlyRefs.size} read-only pull-request refs")
+                            }
+                        },
+                    )
+                }
+                refreshRepositoriesInternal()
             }
         }
     }

@@ -29,6 +29,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -88,7 +89,17 @@ fun HomeScreen(viewModel: HomeViewModel) {
             state.message?.let { message ->
                 item {
                     Card(modifier = Modifier.fillMaxWidth()) {
-                        Text(message, modifier = Modifier.padding(16.dp))
+                        Column(
+                            modifier = Modifier.padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Text(message)
+                            state.lastPublishedRepositoryUrl?.let { url ->
+                                OutlinedButton(onClick = { uriHandler.openUri(url) }) {
+                                    Text("Open restored repository")
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -351,7 +362,26 @@ fun HomeScreen(viewModel: HomeViewModel) {
             if (state.restoredMirrors.isNotEmpty()) {
                 item { Text("Restored mirrors", style = MaterialTheme.typography.titleMedium) }
                 items(state.restoredMirrors, key = { it.id }) { restore ->
-                    RestoredMirrorRow(restore = restore, onDelete = { viewModel.deleteRestoredMirror(restore.id) })
+                    RestoredMirrorRow(
+                        restore = restore,
+                        busy = state.busy,
+                        onPublish = { viewModel.beginGithubPublish(restore) },
+                        onDelete = { viewModel.deleteRestoredMirror(restore.id) },
+                    )
+                }
+            }
+
+            if (state.githubPublishRestoreId != null) {
+                item {
+                    GithubPublishCard(
+                        repositoryName = state.githubPublishRepositoryName,
+                        isPrivate = state.githubPublishPrivate,
+                        busy = state.busy,
+                        onRepositoryNameChange = viewModel::setGithubPublishRepositoryName,
+                        onPrivateChange = viewModel::setGithubPublishPrivate,
+                        onPublish = viewModel::publishRestoreToGithub,
+                        onCancel = viewModel::cancelGithubPublish,
+                    )
                 }
             }
 
@@ -359,6 +389,53 @@ fun HomeScreen(viewModel: HomeViewModel) {
                 item { Text("Recent backups", style = MaterialTheme.typography.titleLarge) }
                 items(state.recentBackups.take(10), key = { it.id }) { backup -> BackupRow(backup) }
             }
+        }
+    }
+}
+
+@Composable
+private fun GithubPublishCard(
+    repositoryName: String,
+    isPrivate: Boolean,
+    busy: Boolean,
+    onRepositoryNameChange: (String) -> Unit,
+    onPrivateChange: (Boolean) -> Unit,
+    onPublish: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text("Restore to new GitHub repository", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "A new empty repository will be created, then all writable Git refs from the validated mirror will be force-pushed. GitHub read-only refs/pull/* are skipped.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            OutlinedTextField(
+                value = repositoryName,
+                onValueChange = onRepositoryNameChange,
+                label = { Text("New repository name") },
+                singleLine = true,
+                enabled = !busy,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Private repository")
+                    Text("Recommended for disaster recovery.", style = MaterialTheme.typography.bodySmall)
+                }
+                Switch(checked = isPrivate, onCheckedChange = onPrivateChange, enabled = !busy)
+            }
+            Button(onClick = onPublish, enabled = !busy && repositoryName.isNotBlank()) {
+                Text("Create repository and restore")
+            }
+            OutlinedButton(onClick = onCancel, enabled = !busy) { Text("Cancel") }
         }
     }
 }
@@ -403,14 +480,17 @@ private fun RepositoryRow(
 @Composable
 private fun RestoredMirrorRow(
     restore: MirrorRestoreRecord,
+    busy: Boolean,
+    onPublish: () -> Unit,
     onDelete: () -> Unit,
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(restore.archiveName, style = MaterialTheme.typography.titleSmall)
             Text("${restore.refCount} refs • ${restore.referencedObjectsVerified} ref-tip objects verified")
-            Text("Stored privately on this device for a future push/export step.", style = MaterialTheme.typography.bodySmall)
-            OutlinedButton(onClick = onDelete) { Text("Delete restored copy") }
+            Text("Stored privately on this device.", style = MaterialTheme.typography.bodySmall)
+            Button(onClick = onPublish, enabled = !busy) { Text("Restore to new GitHub repository") }
+            OutlinedButton(onClick = onDelete, enabled = !busy) { Text("Delete restored copy") }
         }
     }
 }
