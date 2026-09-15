@@ -17,9 +17,9 @@ BackupCoordinator
    +-- BackupEngineFactory
    |     +-- SourceArchiveBackupEngine
    |     +-- GitMirrorBackupEngine
-   |            +-- GitLfsPointerScanner
-   |            +-- GitLfsDownloadService
+   |            +-- GitLfsPointerScanner / GitLfsDownloadService
    |            +-- GithubWikiBackupService
+   |            +-- GithubReleaseBackupService
    +-- StorageRouter
    |     +-- DocumentTreeStorageProvider
    |     +-- GoogleDriveStorageProvider
@@ -29,86 +29,78 @@ BackupCoordinator
 MirrorRestoreCoordinator
    |
 GitMirrorRestoreService
-   +-- GithubWikiBackupService (bundled wiki validation)
+   +-- GithubWikiBackupService (validation)
+   +-- GithubReleaseBackupService (manifest/assets validation)
    |
 GithubMirrorRestorePublisher
-   +-- GitLfsPointerScanner
    +-- GitLfsObjectStore / GitLfsUploadService
    +-- GithubRepositoryRestoreGateway
    +-- GitMirrorPushService
 ```
 
-### GitHub authentication and API
+## GitHub authentication and API
 
-`GithubAuthManager` uses GitHub OAuth Device Flow. The Android package carries only an OAuth client ID and does not embed a confidential client secret. Access and refresh material returned by GitHub is encrypted with an Android Keystore-backed AES-GCM key before being placed in SharedPreferences.
+`GithubAuthManager` uses GitHub OAuth Device Flow. The Android package carries only an OAuth client ID. Access/refresh material is encrypted with an Android Keystore-backed AES-GCM key before being placed in SharedPreferences.
 
-`GithubGateway` owns repository discovery, authenticated source-archive transfer, and lightweight repository feature lookup. Redirects from GitHub's API to archive storage are followed without forwarding the GitHub bearer token to the redirected host.
+`GithubGateway` owns repository discovery, authenticated source-archive transfer, and lightweight repository feature lookup. Redirects from GitHub's API to archive storage are followed without forwarding the bearer token off GitHub's API host.
 
-`GithubRepositoryRestoreGateway` either creates a new empty repository for the authenticated user or resolves a user-supplied `owner/repository` target. The latter supports recovery repositories created ahead of time, including organization-owned repositories the connected account can access.
+`GithubRepositoryRestoreGateway` creates a new empty recovery repository or resolves a user-supplied `owner/repository` target.
 
-### Backup engines, Git LFS, and wiki history
+## Git mirror backup completeness
 
-`BackupEngineFactory` selects an engine from `BackupType`, keeping orchestration independent of artifact format.
+`GitMirrorBackupEngine` uses JGit mirror-clone semantics to fetch all main-repository refs into a bare repository. Credentials are supplied through JGit transport and never written into repository URLs.
 
-`SourceArchiveBackupEngine` downloads the repository default branch as GitHub's TAR.GZ archive. This is a source snapshot only; it does not preserve arbitrary refs or full history.
+### Git LFS
 
-`GitMirrorBackupEngine` uses JGit mirror-clone semantics: all refs are fetched into a bare repository. GitHub credentials are supplied to JGit's transport layer and are not written into the clone URL.
+`GitLfsPointerScanner` walks reachable Git objects and finds unique standard LFS pointer OIDs/sizes. `GitLfsDownloadService` uses the Git LFS Batch API in groups of 100, downloads action URLs using only the returned headers, verifies size plus SHA-256, and stores verified objects in `lfs/objects/<2>/<2>/<oid>`. Cross-host redirects never inherit GitHub bearer credentials.
 
-After the Git clone, `GitLfsPointerScanner` walks reachable mirror objects once and identifies unique standard Git LFS pointer blobs by SHA-256 OID and declared size. `GitLfsDownloadService` requests download actions from the Git LFS Batch API in groups of 100, downloads raw object bytes using only the headers supplied for each action, verifies declared size plus SHA-256, and stores them under the standard bare-repository `lfs/objects/<2>/<2>/<oid>` layout.
+### Wiki history
 
-GitHub credentials are sent only to the GitHub Batch API endpoint. Object-action URLs receive only their returned headers; if a download redirects to another host, `Authorization` is removed before following the redirect. Any missing, unavailable, size-mismatched, or hash-mismatched referenced object fails the backup rather than allowing a silent incomplete success.
+If repository metadata reports the wiki feature enabled, `GithubWikiBackupService` attempts a mirror clone of `<owner>/<repo>.wiki.git`. An enabled but never-initialized wiki is treated as no wiki content. An initialized wiki is verified independently and stored at `github-backup/wiki.git/`.
 
-For wiki coverage, `GithubGateway.repositoryHasWiki` reads GitHub repository metadata. When the wiki feature is enabled, `GithubWikiBackupService` attempts a mirror clone of `<owner>/<repo>.wiki.git`. GitHub only exposes a cloneable wiki after an initial page exists; an enabled but never-initialized wiki is therefore treated as having no wiki content. An initialized wiki is verified as a bare repository and stored inside the main artifact at `github-backup/wiki.git/`.
+### Releases and release assets
 
-The main bare repository, bundled LFS store, and optional wiki mirror are packaged as one `.mirror.zip` artifact. Both backup engines compute SHA-256 as the canonical integrity checksum plus MD5 for providers, such as Drive, that expose an independent MD5 checksum.
+`GithubReleaseBackupService` pages through releases and then pages through assets for each release. It writes a versioned manifest at `github-backup/releases/manifest.json` containing release metadata and asset metadata. Releases with zero assets are still represented.
 
-`BackupArtifact` can carry non-fatal warnings. Current Git mirror backups no longer need an LFS warning because referenced standard LFS objects are bundled and the GitHub recovery path uploads them. A mirror that actually contains wiki history records a warning that wiki bytes/history are preserved but automatic GitHub wiki publication is not implemented yet.
+Asset bytes are downloaded from GitHub's release-asset endpoint using `Accept: application/octet-stream`. The app manually follows redirects, requires HTTPS, and only sends the GitHub bearer token while the request host is `api.github.com`. Every asset must match GitHub's reported size and a locally computed SHA-256. When the API supplies a `sha256:` asset digest, it is independently cross-checked.
 
-Room schema v3 persists warnings separately from `errorMessage`; older rows remain null rather than receiving inferred historical claims. Release assets, issues, and pull-request metadata remain separate completeness modules.
+The main bare repository, LFS store, optional wiki mirror, and optional release directory are packaged as one `.mirror.zip`. The final artifact receives SHA-256 plus MD5 for destination-level verification.
 
-### Mirror restore and GitHub recovery
+`BackupArtifact` can carry non-fatal completeness warnings. Git/LFS recovery is complete for the supported empty-target flow, while mirrors containing wiki or release data currently warn that those modules are preserved/verified but not automatically republished to GitHub.
 
-`GitMirrorRestoreService` rejects ZIP entries whose canonical path escapes the restore root, extracts the main bare repository including any bundled LFS object store, opens it with JGit, and verifies every advertised main-repository ref tip exists in the Git object database.
+## Local mirror restore
 
-If `github-backup/wiki.git/` exists, the same restore operation asks `GithubWikiBackupService` to open it independently as a bare repository and verify every advertised wiki ref tip exists in its object database. A damaged bundled wiki therefore fails local restore rather than being silently ignored.
+`GitMirrorRestoreService` rejects ZIP entries escaping the restore root and then validates every bundled module before the restored copy is retained:
 
-`MirrorRestoreCoordinator` imports a user-selected archive into private app storage, keeps lightweight metadata beside the restored repository, reloads valid restore records across app restarts, and exposes a validated repository directory only for a known restore ID.
+- main bare Git repository: advertised ref tips must exist in the object database;
+- optional wiki mirror: opened independently as a bare repository and its ref tips verified;
+- optional releases: supported manifest version, safe asset paths, file existence, size, and SHA-256 all verified.
 
-`GithubMirrorRestorePublisher` can publish the main repository to either a newly created repository or an existing repository selected by full name. LFS scanning/upload and Git transport execute on `Dispatchers.IO` rather than the UI thread.
+`MirrorRestoreCoordinator` keeps validated restores in private app storage with lightweight metadata and reloads valid records across app restarts.
 
-Recovery is deliberately LFS-first. `GitLfsPointerScanner` rescans reachable pointers from the restored main mirror. `GitLfsObjectStore` requires every referenced bundled object to exist and pass its size/SHA-256 check. `GitLfsUploadService` requests `upload` plans from the target repository's LFS Batch API in groups of 100. An object with no returned actions is treated as already present; otherwise the raw object is PUT using the returned headers and an optional `verify` action is POSTed with OID and size.
+## GitHub recovery
 
-Only after all referenced LFS objects are covered does `GitMirrorPushService` perform its authenticated remote-ref advertisement check. If the target advertises any Git refs, recovery is refused. Writable main-repository refs are then pushed without force, and every attempted remote update must finish as `OK` or `UP_TO_DATE`.
+`GithubMirrorRestorePublisher` can publish the main repository to either a newly created repository or an existing repository selected by full name. The current recovery path is deliberately restricted to an empty target.
 
-This ordering prevents a recovered repository from advertising refs that point at known-missing LFS bytes. It also means older mirror artifacts that contain LFS pointer blobs but lack the corresponding local LFS object files fail recovery before Git refs are published.
+Recovery is LFS-first. `GitLfsObjectStore` verifies every referenced bundled object locally, `GitLfsUploadService` uploads missing objects and performs optional server verify actions, and only then does `GitMirrorPushService` perform its authenticated empty-remote preflight and non-forced ref push.
 
-The empty-target preflight and non-forced refspecs intentionally protect live repositories. Destructive non-empty recovery would require explicit confirmation, remote-ref deletion semantics, and repository-rule handling.
+GitHub-owned `refs/pull/*` refs are skipped and reported rather than treated as writable Git state.
 
-GitHub owns `refs/pull/*` as a read-only namespace. Those refs may be present in a mirror clone but cannot be pushed back; they are skipped explicitly and reported separately. Restoring pull-request metadata remains a future metadata module rather than pretending those refs are writable Git state.
+Wiki publication is not automated because GitHub does not expose a documented wiki-page initialization API. Release publication is also deliberately deferred: releases depend on Git refs already existing, and a publication failure after the main push would leave a non-empty partial target that the current safe retry guard intentionally refuses. A target-bound resumable recovery transaction is required before release recreation can be enabled safely.
 
-Bundled wiki history is currently a preservation/local-restore module only. GitHub documents cloning a wiki after an initial page exists but does not expose a documented wiki-page REST endpoint for safe target initialization. The app therefore does not try to auto-publish wiki refs or overwrite an existing wiki through undocumented behavior.
+Arbitrary destructive recovery into a non-empty repository remains unavailable.
 
-### Storage routing
+## Storage routing and retention
 
-`StorageProvider` stays destination-agnostic. `StorageRouter` delegates new uploads to the persisted `StorageDestination`, while verification and deletion route according to the provider recorded on `RemoteBackup`.
+`StorageRouter` sends new artifacts to the configured destination and uses provider metadata recorded with each completed backup for later verification/deletion. `DocumentTreeStorageProvider` reopens saved files and recomputes size/SHA-256/MD5. `GoogleDriveStorageProvider` uses resumable upload and remote checksum metadata.
 
-`DocumentTreeStorageProvider` streams artifacts through Android SAF and then reopens the saved document to recompute size, SHA-256, and MD5. `GoogleDriveStorageProvider` uses resumable upload and verifies remote size, Drive MD5, and stored SHA-256 metadata.
+Room schema v2 added provider-aware remote identity and deletion timestamps. Schema v3 added nullable completeness warnings. Historical rows are never assigned fabricated metadata.
 
-### Provider-aware history and retention
+`BackupRetentionManager` supports keep-all, 3, 5, or 10 artifacts per repository and format. Deletion failures are best-effort and never retroactively turn a newly verified backup into `FAILED`.
 
-Room schema v2 adds `storageProvider`, remote name/size/MD5, and `remoteDeletedAtEpochMs` to each backup row. The v1-to-v2 migration leaves these fields null for historical rows rather than guessing their origin. Schema v3 adds the nullable completeness-warning field described above.
+## Background execution
 
-A newly completed backup stores the full `RemoteBackup` identity before retention runs. `BackupRetentionManager` is opt-in and supports keep-all, 3, 5, or 10 artifacts per repository and backup format. It reconstructs each expired `RemoteBackup` from immutable history and calls `StorageRouter.delete`, so an artifact is deleted through the provider that created it even after the active destination changes.
-
-Retention failures are best-effort and logged. They never retroactively fail the newly completed backup. After successful deletion, the history row remains and receives `remoteDeletedAtEpochMs` for auditability; warning metadata is retained.
-
-### Background execution
-
-Manual backups require connected networking plus battery/storage constraints. Automatic backup settings persist disabled/daily/weekly cadence plus the selected backup format.
-
-`ScheduledBackupWorker` is only a controller. At execution time it queries the current repository selections and fans out one `RepositoryBackupWorker` per repository. Scheduled work requires unmetered connectivity, battery-not-low, and storage-not-low constraints. This avoids turning a large GitHub account into one monolithic periodic job.
-
-Very large transfers may eventually need Android's user-initiated/foreground transfer path rather than relying on a single long WorkManager execution window.
+Manual backups require connected networking plus battery/storage constraints. Scheduled backups use WorkManager daily/weekly controllers, query currently selected repositories at execution time, and fan out one repository worker per backup. Scheduled jobs require unmetered networking, battery-not-low, and storage-not-low constraints.
 
 ## Backup state machine
 
@@ -122,20 +114,18 @@ QUEUED -> DOWNLOADING -> CHECKSUM -> UPLOADING -> VERIFYING -> COMPLETED
 Git mirror:
 
 ```text
-QUEUED -> DOWNLOADING (Git + LFS + optional wiki) -> PACKAGING -> CHECKSUM -> UPLOADING -> VERIFYING -> COMPLETED
-                 \-----------------------------------------------------------------------------------> FAILED
+QUEUED -> DOWNLOADING (Git + LFS + wiki + releases) -> PACKAGING -> CHECKSUM -> UPLOADING -> VERIFYING -> COMPLETED
+                 \-----------------------------------------------------------------------------------------> FAILED
 ```
 
-After `COMPLETED`, an optional retention pass may delete older verified remote artifacts without changing their historical completion state.
-
-Temporary archives and mirror working directories live below the app cache directory and are removed after success or failure.
+After `COMPLETED`, retention may prune older verified remote artifacts without changing historical completion state.
 
 ## Test coverage
 
-Mirror restore tests create a real local repository and a real wiki repository, make bare mirrors of both, package them together, restore them, and assert branch/tag refs plus referenced objects survive independently. A separate regression test creates a malicious `../` ZIP entry and verifies it cannot write outside the restore directory.
-
-`GitMirrorPushServiceTest` verifies writable branches/tags are pushed into an empty bare target while a synthetic `refs/pull/*` ref is skipped. A second regression creates a target that already has a commit and verifies recovery is refused before the mirror can add its branch or tag refs.
-
-`GitLfsPointerScannerTest` creates a real repository containing an LFS pointer, mirrors it, and verifies the scanner discovers the expected unique OID and size. `GitLfsDownloadServiceTest` validates Batch API download parsing, per-object errors, and size/SHA-256 integrity verification. `GitLfsUploadServiceTest` validates upload/verify action parsing, already-present objects, per-object errors, and the hard failure for missing bundled objects.
-
-Retention tests verify keep-all selects nothing for deletion and keep-last-N selects only older artifacts. Room/KSP compilation validates the nullable v3 warning column and DAO completion query against the entity schema in CI.
+- Mirror restore tests create and restore real main and wiki Git repositories and also include bundled release data.
+- ZIP path traversal is rejected.
+- LFS scanner tests discover real pointer blobs; download/upload tests cover Batch API parsing, errors, already-present objects, and integrity checks.
+- `GithubReleaseBackupServiceTest` verifies valid assets, corrupt-asset rejection, and manifest path-traversal rejection.
+- `GitMirrorPushServiceTest` validates empty-target push behavior and refusal of non-empty targets.
+- Retention tests validate keep-all and keep-last-N selection.
+- Room/KSP compilation validates database schema/query consistency in CI.
