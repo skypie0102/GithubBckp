@@ -20,6 +20,13 @@ data class MirrorPushResult(
 
 @Singleton
 class GitMirrorPushService @Inject constructor() {
+    suspend fun requireRemoteEmpty(
+        remoteUri: String,
+        credentialsProvider: CredentialsProvider? = null,
+    ) = withContext(Dispatchers.IO) {
+        requireEmpty(listRemoteRefs(remoteUri, credentialsProvider))
+    }
+
     suspend fun push(
         repositoryDirectory: File,
         remoteUri: String,
@@ -92,10 +99,7 @@ class GitMirrorPushService @Inject constructor() {
                     skippedReadOnlyRefs = skipped,
                 )
             }
-            val preview = advertised.map { it.first }.distinct().sorted().take(5).joinToString()
-            throw IOException(
-                "Restore target is not empty; found ${advertised.size} advertised Git ref(s): $preview",
-            )
+            requireEmpty(advertised)
         }
 
         if (pushRefs.isEmpty()) {
@@ -126,6 +130,14 @@ class GitMirrorPushService @Inject constructor() {
         return MirrorPushResult(
             pushedRefCount = pushRefs.size,
             skippedReadOnlyRefs = skipped,
+        )
+    }
+
+    private fun requireEmpty(advertised: List<Pair<String, String>>) {
+        if (advertised.isEmpty()) return
+        val preview = advertised.map { it.first }.distinct().sorted().take(5).joinToString()
+        throw IOException(
+            "Restore target is not empty; found ${advertised.size} advertised Git ref(s): $preview",
         )
     }
 
