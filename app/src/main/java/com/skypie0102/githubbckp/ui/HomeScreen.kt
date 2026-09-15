@@ -231,7 +231,7 @@ fun HomeScreen(viewModel: HomeViewModel) {
             item {
                 Text(
                     text = if (state.backupType == BackupType.GIT_MIRROR) {
-                        "Git mirror preserves Git refs and history. Git LFS objects are not included yet."
+                        "Git mirror preserves Git refs/history and bundles every detected Git LFS object after size + SHA-256 verification. GitHub restore does not upload bundled LFS objects yet."
                     } else {
                         "Source snapshot is smaller, but contains only the selected branch snapshot and is not a full Git backup."
                     },
