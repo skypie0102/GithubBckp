@@ -33,6 +33,7 @@ data class ScheduledBackupRunStatus(
     val outcome: ScheduledBackupRunOutcome,
     val repositoryCount: Int = 0,
     val blockReason: ScheduledBackupBlockReason? = null,
+    val scheduledRunId: String? = null,
 )
 
 @Singleton
@@ -74,6 +75,9 @@ class BackupSchedulePreferences @Inject constructor(
             blockReason = enumValueOrNull<ScheduledBackupBlockReason>(
                 preferences.getString(KEY_LAST_RUN_BLOCK_REASON, null),
             ),
+            scheduledRunId = preferences.getString(KEY_LAST_RUN_ID, null)
+                ?.trim()
+                ?.takeIf { it.isNotEmpty() },
         )
     }
 
@@ -87,6 +91,11 @@ class BackupSchedulePreferences @Inject constructor(
                     remove(KEY_LAST_RUN_BLOCK_REASON)
                 } else {
                     putString(KEY_LAST_RUN_BLOCK_REASON, status.blockReason.name)
+                }
+                if (status.scheduledRunId.isNullOrBlank()) {
+                    remove(KEY_LAST_RUN_ID)
+                } else {
+                    putString(KEY_LAST_RUN_ID, status.scheduledRunId)
                 }
             }
             .apply()
@@ -116,11 +125,13 @@ class BackupSchedulePreferences @Inject constructor(
         const val KEY_LAST_RUN_OUTCOME = "last-run-outcome"
         const val KEY_LAST_RUN_REPOSITORY_COUNT = "last-run-repository-count"
         const val KEY_LAST_RUN_BLOCK_REASON = "last-run-block-reason"
+        const val KEY_LAST_RUN_ID = "last-run-id"
         val RUN_STATUS_KEYS = setOf(
             KEY_LAST_RUN_AT,
             KEY_LAST_RUN_OUTCOME,
             KEY_LAST_RUN_REPOSITORY_COUNT,
             KEY_LAST_RUN_BLOCK_REASON,
+            KEY_LAST_RUN_ID,
         )
     }
 }
