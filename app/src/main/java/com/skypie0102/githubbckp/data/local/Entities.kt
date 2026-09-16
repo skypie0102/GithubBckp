@@ -5,6 +5,7 @@ import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
 import com.skypie0102.githubbckp.backup.BackupOrigin
+import com.skypie0102.githubbckp.backup.BackupReverificationStatus
 import com.skypie0102.githubbckp.backup.BackupStatus
 import com.skypie0102.githubbckp.backup.BackupType
 import com.skypie0102.githubbckp.storage.StorageDestination
@@ -47,4 +48,7 @@ data class BackupEntity(
     val repositoryPrivateAtBackup: Boolean? = null,
     val origin: BackupOrigin? = null,
     val scheduledRunId: String? = null,
+    val lastReverifiedAtEpochMs: Long? = null,
+    val lastReverificationStatus: BackupReverificationStatus? = null,
+    val lastReverificationMessage: String? = null,
 )
