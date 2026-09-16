@@ -144,6 +144,21 @@ class HomeViewModel @Inject constructor(
         viewModelScope.launch { backupDao.setRepositorySelected(repositoryId, selected) }
     }
 
+    fun setAllRepositoriesSelected(selected: Boolean) {
+        viewModelScope.launch {
+            backupDao.setAvailableRepositoriesSelected(selected)
+            _state.update {
+                it.copy(
+                    message = if (selected) {
+                        "Selected all available repositories"
+                    } else {
+                        "Cleared repository selection"
+                    },
+                )
+            }
+        }
+    }
+
     fun setBackupType(type: BackupType) {
         _state.update { it.copy(backupType = type) }
     }
