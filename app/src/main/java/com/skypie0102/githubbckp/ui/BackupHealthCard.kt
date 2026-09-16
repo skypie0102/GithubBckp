@@ -53,8 +53,8 @@ fun BackupHealthCard(
 
 private fun BackupHealthSummary.headlineText(): String = when {
     selectedCount == 0 -> "No repositories are currently selected for backup."
-    attentionCount == 0 -> "$protectedCount of $selectedCount selected repositories have a current verified backup."
-    else -> "$protectedCount of $selectedCount selected repositories are protected; $attentionCount need attention."
+    attentionCount == 0 -> "$verifiedCount of $selectedCount selected repositories have a current verified backup."
+    else -> "$verifiedCount of $selectedCount selected repositories have a current verified backup; $attentionCount need attention."
 }
 
 private fun RepositoryBackupHealth.detailText(): String = when (state) {
