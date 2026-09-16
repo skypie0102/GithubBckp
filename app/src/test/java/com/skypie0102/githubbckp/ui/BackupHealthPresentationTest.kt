@@ -20,6 +20,7 @@ class BackupHealthPresentationTest {
         )
 
         assertEquals(1, summary.selectedCount)
+        assertEquals(0, summary.verifiedCount)
         assertEquals(1, summary.attentionCount)
         assertEquals(RepositoryBackupHealthState.NEVER_BACKED_UP, summary.repositories.single().state)
     }
@@ -51,6 +52,7 @@ class BackupHealthPresentationTest {
         )
 
         assertEquals(RepositoryBackupHealthState.PROTECTED, summary.repositories.single().state)
+        assertEquals(1, summary.verifiedCount)
         assertEquals(1, summary.protectedCount)
         assertEquals(0, summary.attentionCount)
     }
@@ -79,6 +81,7 @@ class BackupHealthPresentationTest {
 
         val health = summary.repositories.single()
         assertEquals(RepositoryBackupHealthState.FAILED, health.state)
+        assertEquals(1, summary.verifiedCount)
         assertEquals("network unavailable", health.errorMessage)
     }
 
@@ -117,6 +120,8 @@ class BackupHealthPresentationTest {
         )
 
         assertEquals(RepositoryBackupHealthState.STALE, summary.repositories.single().state)
+        assertEquals(1, summary.verifiedCount)
+        assertEquals(1, summary.attentionCount)
     }
 
     @Test
@@ -150,7 +155,8 @@ class BackupHealthPresentationTest {
         )
 
         assertEquals(RepositoryBackupHealthState.WARNING, summary.repositories.single().state)
-        assertEquals(1, summary.protectedCount)
+        assertEquals(1, summary.verifiedCount)
+        assertEquals(0, summary.protectedCount)
         assertEquals(1, summary.attentionCount)
     }
 
@@ -167,6 +173,7 @@ class BackupHealthPresentationTest {
             nowEpochMs = NOW,
         )
 
+        assertEquals(0, summary.verifiedCount)
         assertEquals(RepositoryBackupHealthState.NEVER_BACKED_UP, summary.repositories.single().state)
     }
 
