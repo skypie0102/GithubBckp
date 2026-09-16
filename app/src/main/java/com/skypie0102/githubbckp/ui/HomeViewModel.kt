@@ -58,6 +58,7 @@ data class HomeUiState(
     val retentionKeepCount: Int = RetentionPreferences.KEEP_ALL,
     val githubDeviceSession: GithubDeviceSession? = null,
     val repositories: List<RepositoryEntity> = emptyList(),
+    val backupHealth: BackupHealthSummary = BackupHealthSummary(),
     val recentBackups: List<BackupEntity> = emptyList(),
     val restoredMirrors: List<MirrorRestoreRecord> = emptyList(),
     val githubPublishRestoreId: String? = null,
@@ -83,6 +84,7 @@ class HomeViewModel @Inject constructor(
     private val githubRestorePublisher: GithubMirrorRestorePublisher,
 ) : ViewModel() {
     private val initialSchedule = backupScheduler.scheduleSettings()
+    private var backupHealthHistory: List<BackupEntity> = emptyList()
     private val _state = MutableStateFlow(
         HomeUiState(
             githubConfigured = githubAuthManager.isConfigured(),
@@ -105,7 +107,34 @@ class HomeViewModel @Inject constructor(
         backupScheduler.reconcileSchedule()
         viewModelScope.launch {
             backupDao.observeRepositories().collect { repositories ->
-                _state.update { it.copy(repositories = repositories) }
+                _state.update { current ->
+                    current.copy(
+                        repositories = repositories,
+                        backupHealth = summarizeBackupHealth(
+                            repositories = repositories,
+                            backups = backupHealthHistory,
+                            scheduleEnabled = current.scheduleEnabled,
+                            cadence = current.scheduleCadence,
+                            nowEpochMs = System.currentTimeMillis(),
+                        ),
+                    )
+                }
+            }
+        }
+        viewModelScope.launch {
+            backupDao.observeBackupHealthHistory().collect { backups ->
+                backupHealthHistory = backups
+                _state.update { current ->
+                    current.copy(
+                        backupHealth = summarizeBackupHealth(
+                            repositories = current.repositories,
+                            backups = backups,
+                            scheduleEnabled = current.scheduleEnabled,
+                            cadence = current.scheduleCadence,
+                            nowEpochMs = System.currentTimeMillis(),
+                        ),
+                    )
+                }
             }
         }
         viewModelScope.launch {
@@ -258,11 +287,18 @@ class HomeViewModel @Inject constructor(
 
     private fun saveSchedule(settings: BackupScheduleSettings, message: String) {
         backupScheduler.updateSchedule(settings)
-        _state.update {
-            it.copy(
+        _state.update { current ->
+            current.copy(
                 scheduleEnabled = settings.enabled,
                 scheduleCadence = settings.cadence,
                 scheduledBackupType = settings.backupType,
+                backupHealth = summarizeBackupHealth(
+                    repositories = current.repositories,
+                    backups = backupHealthHistory,
+                    scheduleEnabled = settings.enabled,
+                    cadence = settings.cadence,
+                    nowEpochMs = System.currentTimeMillis(),
+                ),
                 message = message,
             )
         }
