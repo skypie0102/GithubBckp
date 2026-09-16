@@ -13,6 +13,7 @@ data class BackupAuditSnapshot(
     val repositoryPrivate: Boolean?,
     val repositoryMetadataSource: String,
     val backupType: String,
+    val origin: String?,
     val status: String,
     val startedAtEpochMs: Long,
     val completedAtEpochMs: Long?,
@@ -60,6 +61,7 @@ fun BackupEntity.toBackupAuditSnapshot(repository: RepositoryEntity?): BackupAud
         },
         repositoryMetadataSource = metadataSource,
         backupType = type.name,
+        origin = origin?.name,
         status = status.name,
         startedAtEpochMs = startedAtEpochMs,
         completedAtEpochMs = completedAtEpochMs,
@@ -119,6 +121,7 @@ fun BackupAuditSnapshot.toBackupAuditJson(
     val backup = JSONObject()
         .put("id", backupId)
         .put("type", backupType)
+        .putNullable("origin", origin)
         .put("status", status)
         .put("startedAtEpochMs", startedAtEpochMs)
         .putNullable("completedAtEpochMs", completedAtEpochMs)
@@ -137,9 +140,14 @@ fun BackupAuditSnapshot.toBackupAuditJson(
             "This pre-v4 backup has no immutable repository metadata snapshot and current repository display metadata is unavailable.",
         )
     }
+    if (origin == null) {
+        limitations.put(
+            "This backup predates origin tracking or was queued before origin metadata was available; manual versus scheduled origin is unknown.",
+        )
+    }
 
     return JSONObject()
-        .put("formatVersion", 2)
+        .put("formatVersion", 3)
         .put("reportType", "github-backup-artifact-audit")
         .put("generatedAtEpochMs", generatedAtEpochMs)
         .put("repository", repository)
