@@ -26,11 +26,16 @@ data class GithubDeviceSession(
     val intervalSeconds: Long,
 )
 
+internal const val GITHUB_WORKFLOW_SCOPE = "workflow"
+
 internal fun parseGithubOauthScopes(value: String): Set<String> = value
     .split(Regex("[\\s,]+"))
     .map(String::trim)
     .filter(String::isNotBlank)
     .toSet()
+
+internal fun githubScopesContainWorkflow(value: String?): Boolean =
+    value?.let(::parseGithubOauthScopes)?.contains(GITHUB_WORKFLOW_SCOPE) == true
 
 @Singleton
 class GithubAuthManager @Inject constructor(
@@ -40,10 +45,8 @@ class GithubAuthManager @Inject constructor(
 
     fun isAuthenticated(): Boolean = secureStore.get(KEY_ACCESS_TOKEN) != null
 
-    fun hasWorkflowScopeCached(): Boolean = secureStore.get(KEY_OAUTH_SCOPES)
-        ?.let(::parseGithubOauthScopes)
-        ?.contains(WORKFLOW_SCOPE)
-        ?: false
+    fun hasWorkflowScopeCached(): Boolean =
+        githubScopesContainWorkflow(secureStore.get(KEY_OAUTH_SCOPES))
 
     suspend fun startDeviceFlow(): GithubDeviceSession = withContext(Dispatchers.IO) {
         requireConfigured()
@@ -117,7 +120,7 @@ class GithubAuthManager @Inject constructor(
         } else {
             fetchTokenScopes(token).also(::persistScopes)
         }
-        if (WORKFLOW_SCOPE !in scopes) {
+        if (GITHUB_WORKFLOW_SCOPE !in scopes) {
             throw GithubWorkflowPermissionRequiredException()
         }
         token
@@ -244,7 +247,6 @@ class GithubAuthManager @Inject constructor(
         const val GITHUB_USER_URL = "https://api.github.com/user"
         const val GITHUB_API_VERSION = "2026-03-10"
         const val DEVICE_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:device_code"
-        const val WORKFLOW_SCOPE = "workflow"
         const val KEY_ACCESS_TOKEN = "github.access-token"
         const val KEY_ACCESS_EXPIRES_AT = "github.access-token-expires-at"
         const val KEY_REFRESH_TOKEN = "github.refresh-token"
