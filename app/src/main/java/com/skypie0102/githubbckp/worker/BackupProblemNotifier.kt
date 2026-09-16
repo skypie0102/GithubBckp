@@ -77,8 +77,7 @@ class BackupProblemNotifier @Inject constructor(
     fun notifyOverdueBackups(overdue: List<OverdueBackupRepository>) {
         val currentIds = overdue.mapTo(linkedSetOf()) { it.repositoryId.toString() }
         if (currentIds.isEmpty()) {
-            preferences.edit().remove(KEY_OVERDUE_REPOSITORIES).apply()
-            NotificationManagerCompat.from(context).cancel(OVERDUE_NOTIFICATION_ID)
+            clearOverdueBackupState()
             return
         }
         if (!notificationsEnabled()) return
@@ -115,6 +114,11 @@ class BackupProblemNotifier @Inject constructor(
                 .setContentIntent(mainActivityPendingIntent(OVERDUE_NOTIFICATION_ID))
                 .build(),
         )
+    }
+
+    fun clearOverdueBackupState() {
+        preferences.edit().remove(KEY_OVERDUE_REPOSITORIES).apply()
+        NotificationManagerCompat.from(context).cancel(OVERDUE_NOTIFICATION_ID)
     }
 
     private fun notificationsEnabled(): Boolean {
