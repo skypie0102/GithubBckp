@@ -124,6 +124,30 @@ interface BackupDao {
 
     @Query(
         """
+        SELECT * FROM backups AS backup
+        WHERE backup.id = (
+            SELECT attempt.id
+            FROM backups AS attempt
+            WHERE attempt.repositoryId = backup.repositoryId
+            ORDER BY attempt.startedAtEpochMs DESC, attempt.id DESC
+            LIMIT 1
+        )
+        OR backup.id = (
+            SELECT verified.id
+            FROM backups AS verified
+            WHERE verified.repositoryId = backup.repositoryId
+              AND verified.status = 'COMPLETED'
+              AND verified.remoteDeletedAtEpochMs IS NULL
+            ORDER BY verified.completedAtEpochMs DESC, verified.id DESC
+            LIMIT 1
+        )
+        ORDER BY backup.repositoryId, backup.startedAtEpochMs DESC, backup.id DESC
+        """,
+    )
+    fun observeBackupHealthHistory(): Flow<List<BackupEntity>>
+
+    @Query(
+        """
         SELECT * FROM backups
         WHERE scheduledRunId = :scheduledRunId
         ORDER BY startedAtEpochMs ASC, id ASC
