@@ -29,7 +29,7 @@ class RepositoryBackupWorker(
             BackupWorkerDependencies::class.java,
         )
         val repository = dependencies.backupDao().getRepository(repositoryId)
-            ?: return Result.failure()
+            ?: return Result.success()
         val success = dependencies.backupCoordinator().run(
             BackupRequest(
                 repository = repository.toRepositoryRef(),
