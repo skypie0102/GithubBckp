@@ -18,8 +18,8 @@ import org.eclipse.jgit.transport.UsernamePasswordCredentialsProvider
 /**
  * Creates the on-device equivalent of `git clone --mirror`, downloads every
  * standard Git LFS object referenced by reachable mirror refs, optionally
- * mirrors an initialized GitHub wiki, bundles release metadata/assets, then
- * packages everything into one portable artifact.
+ * mirrors an initialized GitHub wiki, bundles release data and discussion
+ * metadata, then packages everything into one portable artifact.
  */
 @Singleton
 class GitMirrorBackupEngine @Inject constructor(
@@ -29,6 +29,7 @@ class GitMirrorBackupEngine @Inject constructor(
     private val lfsDownloadService: GitLfsDownloadService,
     private val wikiBackupService: GithubWikiBackupService,
     private val releaseBackupService: GithubReleaseBackupService,
+    private val discussionBackupService: GithubDiscussionBackupService,
 ) : BackupEngine {
     override suspend fun createBackup(
         request: BackupRequest,
@@ -83,6 +84,12 @@ class GitMirrorBackupEngine @Inject constructor(
             destination = File(mirrorDirectory, GithubReleaseBackupService.BUNDLED_RELEASES_DIRECTORY),
         )
 
+        val discussions = discussionBackupService.backup(
+            repository = request.repository,
+            accessToken = token,
+            destination = File(mirrorDirectory, GithubDiscussionBackupService.BUNDLED_DISCUSSIONS_DIRECTORY),
+        )
+
         onProgress(BackupStatus.PACKAGING)
         zipBareRepository(mirrorDirectory, archive)
         mirrorDirectory.deleteRecursively()
@@ -105,6 +112,11 @@ class GitMirrorBackupEngine @Inject constructor(
                 if (releases != null) {
                     add(
                         "Release metadata and ${releases.assetCount} release asset${if (releases.assetCount == 1) "" else "s"} are bundled, verified, and restorable. GitHub's original latest-release selection and immutable release state are not automatically reproduced.",
+                    )
+                }
+                if (discussions != null) {
+                    add(
+                        "Issues, pull requests, comments, review comments, and reviews are bundled and locally verified. Automatic GitHub discussion publication, timeline events, and referenced attachment bytes are not implemented yet.",
                     )
                 }
             },
