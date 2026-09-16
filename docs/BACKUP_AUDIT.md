@@ -1,20 +1,21 @@
 # Completed backup audit reports
 
-GithubBckp can export a JSON audit report for any completed backup in Recent backups. The report is intentionally a history/export surface: creating it does **not** download or re-verify the remote artifact.
+GithubBckp can export a JSON audit report for any completed backup in Recent backups. Exporting the JSON is a history/export operation and does **not** itself access the remote artifact. Separately, eligible completed backups expose **Re-verify stored backup**, which performs a fresh read-only remote verification and records the latest result in the same history row.
 
 ## Format
 
-The current report format is version `4` and uses:
+The current report format is version `5` and uses:
 
 ```json
 {
-  "formatVersion": 4,
+  "formatVersion": 5,
   "reportType": "github-backup-artifact-audit",
   "generatedAtEpochMs": 0,
   "repository": {},
   "backup": {},
   "storage": {},
   "integrityVerification": {},
+  "latestReverification": {},
   "limitations": []
 }
 ```
@@ -49,7 +50,7 @@ Rows migrated from schema v1-v6, and scheduled one-time work already pending bef
 
 Scheduled repository work continues to use WorkManager unique-work `KEEP` semantics. If a controller run requests a repository/backup-format pair while older unique work for that same pair is still active, WorkManager keeps the older work and the newer controller run does not create a second child backup row. A run ID therefore correlates child work that actually executes; it is not a claim that every requested fan-out entry produced a distinct backup attempt.
 
-The app currently exposes the export action only for `COMPLETED` backups.
+The app exposes audit export only for `COMPLETED` backups.
 
 ### Storage and retention
 
@@ -59,13 +60,36 @@ The storage section records the provider, remote file identity/name/size, provid
 - `DELETED_BY_RETENTION` — the app later recorded successful provider-aware retention deletion;
 - `UNKNOWN` — history does not contain enough remote identity data.
 
-A pruned backup remains auditable even though its remote artifact no longer exists.
+A pruned backup remains auditable even though its remote artifact no longer exists. Pruned rows do not expose re-verification.
 
-### Integrity verification
+### Original integrity verification
 
-`artifactSha256` is the SHA-256 recorded for the locally produced artifact before upload. `providerMd5` is the persisted destination checksum when the provider exposes/uses MD5 verification.
+`integrityVerification.artifactSha256` is the SHA-256 recorded for the locally produced artifact before upload. `providerMd5` is the persisted destination checksum when the provider exposes/uses MD5 verification.
 
-`PERSISTED_VERIFIED_HISTORY` means the completed backup row contains its artifact SHA-256. It is deliberately **not** a claim that the artifact was re-downloaded when this JSON file was exported.
+`PERSISTED_VERIFIED_HISTORY` means the completed backup row contains the integrity result captured when the backup was created. It is deliberately **not** a claim that the artifact was freshly read when the JSON file was exported.
+
+### Latest on-demand re-verification
+
+Database schema v9 adds nullable `lastReverifiedAtEpochMs`, `lastReverificationStatus`, and `lastReverificationMessage` fields to each backup row. Existing rows migrate with all three fields null.
+
+For an eligible completed, non-pruned backup, **Re-verify stored backup**:
+
+1. resolves the provider that originally stored the artifact rather than using the currently selected destination;
+2. downloads/reads the complete remote artifact into a temporary app-cache file without modifying the remote object;
+3. recomputes byte size, SHA-256, and MD5 locally and compares all three with the persisted verified metadata;
+4. for Git-mirror backups, runs the same safe local mirror/module validator used by restore, including Git ref-tip object checks plus applicable LFS, wiki, release, and discussion validation;
+5. deletes the temporary local copy;
+6. records `VERIFIED` or `FAILED`, a timestamp, and a bounded human-readable detail string in the backup-history row.
+
+A failed re-verification does **not** rewrite the original backup status from `COMPLETED` to `FAILED`. The original completion record answers whether creation/upload verification succeeded at that time; the re-verification fields answer whether the stored artifact could be freshly read and validated later.
+
+`latestReverification.state` is `NOT_RUN` when no result exists and `RECORDED` once either a success or failure has been persisted.
+
+## Provider behavior
+
+Document-tree re-verification opens the persisted document URI and streams the full object to app cache. Google Drive re-verification downloads the file bytes through the Drive API using the persisted file ID. Both paths then use the same local digest comparison; Drive metadata alone is not treated as sufficient for this operation.
+
+If authorization or persisted document access is no longer valid, re-verification records a failed result and leaves the remote object untouched.
 
 ## Export behavior
 
@@ -73,10 +97,10 @@ The UI uses Android's system **Create Document** flow with `application/json`. T
 
 The suggested filename uses the backup-time repository name for schema-v4+ rows. Legacy rows use the current known repository name when available, otherwise the immutable numeric repository ID, plus the backup history ID.
 
+Exporting the report after a re-verification includes the latest recorded result, but export itself never causes another network/storage read.
+
 ## Relation to the personal reliability roadmap
 
-Backup-health status and audit export use the persisted history created when a backup completed; neither operation re-reads the remote bytes. Roadmap issue #35 adds an explicit **on-demand re-verification** operation for the different question: "does this older stored artifact still exist and still match its recorded integrity data today?"
-
-That future operation will remain read-only with respect to the remote backup and will record/display a fresh verification result rather than changing the meaning of the historical completion record.
+Roadmap issue #35 implements the fresh-proof path that was intentionally separate from backup-health classification and audit export. It remains read-only with respect to the stored artifact and reuses the existing restore validator for Git mirrors instead of maintaining a second mirror-validation implementation.
 
 See [`ROADMAP.md`](ROADMAP.md).
