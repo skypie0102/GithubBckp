@@ -4,7 +4,9 @@ import com.skypie0102.githubbckp.backup.BackupArtifact
 import com.skypie0102.githubbckp.storage.RemoteBackup
 import com.skypie0102.githubbckp.storage.StorageDestination
 import com.skypie0102.githubbckp.storage.StorageProvider
+import java.io.File
 import java.io.FileInputStream
+import java.io.FileOutputStream
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
@@ -65,6 +67,26 @@ class GoogleDriveStorageProvider @Inject constructor(
             sha256 == remoteBackup.checksumSha256 &&
                 md5.equals(remoteBackup.checksumMd5, ignoreCase = true) &&
                 size == remoteBackup.sizeBytes
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    override suspend fun download(remoteBackup: RemoteBackup, destination: File) = withContext(Dispatchers.IO) {
+        val token = authManager.requireAccessToken()
+        val connection = open("$FILES_URL/${path(remoteBackup.id)}?alt=media", "GET", token)
+        try {
+            val code = connection.responseCode
+            if (code !in 200..299) {
+                val error = connection.errorStream?.bufferedReader()?.use { it.readText() }.orEmpty()
+                throw IOException("Drive download HTTP $code: ${error.take(300)}")
+            }
+            destination.parentFile?.mkdirs()
+            connection.inputStream.buffered().use { source ->
+                FileOutputStream(destination).buffered().use { output ->
+                    source.copyTo(output, bufferSize = BUFFER_SIZE)
+                }
+            }
         } finally {
             connection.disconnect()
         }
