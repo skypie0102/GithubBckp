@@ -11,6 +11,7 @@ data class BackupAuditSnapshot(
     val repositoryFullName: String?,
     val repositoryDefaultBranch: String?,
     val repositoryPrivate: Boolean?,
+    val repositoryMetadataSource: String,
     val backupType: String,
     val status: String,
     val startedAtEpochMs: Long,
@@ -30,12 +31,34 @@ fun BackupEntity.toBackupAuditSnapshot(repository: RepositoryEntity?): BackupAud
     require(repository == null || repository.githubId == repositoryId) {
         "Repository metadata does not match backup repository ID"
     }
+    val hasBackupTimeSnapshot = repositoryOwnerAtBackup != null &&
+        repositoryNameAtBackup != null &&
+        repositoryDefaultBranchAtBackup != null &&
+        repositoryPrivateAtBackup != null
+    val metadataSource = when {
+        hasBackupTimeSnapshot -> "backup-time-snapshot"
+        repository != null -> "current-local-repository-cache"
+        else -> "unavailable"
+    }
     return BackupAuditSnapshot(
         backupId = id,
         repositoryId = repositoryId,
-        repositoryFullName = repository?.let { "${it.owner}/${it.name}" },
-        repositoryDefaultBranch = repository?.defaultBranch,
-        repositoryPrivate = repository?.isPrivate,
+        repositoryFullName = if (hasBackupTimeSnapshot) {
+            "$repositoryOwnerAtBackup/$repositoryNameAtBackup"
+        } else {
+            repository?.let { "${it.owner}/${it.name}" }
+        },
+        repositoryDefaultBranch = if (hasBackupTimeSnapshot) {
+            repositoryDefaultBranchAtBackup
+        } else {
+            repository?.defaultBranch
+        },
+        repositoryPrivate = if (hasBackupTimeSnapshot) {
+            repositoryPrivateAtBackup
+        } else {
+            repository?.isPrivate
+        },
+        repositoryMetadataSource = metadataSource,
         backupType = type.name,
         status = status.name,
         startedAtEpochMs = startedAtEpochMs,
@@ -57,13 +80,10 @@ fun BackupAuditSnapshot.toBackupAuditJson(
 ): JSONObject {
     val repository = JSONObject()
         .put("githubId", repositoryId)
-        .putNullable("currentKnownFullName", repositoryFullName)
-        .putNullable("currentKnownDefaultBranch", repositoryDefaultBranch)
-        .putNullable("currentKnownPrivate", repositoryPrivate)
-        .put(
-            "metadataSource",
-            if (repositoryFullName == null) "unavailable" else "current-local-repository-cache",
-        )
+        .putNullable("fullName", repositoryFullName)
+        .putNullable("defaultBranch", repositoryDefaultBranch)
+        .putNullable("private", repositoryPrivate)
+        .put("metadataSource", repositoryMetadataSource)
 
     val storage = JSONObject()
         .putNullable("provider", storageProvider)
@@ -106,14 +126,17 @@ fun BackupAuditSnapshot.toBackupAuditJson(
         .put(
             "This report is generated from persisted app history; exporting it does not re-download or re-verify the remote backup artifact.",
         )
-    if (repositoryFullName != null) {
-        limitations.put(
-            "Repository owner/name/default-branch/privacy values come from the current local repository cache, not an immutable backup-time repository snapshot.",
+    when (repositoryMetadataSource) {
+        "current-local-repository-cache" -> limitations.put(
+            "This pre-v4 backup has no immutable repository metadata snapshot; owner/name/default-branch/privacy values come from the current local repository cache.",
+        )
+        "unavailable" -> limitations.put(
+            "This pre-v4 backup has no immutable repository metadata snapshot and current repository display metadata is unavailable.",
         )
     }
 
     return JSONObject()
-        .put("formatVersion", 1)
+        .put("formatVersion", 2)
         .put("reportType", "github-backup-artifact-audit")
         .put("generatedAtEpochMs", generatedAtEpochMs)
         .put("repository", repository)
