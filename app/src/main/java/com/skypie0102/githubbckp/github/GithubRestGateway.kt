@@ -21,12 +21,13 @@ class GithubRestGateway @Inject constructor(
     override suspend fun listRepositories(): List<RepositoryRef> = withContext(Dispatchers.IO) {
         val token = authManager.requireAccessToken()
         buildList {
-            var page = 1
-            while (true) {
-                val url = "$API_BASE/user/repos?per_page=$PAGE_SIZE&page=$page&sort=full_name&affiliation=owner,collaborator,organization_member"
-                val response = getJsonArray(url, token)
-                for (index in 0 until response.length()) {
-                    val item = response.getJSONObject(index)
+            var nextUrl: String? =
+                "$API_BASE/user/repos?per_page=$PAGE_SIZE&sort=full_name&affiliation=owner,collaborator,organization_member"
+            while (nextUrl != null) {
+                val response = getJsonResponse(nextUrl, token)
+                val repositories = JSONArray(response.body)
+                for (index in 0 until repositories.length()) {
+                    val item = repositories.getJSONObject(index)
                     add(
                         RepositoryRef(
                             id = item.getLong("id"),
@@ -37,8 +38,7 @@ class GithubRestGateway @Inject constructor(
                         ),
                     )
                 }
-                if (response.length() < PAGE_SIZE) break
-                page += 1
+                nextUrl = githubNextLink(response.linkHeader)?.let(::requireTrustedGithubApiUrl)
             }
         }
     }
@@ -60,17 +60,10 @@ class GithubRestGateway @Inject constructor(
         downloadFollowingRedirects(initialUrl, token, destination)
     }
 
-    private fun getJsonArray(url: String, token: String): JSONArray {
-        val text = getJsonText(url, token)
-        return JSONArray(text)
-    }
+    private fun getJsonObject(url: String, token: String): JSONObject =
+        JSONObject(getJsonResponse(url, token).body)
 
-    private fun getJsonObject(url: String, token: String): JSONObject {
-        val text = getJsonText(url, token)
-        return JSONObject(text)
-    }
-
-    private fun getJsonText(url: String, token: String): String {
+    private fun getJsonResponse(url: String, token: String): GithubJsonResponse {
         val connection = openGet(url, token)
         return try {
             val code = connection.responseCode
@@ -81,7 +74,10 @@ class GithubRestGateway @Inject constructor(
             if (code !in 200..299) {
                 throw IOException("GitHub API HTTP $code: ${text.take(300)}")
             }
-            text
+            GithubJsonResponse(
+                body = text,
+                linkHeader = connection.getHeaderField("Link"),
+            )
         } finally {
             connection.disconnect()
         }
@@ -169,3 +165,38 @@ class GithubRestGateway @Inject constructor(
         const val BUFFER_SIZE = 64 * 1024
     }
 }
+
+internal data class GithubJsonResponse(
+    val body: String,
+    val linkHeader: String?,
+)
+
+internal fun githubNextLink(linkHeader: String?): String? {
+    if (linkHeader.isNullOrBlank()) return null
+    return GITHUB_LINK_REGEX.findAll(linkHeader)
+        .firstOrNull { match ->
+            match.groupValues[2]
+                .split(' ')
+                .any { relation -> relation.equals("next", ignoreCase = true) }
+        }
+        ?.groupValues
+        ?.get(1)
+}
+
+internal fun requireTrustedGithubApiUrl(value: String): String {
+    val url = runCatching { URL(value) }
+        .getOrElse { throw IOException("GitHub pagination returned an invalid next URL") }
+    if (
+        !url.protocol.equals("https", ignoreCase = true) ||
+        !url.host.equals("api.github.com", ignoreCase = true) ||
+        (url.port != -1 && url.port != 443)
+    ) {
+        throw IOException("GitHub pagination returned an untrusted next URL")
+    }
+    return url.toString()
+}
+
+private val GITHUB_LINK_REGEX = Regex(
+    pattern = """<([^>]+)>\s*;[^,]*?\brel\s*=\s*\"([^\"]+)\"""",
+    option = RegexOption.IGNORE_CASE,
+)
