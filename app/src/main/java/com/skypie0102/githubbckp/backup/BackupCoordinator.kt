@@ -29,6 +29,7 @@ class BackupCoordinator @Inject constructor(
                 repositoryNameAtBackup = request.repository.name,
                 repositoryDefaultBranchAtBackup = request.repository.defaultBranch,
                 repositoryPrivateAtBackup = request.repository.isPrivate,
+                origin = request.origin,
             ),
         )
         var artifact: BackupArtifact? = null

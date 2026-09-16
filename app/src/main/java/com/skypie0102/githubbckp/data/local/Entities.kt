@@ -3,6 +3,7 @@ package com.skypie0102.githubbckp.data.local
 import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.PrimaryKey
+import com.skypie0102.githubbckp.backup.BackupOrigin
 import com.skypie0102.githubbckp.backup.BackupStatus
 import com.skypie0102.githubbckp.backup.BackupType
 import com.skypie0102.githubbckp.storage.StorageDestination
@@ -40,4 +41,5 @@ data class BackupEntity(
     val repositoryNameAtBackup: String? = null,
     val repositoryDefaultBranchAtBackup: String? = null,
     val repositoryPrivateAtBackup: Boolean? = null,
+    val origin: BackupOrigin? = null,
 )

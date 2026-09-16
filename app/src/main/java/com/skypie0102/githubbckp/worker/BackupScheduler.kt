@@ -9,6 +9,7 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.workDataOf
+import com.skypie0102.githubbckp.backup.BackupOrigin
 import com.skypie0102.githubbckp.backup.BackupType
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.util.concurrent.TimeUnit
@@ -30,6 +31,7 @@ class BackupScheduler @Inject constructor(
         enqueueWithConstraints(
             repositoryIds = repositoryIds,
             type = type,
+            origin = BackupOrigin.MANUAL,
             constraints = manualConstraints(),
             originTag = TAG_MANUAL,
         )
@@ -42,6 +44,7 @@ class BackupScheduler @Inject constructor(
         enqueueWithConstraints(
             repositoryIds = repositoryIds,
             type = type,
+            origin = BackupOrigin.SCHEDULED,
             constraints = scheduledConstraints(),
             originTag = TAG_SCHEDULED,
         )
@@ -87,6 +90,7 @@ class BackupScheduler @Inject constructor(
     private fun enqueueWithConstraints(
         repositoryIds: List<Long>,
         type: BackupType,
+        origin: BackupOrigin,
         constraints: Constraints,
         originTag: String,
     ) {
@@ -97,6 +101,7 @@ class BackupScheduler @Inject constructor(
                     workDataOf(
                         RepositoryBackupWorker.KEY_REPOSITORY_ID to repositoryId,
                         RepositoryBackupWorker.KEY_BACKUP_TYPE to type.name,
+                        RepositoryBackupWorker.KEY_BACKUP_ORIGIN to origin.name,
                     ),
                 )
                 .addTag("backup-$repositoryId")

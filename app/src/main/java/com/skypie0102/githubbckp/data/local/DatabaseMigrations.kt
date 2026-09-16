@@ -34,4 +34,10 @@ object DatabaseMigrations {
             db.execSQL("ALTER TABLE repositories ADD COLUMN isAvailable INTEGER NOT NULL DEFAULT 1")
         }
     }
+
+    val MIGRATION_5_6 = object : Migration(5, 6) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE backups ADD COLUMN origin TEXT")
+        }
+    }
 }
