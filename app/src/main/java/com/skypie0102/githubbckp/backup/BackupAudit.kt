@@ -14,6 +14,7 @@ data class BackupAuditSnapshot(
     val repositoryMetadataSource: String,
     val backupType: String,
     val origin: String?,
+    val scheduledRunId: String?,
     val status: String,
     val startedAtEpochMs: Long,
     val completedAtEpochMs: Long?,
@@ -62,6 +63,7 @@ fun BackupEntity.toBackupAuditSnapshot(repository: RepositoryEntity?): BackupAud
         repositoryMetadataSource = metadataSource,
         backupType = type.name,
         origin = origin?.name,
+        scheduledRunId = scheduledRunId,
         status = status.name,
         startedAtEpochMs = startedAtEpochMs,
         completedAtEpochMs = completedAtEpochMs,
@@ -122,6 +124,7 @@ fun BackupAuditSnapshot.toBackupAuditJson(
         .put("id", backupId)
         .put("type", backupType)
         .putNullable("origin", origin)
+        .putNullable("scheduledRunId", scheduledRunId)
         .put("status", status)
         .put("startedAtEpochMs", startedAtEpochMs)
         .putNullable("completedAtEpochMs", completedAtEpochMs)
@@ -144,10 +147,19 @@ fun BackupAuditSnapshot.toBackupAuditJson(
         limitations.put(
             "This backup predates origin tracking or was queued before origin metadata was available; manual versus scheduled origin is unknown.",
         )
+    } else if (origin == BackupOrigin.SCHEDULED.name && scheduledRunId == null) {
+        limitations.put(
+            "This scheduled backup predates scheduled-run correlation or was queued before a run ID was available.",
+        )
+    }
+    if (origin == BackupOrigin.SCHEDULED.name) {
+        limitations.put(
+            "Scheduled controller fan-out uses WorkManager unique-work KEEP semantics; a controller run may request a repository while older work is still active, in which case no new child backup row is created for that newer run.",
+        )
     }
 
     return JSONObject()
-        .put("formatVersion", 3)
+        .put("formatVersion", 4)
         .put("reportType", "github-backup-artifact-audit")
         .put("generatedAtEpochMs", generatedAtEpochMs)
         .put("repository", repository)
