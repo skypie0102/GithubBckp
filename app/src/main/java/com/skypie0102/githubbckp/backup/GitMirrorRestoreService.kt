@@ -14,6 +14,7 @@ import org.eclipse.jgit.storage.file.FileRepositoryBuilder
 data class MirrorRestoreResult(
     val refNames: List<String>,
     val referencedObjectsVerified: Int,
+    val lfsObjectCount: Int = 0,
     val wikiRefNames: List<String> = emptyList(),
     val wikiReferencedObjectsVerified: Int = 0,
     val releaseCount: Int = 0,
@@ -27,11 +28,13 @@ data class MirrorRestoreResult(
 
 /**
  * Restore primitive for GIT_MIRROR artifacts. It extracts the bare repository,
- * verifies advertised main-repository ref tips and every bundled metadata
- * module before retaining the local restore.
+ * verifies advertised main-repository ref tips, every referenced bundled LFS
+ * object, and each bundled metadata module before retaining the local restore.
  */
 @Singleton
 class GitMirrorRestoreService @Inject constructor(
+    private val lfsPointerScanner: GitLfsPointerScanner,
+    private val lfsObjectStore: GitLfsObjectStore,
     private val wikiBackupService: GithubWikiBackupService,
     private val releaseBackupService: GithubReleaseBackupService,
     private val discussionBackupService: GithubDiscussionBackupService,
@@ -65,6 +68,12 @@ class GitMirrorRestoreService @Inject constructor(
                 }
                 refs.map { it.name }.sorted() to objectIds.size
             }
+
+        val lfsPointers = lfsPointerScanner.scan(destination)
+        lfsPointers.forEach { pointer ->
+            lfsObjectStore.requireVerifiedObject(destination, pointer)
+        }
+
         val wikiResult = wikiBackupService.validateBundledWiki(destination)
         val releaseResult = releaseBackupService.validateBundledReleases(destination)
         val discussionResult = discussionBackupService.validateBundledDiscussions(destination)
@@ -72,6 +81,7 @@ class GitMirrorRestoreService @Inject constructor(
         MirrorRestoreResult(
             refNames = mainResult.first,
             referencedObjectsVerified = mainResult.second,
+            lfsObjectCount = lfsPointers.size,
             wikiRefNames = wikiResult?.refNames.orEmpty(),
             wikiReferencedObjectsVerified = wikiResult?.referencedObjectsVerified ?: 0,
             releaseCount = releaseResult?.releaseCount ?: 0,
