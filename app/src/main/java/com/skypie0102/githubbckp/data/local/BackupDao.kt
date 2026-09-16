@@ -121,4 +121,13 @@ interface BackupDao {
 
     @Query("SELECT * FROM backups ORDER BY startedAtEpochMs DESC LIMIT :limit")
     fun observeRecentBackups(limit: Int = 50): Flow<List<BackupEntity>>
+
+    @Query(
+        """
+        SELECT * FROM backups
+        WHERE scheduledRunId = :scheduledRunId
+        ORDER BY startedAtEpochMs ASC, id ASC
+        """,
+    )
+    fun observeBackupsForScheduledRun(scheduledRunId: String): Flow<List<BackupEntity>>
 }
