@@ -26,17 +26,35 @@ class GithubMirrorRestorePublisher @Inject constructor(
     private val lfsPointerScanner: GitLfsPointerScanner,
     private val lfsUploadService: GitLfsUploadService,
     private val pushService: GitMirrorPushService,
+    private val transactionStore: RecoveryTransactionStore,
 ) {
     suspend fun publishToNewRepository(
         restoreId: String,
         repositoryName: String,
         isPrivate: Boolean,
     ): GithubRestorePublishResult {
-        val created = repositoryGateway.createRepository(repositoryName, isPrivate)
+        val existingTransaction = transactionStore.get(restoreId)
+        val repository = if (existingTransaction == null) {
+            repositoryGateway.createRepository(repositoryName, isPrivate)
+        } else {
+            if (existingTransaction.targetKind != RecoveryTargetKind.NEW_REPOSITORY) {
+                throw IOException(
+                    "This restore is already bound to existing target ${existingTransaction.repositoryFullName}",
+                )
+            }
+            resolveBoundRepository(existingTransaction)
+        }
+        val transaction = transactionStore.bind(
+            restoreId = restoreId,
+            targetKind = RecoveryTargetKind.NEW_REPOSITORY,
+            repository = repository,
+        )
         return publish(
             restoreId = restoreId,
-            repository = created,
-            failurePrefix = "${created.fullName} was created, but recovery failed",
+            repository = repository,
+            initialTransaction = transaction,
+            isResume = existingTransaction != null,
+            failurePrefix = "${repository.fullName} was created or resumed, but recovery failed",
         )
     }
 
@@ -44,42 +62,112 @@ class GithubMirrorRestorePublisher @Inject constructor(
         restoreId: String,
         repositoryFullName: String,
     ): GithubRestorePublishResult {
-        val existing = repositoryGateway.getRepository(repositoryFullName)
+        val existingTransaction = transactionStore.get(restoreId)
+        val repository = if (existingTransaction == null) {
+            repositoryGateway.getRepository(repositoryFullName)
+        } else {
+            if (existingTransaction.targetKind != RecoveryTargetKind.EXISTING_EMPTY_REPOSITORY) {
+                throw IOException(
+                    "This restore is already bound to new target ${existingTransaction.repositoryFullName}",
+                )
+            }
+            if (!existingTransaction.repositoryFullName.equals(repositoryFullName.trim(), ignoreCase = true)) {
+                throw IOException(
+                    "This restore is already bound to ${existingTransaction.repositoryFullName}",
+                )
+            }
+            resolveBoundRepository(existingTransaction)
+        }
+        val transaction = transactionStore.bind(
+            restoreId = restoreId,
+            targetKind = RecoveryTargetKind.EXISTING_EMPTY_REPOSITORY,
+            repository = repository,
+        )
         return publish(
             restoreId = restoreId,
-            repository = existing,
-            failurePrefix = "Restore to ${existing.fullName} failed",
+            repository = repository,
+            initialTransaction = transaction,
+            isResume = existingTransaction != null,
+            failurePrefix = "Restore to ${repository.fullName} failed",
         )
+    }
+
+    private suspend fun resolveBoundRepository(transaction: RecoveryTransaction): GithubRestoreRepository {
+        val repository = repositoryGateway.getRepository(transaction.repositoryFullName)
+        if (repository.id != transaction.repositoryId) {
+            throw IOException(
+                "Recovery target identity changed; expected GitHub repository ID ${transaction.repositoryId}",
+            )
+        }
+        return repository
     }
 
     private suspend fun publish(
         restoreId: String,
         repository: GithubRestoreRepository,
+        initialTransaction: RecoveryTransaction,
+        isResume: Boolean,
         failurePrefix: String,
     ): GithubRestorePublishResult {
         val repositoryDirectory = restoreCoordinator.requireRepositoryDirectory(restoreId)
         val token = authManager.requireAccessToken()
+        val credentials = UsernamePasswordCredentialsProvider("x-access-token", token)
 
         return try {
             withContext(Dispatchers.IO) {
-                val lfsPointers = lfsPointerScanner.scan(repositoryDirectory)
-                val lfsObjectCount = lfsUploadService.uploadAll(
-                    repositoryFullName = repository.fullName,
-                    accessToken = token,
-                    pointers = lfsPointers,
-                    repositoryDirectory = repositoryDirectory,
-                )
-                val push = pushService.push(
-                    repositoryDirectory = repositoryDirectory,
-                    remoteUri = repository.cloneUrl,
-                    credentialsProvider = UsernamePasswordCredentialsProvider("x-access-token", token),
-                )
+                var transaction = initialTransaction
+                if (transaction.phase == RecoveryPhase.TARGET_BOUND) {
+                    // Refuse a non-empty target before any LFS object can be uploaded.
+                    // The Git push performs the same empty check again immediately
+                    // before publishing refs, which protects against a concurrent writer.
+                    pushService.requireRemoteEmpty(
+                        remoteUri = repository.cloneUrl,
+                        credentialsProvider = credentials,
+                    )
+                    val lfsPointers = lfsPointerScanner.scan(repositoryDirectory)
+                    val lfsObjectCount = lfsUploadService.uploadAll(
+                        repositoryFullName = repository.fullName,
+                        accessToken = token,
+                        pointers = lfsPointers,
+                        repositoryDirectory = repositoryDirectory,
+                    )
+                    transaction = transactionStore.markLfsPublished(
+                        restoreId = restoreId,
+                        repositoryId = repository.id,
+                        lfsObjectCount = lfsObjectCount,
+                    )
+                }
+
+                if (transaction.phase == RecoveryPhase.LFS_PUBLISHED) {
+                    val push = if (isResume) {
+                        pushService.pushOrReconcilePublished(
+                            repositoryDirectory = repositoryDirectory,
+                            remoteUri = repository.cloneUrl,
+                            credentialsProvider = credentials,
+                        )
+                    } else {
+                        pushService.push(
+                            repositoryDirectory = repositoryDirectory,
+                            remoteUri = repository.cloneUrl,
+                            credentialsProvider = credentials,
+                        )
+                    }
+                    transaction = transactionStore.markGitPublished(
+                        restoreId = restoreId,
+                        repositoryId = repository.id,
+                        result = push,
+                    )
+                }
+
+                check(transaction.phase == RecoveryPhase.GIT_PUBLISHED) {
+                    "Recovery transaction did not reach Git publication"
+                }
                 GithubRestorePublishResult(
                     repositoryFullName = repository.fullName,
                     repositoryUrl = repository.htmlUrl,
-                    pushedRefCount = push.pushedRefCount,
-                    restoredLfsObjectCount = lfsObjectCount,
-                    skippedReadOnlyRefs = push.skippedReadOnlyRefs,
+                    pushedRefCount = transaction.pushedRefCount,
+                    restoredLfsObjectCount = transaction.lfsObjectCount,
+                    skippedReadOnlyRefs = transaction.skippedReadOnlyRefs,
                 )
             }
         } catch (throwable: Throwable) {

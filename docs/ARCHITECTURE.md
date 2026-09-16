@@ -33,6 +33,7 @@ GitMirrorRestoreService
    +-- GithubReleaseBackupService (manifest/assets validation)
    |
 GithubMirrorRestorePublisher
+   +-- RecoveryTransactionStore
    +-- GitLfsObjectStore / GitLfsUploadService
    +-- GithubRepositoryRestoreGateway
    +-- GitMirrorPushService
@@ -78,15 +79,27 @@ The main bare repository, LFS store, optional wiki mirror, and optional release 
 
 `MirrorRestoreCoordinator` keeps validated restores in private app storage with lightweight metadata and reloads valid records across app restarts.
 
-## GitHub recovery
+## Resumable GitHub recovery
 
-`GithubMirrorRestorePublisher` can publish the main repository to either a newly created repository or an existing repository selected by full name. The current recovery path is deliberately restricted to an empty target.
+`GithubMirrorRestorePublisher` publishes the main repository to either a newly created repository or an existing repository selected by full name. The normal flow remains restricted to an empty target.
 
-Recovery is LFS-first. `GitLfsObjectStore` verifies every referenced bundled object locally, `GitLfsUploadService` uploads missing objects and performs optional server verify actions, and only then does `GitMirrorPushService` perform its authenticated empty-remote preflight and non-forced ref push.
+`RecoveryTransactionStore` persists one app-private transaction per restore. A transaction binds that restore to the stable GitHub repository ID/full name and advances monotonically through:
 
-GitHub-owned `refs/pull/*` refs are skipped and reported rather than treated as writable Git state.
+```text
+TARGET_BOUND -> LFS_PUBLISHED -> GIT_PUBLISHED
+```
 
-Wiki publication is not automated because GitHub does not expose a documented wiki-page initialization API. Release publication is also deliberately deferred: releases depend on Git refs already existing, and a publication failure after the main push would leave a non-empty partial target that the current safe retry guard intentionally refuses. A target-bound resumable recovery transaction is required before release recreation can be enabled safely.
+The binding is immutable. A retry for a newly created target resolves and reuses the previously created repository instead of creating another one. A retry for an existing target must supply the same full name and the resolved GitHub repository ID must still match the transaction.
+
+The first write-capable phase has two empty-target guards. While the transaction is `TARGET_BOUND`, `GitMirrorPushService.requireRemoteEmpty` runs **before any LFS upload**. Only an empty remote can proceed to `GitLfsUploadService`. Immediately before Git refs are published, `GitMirrorPushService.push` checks emptiness again. The second preflight protects against a concurrent writer between the LFS and Git phases.
+
+A crash after GitHub accepts the Git push but before `GIT_PUBLISHED` is persisted is handled by the resume-only `pushOrReconcilePublished` path. It compares the target's advertised writable ref names and object IDs with the local mirror. Only an exact match is accepted as an already-completed Git phase. Extra refs, missing refs, mismatched object IDs, and GitHub-owned `refs/pull/*` refs on the target cause a hard failure rather than relaxing the non-empty-target rule.
+
+GitHub-owned `refs/pull/*` refs from the source mirror are skipped and reported rather than treated as writable Git state.
+
+The transaction mechanism is deliberately narrow: it makes retries idempotent for the target this restore already owns; it does not authorize arbitrary overwrite or force-push into a live repository.
+
+Wiki publication is not automated because GitHub does not expose a documented wiki-page initialization API. Release publication is also deferred until it can use later transaction phases for idempotent create/upload behavior after `GIT_PUBLISHED`.
 
 Arbitrary destructive recovery into a non-empty repository remains unavailable.
 
@@ -126,6 +139,7 @@ After `COMPLETED`, retention may prune older verified remote artifacts without c
 - ZIP path traversal is rejected.
 - LFS scanner tests discover real pointer blobs; download/upload tests cover Batch API parsing, errors, already-present objects, and integrity checks.
 - `GithubReleaseBackupServiceTest` verifies valid assets, corrupt-asset rejection, and manifest path-traversal rejection.
-- `GitMirrorPushServiceTest` validates empty-target push behavior and refusal of non-empty targets.
+- `RecoveryTransactionStoreTest` covers persistence, phase advancement, immutable target binding, and corrupt/rebound state rejection.
+- `GitMirrorPushServiceTest` validates empty-target push behavior, explicit preflight refusal for non-empty targets, exact post-push reconciliation, and rejection of unexpected extra refs.
 - Retention tests validate keep-all and keep-last-N selection.
 - Room/KSP compilation validates database schema/query consistency in CI.

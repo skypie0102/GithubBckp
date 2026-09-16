@@ -51,6 +51,70 @@ class GitMirrorPushServiceTest {
     }
 
     @Test
+    fun resumeAcceptsOnlyExactAlreadyPublishedMirror() = runBlocking {
+        val root = Files.createTempDirectory("mirror-resume-test").toFile()
+        try {
+            val mirror = createSourceMirror(root)
+            val target = File(root, "target.git")
+            Git.init().setBare(true).setDirectory(target).call().close()
+            val first = service.push(mirror, target.toURI().toString())
+
+            val resumed = service.pushOrReconcilePublished(mirror, target.toURI().toString())
+            assertEquals(first.pushedRefCount, resumed.pushedRefCount)
+
+            FileRepositoryBuilder().setGitDir(target).setBare().build().use { repository ->
+                val head = repository.resolve("refs/heads/master")
+                val extra = repository.updateRef("refs/heads/unexpected")
+                extra.setNewObjectId(head)
+                assertTrue(extra.update().name in setOf("NEW", "FORCED", "FAST_FORWARD", "NO_CHANGE"))
+            }
+            val failure = runCatching {
+                service.pushOrReconcilePublished(mirror, target.toURI().toString())
+            }.exceptionOrNull()
+            assertTrue(failure is IOException)
+            assertTrue(failure?.message.orEmpty().contains("not empty"))
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun preflightRejectsNonEmptyTargetBeforeRecoverySideEffects() = runBlocking {
+        val root = Files.createTempDirectory("mirror-preflight-test").toFile()
+        try {
+            val targetWork = File(root, "target-work")
+            val targetCommit = Git.init().setDirectory(targetWork).call().use { git ->
+                File(targetWork, "existing.txt").writeText("existing target state\n")
+                git.add().addFilepattern("existing.txt").call()
+                git.commit()
+                    .setMessage("existing target")
+                    .setAuthor("Target", "target@example.com")
+                    .setCommitter("Target", "target@example.com")
+                    .call()
+            }
+            val target = File(root, "target.git")
+            Git.cloneRepository()
+                .setURI(targetWork.toURI().toString())
+                .setDirectory(target)
+                .setBare(true)
+                .call()
+                .close()
+
+            val failure = runCatching {
+                service.requireRemoteEmpty(target.toURI().toString())
+            }.exceptionOrNull()
+
+            assertTrue(failure is IOException)
+            assertTrue(failure?.message.orEmpty().contains("not empty"))
+            FileRepositoryBuilder().setGitDir(target).setBare().build().use { repository ->
+                assertEquals(targetCommit.id, repository.resolve("refs/heads/master"))
+            }
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
     fun refusesNonEmptyTargetWithoutChangingIt() = runBlocking {
         val root = Files.createTempDirectory("mirror-non-empty-target-test").toFile()
         try {
