@@ -52,6 +52,7 @@ import com.skypie0102.githubbckp.backup.MirrorRestoreRecord
 import com.skypie0102.githubbckp.backup.RetentionPreferences
 import com.skypie0102.githubbckp.backup.auditReportFileName
 import com.skypie0102.githubbckp.backup.backupAuditReportFileName
+import com.skypie0102.githubbckp.backup.repositoryDisplayName
 import com.skypie0102.githubbckp.backup.toAuditJson
 import com.skypie0102.githubbckp.backup.toAuditSnapshot
 import com.skypie0102.githubbckp.backup.toBackupAuditJson
@@ -672,10 +673,7 @@ private fun BackupRow(
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(
-                repository?.let { "${it.owner}/${it.name}" } ?: "Repository #${backup.repositoryId}",
-                style = MaterialTheme.typography.titleSmall,
-            )
+            Text(backup.repositoryDisplayName(repository), style = MaterialTheme.typography.titleSmall)
             Text("${backup.type.name.replace('_', ' ')} • ${backup.status.name}")
             backup.storageProvider?.let { provider ->
                 Text(
