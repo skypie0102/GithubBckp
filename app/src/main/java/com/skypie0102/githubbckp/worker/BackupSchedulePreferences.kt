@@ -55,11 +55,27 @@ class BackupSchedulePreferences @Inject constructor(
     )
 
     fun save(settings: BackupScheduleSettings) {
+        val previouslyEnabled = preferences.getBoolean(KEY_ENABLED, false)
+        val enabledAt = preferences.getLong(KEY_ENABLED_AT, 0L)
         preferences.edit()
             .putBoolean(KEY_ENABLED, settings.enabled)
             .putString(KEY_CADENCE, settings.cadence.name)
             .putString(KEY_BACKUP_TYPE, settings.backupType.name)
+            .apply {
+                when {
+                    !settings.enabled -> remove(KEY_ENABLED_AT)
+                    !previouslyEnabled || enabledAt <= 0L -> putLong(KEY_ENABLED_AT, System.currentTimeMillis())
+                }
+            }
             .apply()
+    }
+
+    fun enabledAtEpochMs(): Long? = preferences.getLong(KEY_ENABLED_AT, 0L)
+        .takeIf { it > 0L }
+
+    fun ensureEnabledAt(nowEpochMs: Long = System.currentTimeMillis()) {
+        if (!settings().enabled || enabledAtEpochMs() != null) return
+        preferences.edit().putLong(KEY_ENABLED_AT, nowEpochMs).apply()
     }
 
     fun runStatus(): ScheduledBackupRunStatus? {
@@ -119,6 +135,7 @@ class BackupSchedulePreferences @Inject constructor(
     private companion object {
         const val PREFERENCES_NAME = "backup-schedule"
         const val KEY_ENABLED = "enabled"
+        const val KEY_ENABLED_AT = "enabled-at"
         const val KEY_CADENCE = "cadence"
         const val KEY_BACKUP_TYPE = "backup-type"
         const val KEY_LAST_RUN_AT = "last-run-at"
