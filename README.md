@@ -22,11 +22,12 @@ Mirror ZIP
   -> safe private import
   -> validate main Git, LFS, wiki, and release data
   -> bind recovery transaction to one GitHub repository ID
-  -> verify target advertises no Git refs
+  -> verify target Git + release surfaces are empty
   -> verify/upload Git LFS objects
   -> verify target is still empty immediately before Git publication
   -> push writable main-repository refs without force
-  -> persist resumable recovery phase
+  -> recreate/reconcile releases and upload verified assets
+  -> persist resumable recovery phases
 ```
 
 ### Backup formats
@@ -34,7 +35,9 @@ Mirror ZIP
 - **Source snapshot** — downloads the default branch as GitHub's TAR.GZ archive. It is compact, but not a full-history backup.
 - **Git mirror** — mirror-clones the repository, bundles all detected standard Git LFS objects, optionally bundles initialized wiki history, and preserves release metadata/assets inside one `.mirror.zip`. The artifact receives SHA-256 + MD5 integrity hashes before storage.
 
-Git mirror backup fails rather than silently succeeding when a referenced LFS object or release asset cannot be fetched or verified. Main Git/LFS recovery is publishable to a new or provably empty GitHub repository. Wiki history and releases are preserved and locally verified, but automatic GitHub publication for those two modules is intentionally deferred and recorded as non-fatal completeness warnings.
+Git mirror backup fails rather than silently succeeding when a referenced LFS object or release asset cannot be fetched or verified. Main Git, Git LFS, release metadata, and release assets are recoverable to a new or provably empty GitHub repository. Wiki history is preserved and locally verified but automatic wiki publication remains intentionally unavailable.
+
+For releases, GitHub's original latest-release selection, original publication timestamps, and immutable-release state are not recreated. Those limitations remain recorded as non-fatal completeness metadata when release data is present.
 
 Issues and pull-request metadata remain future completeness modules.
 
@@ -94,7 +97,7 @@ Mirror mode scans reachable Git blobs for standard LFS pointers. Unique OIDs are
 lfs/objects/<first 2 hex>/<next 2 hex>/<full sha256 oid>
 ```
 
-During GitHub recovery, bundled objects are revalidated locally and the target LFS Batch API is queried for upload actions. Before any LFS object can be uploaded, the target Git remote must still advertise no refs. Missing LFS objects are then uploaded and optional server verify actions are executed. The Git remote is checked again immediately before refs are published, protecting against a concurrent writer between the LFS and Git phases.
+During GitHub recovery, bundled objects are revalidated locally and the target LFS Batch API is queried for upload actions. Before any LFS object can be uploaded, the target Git remote must still advertise no refs and its release surface must be empty. Missing LFS objects are then uploaded and optional server verify actions are executed. The Git remote is checked again immediately before refs are published, protecting against a concurrent writer between the LFS and Git phases.
 
 See [`docs/LFS_BACKUP.md`](docs/LFS_BACKUP.md).
 
@@ -112,9 +115,9 @@ The wiki mirror is verified before packaging and again during local restore. Aut
 
 See [`docs/WIKI_BACKUP.md`](docs/WIKI_BACKUP.md).
 
-## GitHub release backup
+## GitHub release backup and recovery
 
-Mirror mode also lists GitHub releases and their assets. Release metadata is stored in a versioned manifest:
+Mirror mode lists GitHub releases and their assets. Release metadata is stored in a versioned manifest:
 
 ```text
 github-backup/releases/manifest.json
@@ -130,7 +133,9 @@ Every asset must match GitHub's reported size and a locally computed SHA-256. Wh
 
 Local mirror restore revalidates the manifest, safe relative paths, file sizes, and SHA-256 values. Releases with no binary assets are still preserved in the manifest.
 
-Automatic release recreation/upload is intentionally deferred. Releases depend on Git refs already existing, so publication needs the resumable transaction mechanism described below before it can be made retry-safe.
+After Git refs are recovered, release publication runs as a resumable transaction phase. A retry reconciles already-created releases by tag and requires their name/body/draft/prerelease metadata to match. Existing uploaded assets are reused only after size + SHA-256 verification; a `starter` asset left by a failed upload is removed and retried. Conflicting or ambiguous remote release state fails safely instead of being overwritten.
+
+Release creation deliberately avoids changing GitHub's latest-release selection. Original release timestamps and immutable-release state are also not recreated.
 
 See [`docs/RELEASE_BACKUP.md`](docs/RELEASE_BACKUP.md).
 
@@ -139,14 +144,16 @@ See [`docs/RELEASE_BACKUP.md`](docs/RELEASE_BACKUP.md).
 Every GitHub recovery is bound to a private app-side transaction keyed by the restored mirror ID. The transaction records the exact GitHub repository ID/full name plus the recovery phase:
 
 ```text
-TARGET_BOUND -> LFS_PUBLISHED -> GIT_PUBLISHED
+TARGET_BOUND -> LFS_PUBLISHED -> GIT_PUBLISHED -> RELEASES_PUBLISHED
 ```
 
 Retries cannot silently switch to another target. A new-repository retry reuses the previously created repository instead of creating a duplicate, and an existing-target retry verifies that the GitHub repository ID still matches the transaction.
 
 A crash after GitHub accepted the Git push but before the local `GIT_PUBLISHED` phase was written is reconciled narrowly: the app compares every advertised writable remote ref name and object ID with the local mirror. Only an exact match is accepted as already published; any extra or mismatched ref still fails safely.
 
-The recovery transaction does **not** enable arbitrary non-empty overwrite. First-time Git publication still requires an empty target, and the target is checked before LFS transfer and again immediately before Git refs are pushed.
+A crash during release publication resumes from `GIT_PUBLISHED`. Existing releases/assets are reconciled against the bundled manifest and hashes; only matching state is reused.
+
+The recovery transaction does **not** enable arbitrary non-empty overwrite. First-time recovery still requires an empty Git target and no pre-existing releases.
 
 ## Mirror restoration
 
@@ -181,9 +188,10 @@ Key boundaries:
 - `GitLfsObjectStore` / `GitLfsUploadService` — LFS recovery
 - `GithubWikiBackupService` — wiki mirror preservation/validation
 - `GithubReleaseBackupService` — release manifest/asset preservation/validation
+- `GithubReleaseRestoreService` — idempotent release recreation and asset verification/upload
 - `GitMirrorRestoreService` / `MirrorRestoreCoordinator` — safe local restore
 - `RecoveryTransactionStore` — stable target binding and resumable recovery phase persistence
-- `GitMirrorPushService` / `GithubMirrorRestorePublisher` — preflight, exact-resume reconciliation, and safe main-repository publication
+- `GitMirrorPushService` / `GithubMirrorRestorePublisher` — preflight, exact-resume reconciliation, and recovery orchestration
 - `StorageRouter` — provider-aware upload, verification, deletion
 - `BackupScheduler` / `ScheduledBackupWorker` — manual and periodic scheduling
 - `BackupRetentionManager` — keep-last-N pruning
@@ -193,7 +201,7 @@ See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ## Next implementation slice
 
-1. Use the recovery transaction to add idempotent release recreation and asset upload after `GIT_PUBLISHED`.
-2. Design separately confirmed destructive recovery for non-empty repositories with explicit ref-deletion and repository-rule handling.
-3. Add issues and pull-request metadata backup/recovery modules.
+1. Harden GitHub authorization for workflow-bearing repositories and recovery operations that require GitHub's workflow permission.
+2. Add issues and pull-request metadata backup/recovery modules.
+3. Design separately confirmed destructive recovery for non-empty repositories with explicit ref-deletion and repository-rule handling.
 4. Add richer backup/restore audit and export reporting.
