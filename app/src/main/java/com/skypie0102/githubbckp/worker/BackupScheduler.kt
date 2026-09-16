@@ -65,12 +65,14 @@ class BackupScheduler @Inject constructor(
     }
 
     fun reconcileSchedule() {
+        schedulePreferences.ensureEnabledAt()
         applySchedule(schedulePreferences.settings())
     }
 
     private fun applySchedule(settings: BackupScheduleSettings) {
         if (!settings.enabled) {
             workManager.cancelUniqueWork(SCHEDULE_WORK_NAME)
+            workManager.cancelUniqueWork(HEALTH_CHECK_WORK_NAME)
             return
         }
 
@@ -87,6 +89,20 @@ class BackupScheduler @Inject constructor(
             SCHEDULE_WORK_NAME,
             ExistingPeriodicWorkPolicy.UPDATE,
             request,
+        )
+
+        val healthCheckRequest = PeriodicWorkRequestBuilder<BackupHealthCheckWorker>(
+            HEALTH_CHECK_REPEAT_HOURS,
+            TimeUnit.HOURS,
+        )
+            .setInitialDelay(HEALTH_CHECK_INITIAL_DELAY_HOURS, TimeUnit.HOURS)
+            .addTag(TAG_HEALTH_CHECK)
+            .build()
+
+        workManager.enqueueUniquePeriodicWork(
+            HEALTH_CHECK_WORK_NAME,
+            ExistingPeriodicWorkPolicy.UPDATE,
+            healthCheckRequest,
         )
     }
 
@@ -129,9 +145,13 @@ class BackupScheduler @Inject constructor(
 
     companion object {
         private const val SCHEDULE_WORK_NAME = "scheduled-repository-backups"
+        private const val HEALTH_CHECK_WORK_NAME = "backup-health-notification-check"
         private const val TAG_MANUAL = "backup-origin-manual"
         private const val TAG_SCHEDULED = "backup-origin-scheduled"
         private const val TAG_SCHEDULE_CONTROLLER = "backup-schedule-controller"
+        private const val TAG_HEALTH_CHECK = "backup-health-check"
+        private const val HEALTH_CHECK_REPEAT_HOURS = 24L
+        private const val HEALTH_CHECK_INITIAL_DELAY_HOURS = 1L
 
         fun scheduledConstraints(): Constraints = Constraints.Builder()
             .setRequiredNetworkType(NetworkType.UNMETERED)
