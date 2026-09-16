@@ -34,7 +34,7 @@ Mirror ZIP
   -> persist resumable recovery phases
 ```
 
-Completed backups and imported mirrors expose JSON audit reports. Scheduled runs expose live child-backup progress. The Home screen also shows repository-level backup health, and the app can notify about failed attempts and overdue scheduled-backup health.
+Completed backups and imported mirrors expose JSON audit reports. Scheduled runs expose live child-backup progress. The Home screen shows repository-level backup health, the app can notify about failed attempts and overdue scheduled-backup health, and eligible completed backups can be freshly re-verified by reading their stored bytes again.
 
 ### Backup formats
 
@@ -68,13 +68,13 @@ Completed:
 
 1. **Backup health dashboard (#33)** — every selected/available repository is classified as protected, warning, failed, stale, or never backed up using the latest attempt and latest non-pruned verified backup.
 2. **Failure and overdue-backup notifications (#34)** — failed backups can notify after durable failure recording; repeat failures are rate-limited; overdue selected repositories are checked locally and grouped into deduplicated alerts.
+3. **On-demand backup re-verification (#35)** — completed, non-pruned artifacts can be reread through their original provider, rehashed locally, and—when they are Git mirrors—run through the existing safe mirror/module validator.
 
 Remaining planned product work:
 
-3. **On-demand backup re-verification (#35)** — re-open/re-download an existing stored artifact and prove it is still intact.
 4. **Guided disaster-recovery drill (#36)** — make a safe recovery test routine rather than something first attempted during an emergency.
 
-After the remaining two items, feature development should stop by default unless personal usage exposes a concrete recurring problem. Reliability, compatibility, security, and recovery-safety fixes remain in scope.
+After the remaining item, feature development should stop by default unless personal usage exposes a concrete recurring problem. Reliability, compatibility, security, and recovery-safety fixes remain in scope.
 
 ## Build
 
@@ -160,7 +160,7 @@ See [`docs/LFS_BACKUP.md`](docs/LFS_BACKUP.md).
 
 ## GitHub wiki backup
 
-GitHub wikis are separate Git repositories. When the wiki feature is enabled, mirror mode attempts to clone `<owner>/<repository>.wiki.git` with mirror semantics. An enabled wiki that has never had an initial page is treated as having no wiki content.
+GitHub wikis are separate Git repositories. When the wiki feature is enabled, mirror mode attempts to clone `<owner>/<repository>.wiki.git` with mirror semantics. An enabled wiki that has never had an initial page is treated as no wiki content.
 
 Initialized wiki history is stored at:
 
@@ -219,9 +219,21 @@ The app imports a Git mirror ZIP through Android's document picker and validates
 
 A validated mirror can then be published to either a **new** GitHub repository or an **existing repository that is still empty**. GitHub-owned `refs/pull/*` refs are skipped and reported. Main refs are never force-pushed.
 
+## On-demand backup re-verification
+
+Completed, non-pruned backups with persisted provider/checksum metadata expose **Re-verify stored backup** in Recent backups.
+
+Re-verification resolves the artifact through the provider that originally created it, reads the complete remote object into temporary app-cache storage, and recomputes byte size, SHA-256, and MD5 locally. Google Drive re-verification downloads the actual file bytes; Drive metadata alone is not treated as fresh proof. Document-tree re-verification streams the persisted document URI.
+
+Git-mirror backups additionally run through the same safe local validator used by restore, covering main Git refs/objects and applicable LFS, wiki, release, and discussion modules. No GitHub publication occurs during this check. Temporary downloaded bytes are deleted afterward and the remote object is never mutated.
+
+The latest `VERIFIED` or `FAILED` result, timestamp, and detail are stored separately from the original backup status. An old backup can therefore remain historically `COMPLETED` while clearly showing that a later remote re-verification failed.
+
+See [`docs/BACKUP_AUDIT.md`](docs/BACKUP_AUDIT.md).
+
 ## Audit reporting
 
-Completed backups can export JSON history/audit reports without re-downloading the remote artifact. Imported mirrors can export module-level restore audit reports including Git, LFS, wiki, release, and discussion counts.
+Completed backups can export JSON history/audit reports without triggering another remote read. Backup-audit format v5 includes the latest recorded on-demand re-verification result when one exists. Imported mirrors can export module-level restore audit reports including Git, LFS, wiki, release, and discussion counts.
 
 See [`docs/BACKUP_AUDIT.md`](docs/BACKUP_AUDIT.md) and [`docs/RESTORE_AUDIT.md`](docs/RESTORE_AUDIT.md).
 
@@ -229,7 +241,7 @@ See [`docs/BACKUP_AUDIT.md`](docs/BACKUP_AUDIT.md) and [`docs/RESTORE_AUDIT.md`]
 
 Do **not** commit OAuth client secrets, access/refresh tokens, signing keys, or generated `local.properties`.
 
-Git credentials are passed to JGit's transport layer rather than embedded in repository URLs. Temporary source/mirror artifacts live below app cache and are removed after each backup attempt. Redirected archive/LFS/release downloads do not forward GitHub authentication to unrelated hosts. Recovery transaction files live in app-private storage and bind a restore to a stable GitHub repository ID.
+Git credentials are passed to JGit's transport layer rather than embedded in repository URLs. Temporary source/mirror and re-verification artifacts live below app cache and are removed after each operation. Redirected archive/LFS/release downloads do not forward GitHub authentication to unrelated hosts. Recovery transaction files live in app-private storage and bind a restore to a stable GitHub repository ID.
 
 ## Architecture
 
@@ -244,7 +256,8 @@ Key boundaries include:
 - `GithubDiscussionBackupService` — issue/PR metadata preservation/validation
 - `GitMirrorRestoreService` / `MirrorRestoreCoordinator` — safe local restore
 - `RecoveryTransactionStore` / `GithubMirrorRestorePublisher` — resumable safe publication
-- `StorageRouter` — provider-aware upload, verification, deletion
+- `StorageRouter` — provider-aware upload, verification, read-only download, and deletion
+- `BackupReverificationService` — fresh remote-byte verification and optional mirror/module validation
 - `BackupScheduler` / `ScheduledBackupWorker` / `BackupHealthCheckWorker` — backup scheduling and local health monitoring
 - `BackupProblemNotifier` — rate-limited failure and deduplicated overdue alerts
 - `BackupRetentionManager` — keep-last-N pruning
