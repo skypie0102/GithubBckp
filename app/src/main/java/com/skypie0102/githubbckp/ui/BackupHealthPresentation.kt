@@ -31,9 +31,9 @@ data class BackupHealthSummary(
     val repositories: List<RepositoryBackupHealth> = emptyList(),
 ) {
     val selectedCount: Int = repositories.size
+    val verifiedCount: Int = repositories.count { it.latestVerifiedAtEpochMs != null }
     val protectedCount: Int = repositories.count {
-        it.state == RepositoryBackupHealthState.PROTECTED ||
-            it.state == RepositoryBackupHealthState.WARNING
+        it.state == RepositoryBackupHealthState.PROTECTED
     }
     val attentionCount: Int = repositories.count {
         it.state != RepositoryBackupHealthState.PROTECTED
