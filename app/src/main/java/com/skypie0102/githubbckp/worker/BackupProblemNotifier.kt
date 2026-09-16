@@ -1,13 +1,17 @@
 package com.skypie0102.githubbckp.worker
 
+import android.Manifest
+import android.annotation.SuppressLint
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
 import com.skypie0102.githubbckp.MainActivity
 import com.skypie0102.githubbckp.backup.BackupType
 import com.skypie0102.githubbckp.data.local.RepositoryEntity
@@ -21,6 +25,7 @@ class BackupProblemNotifier @Inject constructor(
 ) {
     private val preferences = context.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
 
+    @SuppressLint("MissingPermission")
     fun notifyBackupFailure(
         repository: RepositoryEntity,
         type: BackupType,
@@ -68,6 +73,7 @@ class BackupProblemNotifier @Inject constructor(
         preferences.edit().putLong(key, nowEpochMs).apply()
     }
 
+    @SuppressLint("MissingPermission")
     fun notifyOverdueBackups(overdue: List<OverdueBackupRepository>) {
         val currentIds = overdue.mapTo(linkedSetOf()) { it.repositoryId.toString() }
         if (currentIds.isEmpty()) {
@@ -111,8 +117,15 @@ class BackupProblemNotifier @Inject constructor(
         )
     }
 
-    private fun notificationsEnabled(): Boolean =
-        NotificationManagerCompat.from(context).areNotificationsEnabled()
+    private fun notificationsEnabled(): Boolean {
+        if (
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            return false
+        }
+        return NotificationManagerCompat.from(context).areNotificationsEnabled()
+    }
 
     private fun ensureChannel() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
