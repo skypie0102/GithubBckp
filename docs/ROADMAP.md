@@ -13,32 +13,28 @@ The supported recovery promise is intentionally narrow:
 - wiki and discussion data are preservation/local-validation surfaces rather than automated GitHub publication surfaces;
 - recovery never force-pushes or destructively rewrites an arbitrary non-empty repository.
 
+## Completed reliability work
+
+### P0 — Backup health dashboard — #33 — complete
+
+The Home screen classifies every currently selected, available repository as protected, warning, failed-after-last-success, stale, or never backed up. Health uses the latest attempt and latest non-pruned verified backup rather than the fixed-size Recent backups list. Automatic-backup staleness uses two cadence windows to account for WorkManager's opportunistic execution.
+
+### P0 — Failure and overdue-backup notifications — #34 — complete
+
+The app requests notification permission on supported Android versions and surfaces backup trouble without requiring the app to remain open.
+
+Implemented behavior:
+
+- a failed backup can produce a notification only after the failure is durably recorded;
+- repeated failures for the same repository/backup format are rate-limited to one alert per six hours;
+- automatic-backup health is checked locally every 24 hours while scheduling is enabled;
+- repositories become overdue after two cadence windows; repositories with no successful backup receive the same grace window starting when scheduling is enabled;
+- overdue repositories are grouped into one notification and are re-notified only when a repository newly enters the overdue set;
+- unavailable and unselected repositories are excluded;
+- disabling automatic backups clears overdue-notification state;
+- tapping an alert opens the app's Home/backup-health surface.
+
 ## Active roadmap
-
-### P0 — Backup health dashboard — #33
-
-Goal: make silent backup failure obvious without reading raw history.
-
-Acceptance criteria:
-
-- show health for every currently selected repository;
-- distinguish protected, warning, failed-after-last-success, stale, and never-backed-up states;
-- use the latest verified backup and latest attempt rather than a fixed-size recent-history window;
-- when automatic backups are enabled, flag repositories whose last verified backup is older than a cadence-aware freshness window;
-- surface a compact top-level summary and the repositories that need attention;
-- keep the health calculation pure and unit tested.
-
-### P0 — Failure and overdue-backup notifications — #34
-
-Goal: make the app useful even when it is not opened regularly.
-
-Acceptance criteria:
-
-- notify when a backup attempt reaches `FAILED`;
-- notify when scheduled backup health becomes overdue for selected repositories;
-- avoid notification storms by grouping/rate-limiting repeated failures;
-- lead the user to actionable in-app state;
-- do not notify for intentionally unavailable/unselected repositories.
 
 ### P1 — On-demand backup re-verification — #35
 
@@ -91,4 +87,4 @@ These cuts are deliberate safety/maintenance decisions, not release blockers.
 
 ## Priority rule
 
-After the four active roadmap items are complete, feature development should stop by default. New features require a concrete problem observed during personal use. Reliability fixes, compatibility fixes, security fixes, and recovery-safety improvements remain in scope at any time.
+After the two remaining active roadmap items are complete, feature development should stop by default. New features require a concrete problem observed during personal use. Reliability fixes, compatibility fixes, security fixes, and recovery-safety improvements remain in scope at any time.
