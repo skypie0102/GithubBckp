@@ -17,6 +17,11 @@ enum class BackupType {
     GIT_MIRROR,
 }
 
+enum class BackupOrigin {
+    MANUAL,
+    SCHEDULED,
+}
+
 enum class BackupStatus {
     QUEUED,
     DOWNLOADING,
@@ -32,6 +37,7 @@ enum class BackupStatus {
 data class BackupRequest(
     val repository: RepositoryRef,
     val type: BackupType,
+    val origin: BackupOrigin? = null,
 )
 
 data class BackupArtifact(
