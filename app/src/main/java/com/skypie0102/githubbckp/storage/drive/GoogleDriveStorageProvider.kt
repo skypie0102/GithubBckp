@@ -72,7 +72,7 @@ class GoogleDriveStorageProvider @Inject constructor(
         }
     }
 
-    override suspend fun download(remoteBackup: RemoteBackup, destination: File) = withContext(Dispatchers.IO) {
+    override suspend fun download(remoteBackup: RemoteBackup, destination: File): Unit = withContext(Dispatchers.IO) {
         val token = authManager.requireAccessToken()
         val connection = open("$FILES_URL/${path(remoteBackup.id)}?alt=media", "GET", token)
         try {
@@ -90,6 +90,7 @@ class GoogleDriveStorageProvider @Inject constructor(
         } finally {
             connection.disconnect()
         }
+        Unit
     }
 
     override suspend fun delete(remoteBackup: RemoteBackup) = withContext(Dispatchers.IO) {
