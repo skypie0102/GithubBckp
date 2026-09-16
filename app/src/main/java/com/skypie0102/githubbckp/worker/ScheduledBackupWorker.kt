@@ -22,7 +22,7 @@ class ScheduledBackupWorker(
         if (!settings.enabled) return Result.success()
 
         val repositoryIds = dependencies.backupDao()
-            .getRepositories()
+            .getAvailableRepositories()
             .asSequence()
             .filter { it.selectedForBackup }
             .map { it.githubId }
