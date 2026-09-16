@@ -28,4 +28,10 @@ object DatabaseMigrations {
             db.execSQL("ALTER TABLE backups ADD COLUMN repositoryPrivateAtBackup INTEGER")
         }
     }
+
+    val MIGRATION_4_5 = object : Migration(4, 5) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE repositories ADD COLUMN isAvailable INTEGER NOT NULL DEFAULT 1")
+        }
+    }
 }
