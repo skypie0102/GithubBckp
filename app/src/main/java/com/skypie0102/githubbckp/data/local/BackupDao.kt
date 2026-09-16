@@ -42,6 +42,9 @@ interface BackupDao {
     @Query("UPDATE repositories SET selectedForBackup = :selected WHERE githubId = :githubId AND isAvailable = 1")
     suspend fun setRepositorySelected(githubId: Long, selected: Boolean)
 
+    @Query("UPDATE repositories SET selectedForBackup = :selected WHERE isAvailable = 1")
+    suspend fun setAvailableRepositoriesSelected(selected: Boolean)
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertBackup(backup: BackupEntity): Long
 
