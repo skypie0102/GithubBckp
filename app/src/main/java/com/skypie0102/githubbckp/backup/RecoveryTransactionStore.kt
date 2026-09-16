@@ -19,6 +19,7 @@ enum class RecoveryPhase {
     TARGET_BOUND,
     LFS_PUBLISHED,
     GIT_PUBLISHED,
+    RELEASES_PUBLISHED,
 }
 
 data class RecoveryTransaction(
@@ -31,6 +32,8 @@ data class RecoveryTransaction(
     val lfsObjectCount: Int,
     val pushedRefCount: Int,
     val skippedReadOnlyRefs: List<String>,
+    val releaseCount: Int,
+    val releaseAssetCount: Int,
     val createdAtEpochMs: Long,
     val updatedAtEpochMs: Long,
 )
@@ -81,6 +84,8 @@ class RecoveryTransactionStore {
             lfsObjectCount = 0,
             pushedRefCount = 0,
             skippedReadOnlyRefs = emptyList(),
+            releaseCount = 0,
+            releaseAssetCount = 0,
             createdAtEpochMs = now,
             updatedAtEpochMs = now,
         ).also(::write)
@@ -111,6 +116,22 @@ class RecoveryTransactionStore {
         )
     }
 
+    @Synchronized
+    fun markReleasesPublished(
+        restoreId: String,
+        repositoryId: Long,
+        result: GithubReleaseRestoreResult,
+    ): RecoveryTransaction = update(restoreId, repositoryId) { current ->
+        if (current.phase.ordinal < RecoveryPhase.GIT_PUBLISHED.ordinal) {
+            throw IOException("Git refs must be published before GitHub releases")
+        }
+        current.advance(
+            phase = RecoveryPhase.RELEASES_PUBLISHED,
+            releaseCount = result.releaseCount,
+            releaseAssetCount = result.assetCount,
+        )
+    }
+
     private fun update(
         restoreId: String,
         repositoryId: Long,
@@ -134,11 +155,15 @@ class RecoveryTransactionStore {
         lfsObjectCount: Int = this.lfsObjectCount,
         pushedRefCount: Int = this.pushedRefCount,
         skippedReadOnlyRefs: List<String> = this.skippedReadOnlyRefs,
+        releaseCount: Int = this.releaseCount,
+        releaseAssetCount: Int = this.releaseAssetCount,
     ): RecoveryTransaction = copy(
         phase = if (phase.ordinal >= this.phase.ordinal) phase else this.phase,
         lfsObjectCount = lfsObjectCount,
         pushedRefCount = pushedRefCount,
         skippedReadOnlyRefs = skippedReadOnlyRefs,
+        releaseCount = releaseCount,
+        releaseAssetCount = releaseAssetCount,
         updatedAtEpochMs = System.currentTimeMillis(),
     )
 
@@ -164,6 +189,8 @@ class RecoveryTransactionStore {
         .put("lfsObjectCount", transaction.lfsObjectCount)
         .put("pushedRefCount", transaction.pushedRefCount)
         .put("skippedReadOnlyRefs", JSONArray(transaction.skippedReadOnlyRefs))
+        .put("releaseCount", transaction.releaseCount)
+        .put("releaseAssetCount", transaction.releaseAssetCount)
         .put("createdAtEpochMs", transaction.createdAtEpochMs)
         .put("updatedAtEpochMs", transaction.updatedAtEpochMs)
 
@@ -187,6 +214,8 @@ class RecoveryTransactionStore {
                 lfsObjectCount = json.optInt("lfsObjectCount", 0),
                 pushedRefCount = json.optInt("pushedRefCount", 0),
                 skippedReadOnlyRefs = skipped,
+                releaseCount = json.optInt("releaseCount", 0),
+                releaseAssetCount = json.optInt("releaseAssetCount", 0),
                 createdAtEpochMs = json.getLong("createdAtEpochMs"),
                 updatedAtEpochMs = json.getLong("updatedAtEpochMs"),
             )
@@ -209,6 +238,7 @@ class RecoveryTransactionStore {
     }
 
     private companion object {
+        // New fields are optional on read, so v1 transaction files remain valid.
         const val FORMAT_VERSION = 1
         const val DIRECTORY_NAME = "recovery-transactions"
         val RESTORE_ID_REGEX = Regex("[A-Za-z0-9._-]+")
