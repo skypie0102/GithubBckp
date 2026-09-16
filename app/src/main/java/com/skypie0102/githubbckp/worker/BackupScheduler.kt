@@ -21,6 +21,7 @@ import kotlinx.coroutines.flow.Flow
 class BackupScheduler @Inject constructor(
     @ApplicationContext context: Context,
     private val schedulePreferences: BackupSchedulePreferences,
+    private val backupProblemNotifier: BackupProblemNotifier,
 ) {
     private val workManager = WorkManager.getInstance(context)
 
@@ -73,6 +74,7 @@ class BackupScheduler @Inject constructor(
         if (!settings.enabled) {
             workManager.cancelUniqueWork(SCHEDULE_WORK_NAME)
             workManager.cancelUniqueWork(HEALTH_CHECK_WORK_NAME)
+            backupProblemNotifier.clearOverdueBackupState()
             return
         }
 
