@@ -46,12 +46,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.unit.dp
+import com.skypie0102.githubbckp.backup.BackupStatus
 import com.skypie0102.githubbckp.backup.BackupType
 import com.skypie0102.githubbckp.backup.MirrorRestoreRecord
 import com.skypie0102.githubbckp.backup.RetentionPreferences
 import com.skypie0102.githubbckp.backup.auditReportFileName
+import com.skypie0102.githubbckp.backup.backupAuditReportFileName
 import com.skypie0102.githubbckp.backup.toAuditJson
 import com.skypie0102.githubbckp.backup.toAuditSnapshot
+import com.skypie0102.githubbckp.backup.toBackupAuditJson
+import com.skypie0102.githubbckp.backup.toBackupAuditSnapshot
 import com.skypie0102.githubbckp.data.local.BackupEntity
 import com.skypie0102.githubbckp.data.local.RepositoryEntity
 import com.skypie0102.githubbckp.storage.StorageDestination
@@ -64,6 +68,7 @@ fun HomeScreen(viewModel: HomeViewModel) {
     val uriHandler = LocalUriHandler.current
     val context = LocalContext.current
     var pendingAuditRestore by remember { mutableStateOf<MirrorRestoreRecord?>(null) }
+    var pendingBackupAudit by remember { mutableStateOf<Pair<BackupEntity, RepositoryEntity?>?>(null) }
     val driveLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartIntentSenderForResult(),
     ) { result ->
@@ -82,7 +87,7 @@ fun HomeScreen(viewModel: HomeViewModel) {
         if (uri != null) viewModel.restoreMirrorArchive(uri)
         else viewModel.restoreArchiveSelectionCancelled()
     }
-    val auditLauncher = rememberLauncherForActivityResult(
+    val restoreAuditLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("application/json"),
     ) { uri ->
         val restore = pendingAuditRestore
@@ -100,6 +105,32 @@ fun HomeScreen(viewModel: HomeViewModel) {
                 Toast.makeText(
                     context,
                     throwable.message ?: "Unable to export audit report",
+                    Toast.LENGTH_LONG,
+                ).show()
+            }
+        }
+    }
+    val backupAuditLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/json"),
+    ) { uri ->
+        val pending = pendingBackupAudit
+        pendingBackupAudit = null
+        if (uri != null && pending != null) {
+            runCatching {
+                val report = pending.first
+                    .toBackupAuditSnapshot(pending.second)
+                    .toBackupAuditJson()
+                    .toString(2)
+                context.contentResolver.openOutputStream(uri, "wt")
+                    ?.bufferedWriter()
+                    ?.use { writer -> writer.write(report) }
+                    ?: error("Unable to create backup audit report")
+            }.onSuccess {
+                Toast.makeText(context, "Backup audit report exported", Toast.LENGTH_SHORT).show()
+            }.onFailure { throwable ->
+                Toast.makeText(
+                    context,
+                    throwable.message ?: "Unable to export backup audit report",
                     Toast.LENGTH_LONG,
                 ).show()
             }
@@ -409,7 +440,7 @@ fun HomeScreen(viewModel: HomeViewModel) {
                         onPublish = { viewModel.beginGithubPublish(restore) },
                         onExportAudit = {
                             pendingAuditRestore = restore
-                            auditLauncher.launch(restore.auditReportFileName())
+                            restoreAuditLauncher.launch(restore.auditReportFileName())
                         },
                         onDelete = { viewModel.deleteRestoredMirror(restore.id) },
                     )
@@ -436,7 +467,22 @@ fun HomeScreen(viewModel: HomeViewModel) {
 
             if (state.recentBackups.isNotEmpty()) {
                 item { Text("Recent backups", style = MaterialTheme.typography.titleLarge) }
-                items(state.recentBackups.take(10), key = { it.id }) { backup -> BackupRow(backup) }
+                items(state.recentBackups.take(10), key = { it.id }) { backup ->
+                    val repository = state.repositories.firstOrNull { it.githubId == backup.repositoryId }
+                    BackupRow(
+                        backup = backup,
+                        repository = repository,
+                        onExportAudit = if (backup.status == BackupStatus.COMPLETED) {
+                            {
+                                val snapshot = backup.toBackupAuditSnapshot(repository)
+                                pendingBackupAudit = backup to repository
+                                backupAuditLauncher.launch(snapshot.backupAuditReportFileName())
+                            }
+                        } else {
+                            null
+                        },
+                    )
+                }
             }
         }
     }
@@ -610,10 +656,17 @@ private fun RestoredMirrorRow(
 }
 
 @Composable
-private fun BackupRow(backup: BackupEntity) {
+private fun BackupRow(
+    backup: BackupEntity,
+    repository: RepositoryEntity?,
+    onExportAudit: (() -> Unit)?,
+) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text("Repository #${backup.repositoryId}", style = MaterialTheme.typography.titleSmall)
+            Text(
+                repository?.let { "${it.owner}/${it.name}" } ?: "Repository #${backup.repositoryId}",
+                style = MaterialTheme.typography.titleSmall,
+            )
             Text("${backup.type.name.replace('_', ' ')} • ${backup.status.name}")
             backup.storageProvider?.let { provider ->
                 Text(
@@ -629,6 +682,9 @@ private fun BackupRow(backup: BackupEntity) {
                 Text("Completeness: $warning", style = MaterialTheme.typography.bodySmall)
             }
             backup.errorMessage?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            onExportAudit?.let {
+                OutlinedButton(onClick = it) { Text("Export audit JSON") }
+            }
         }
     }
 }
