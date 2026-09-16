@@ -36,6 +36,9 @@ class GithubMirrorRestorePublisher @Inject constructor(
         repositoryName: String,
         isPrivate: Boolean,
     ): GithubRestorePublishResult {
+        // Verify the recovery-specific OAuth permission before repository
+        // creation so an older token cannot leave an unused target behind.
+        val recoveryToken = authManager.requireRecoveryAccessToken()
         val existingTransaction = transactionStore.get(restoreId)
         val repository = if (existingTransaction == null) {
             repositoryGateway.createRepository(repositoryName, isPrivate)
@@ -57,6 +60,7 @@ class GithubMirrorRestorePublisher @Inject constructor(
             repository = repository,
             initialTransaction = transaction,
             isResume = existingTransaction != null,
+            token = recoveryToken,
             failurePrefix = "${repository.fullName} was created or resumed, but recovery failed",
         )
     }
@@ -65,6 +69,7 @@ class GithubMirrorRestorePublisher @Inject constructor(
         restoreId: String,
         repositoryFullName: String,
     ): GithubRestorePublishResult {
+        val recoveryToken = authManager.requireRecoveryAccessToken()
         val existingTransaction = transactionStore.get(restoreId)
         val repository = if (existingTransaction == null) {
             repositoryGateway.getRepository(repositoryFullName)
@@ -91,6 +96,7 @@ class GithubMirrorRestorePublisher @Inject constructor(
             repository = repository,
             initialTransaction = transaction,
             isResume = existingTransaction != null,
+            token = recoveryToken,
             failurePrefix = "Restore to ${repository.fullName} failed",
         )
     }
@@ -110,10 +116,10 @@ class GithubMirrorRestorePublisher @Inject constructor(
         repository: GithubRestoreRepository,
         initialTransaction: RecoveryTransaction,
         isResume: Boolean,
+        token: String,
         failurePrefix: String,
     ): GithubRestorePublishResult {
         val repositoryDirectory = restoreCoordinator.requireRepositoryDirectory(restoreId)
-        val token = authManager.requireAccessToken()
         val credentials = UsernamePasswordCredentialsProvider("x-access-token", token)
 
         return try {

@@ -33,6 +33,7 @@ GitMirrorRestoreService
    +-- GithubReleaseBackupService (manifest/assets validation)
    |
 GithubMirrorRestorePublisher
+   +-- GithubAuthManager (recovery scope enforcement)
    +-- RecoveryTransactionStore
    +-- GitLfsObjectStore / GitLfsUploadService
    +-- GithubReleaseRestoreService
@@ -42,7 +43,11 @@ GithubMirrorRestorePublisher
 
 ## GitHub authentication and API
 
-`GithubAuthManager` uses GitHub OAuth Device Flow. The Android package carries only an OAuth client ID. Access/refresh material is encrypted with an Android Keystore-backed AES-GCM key before being placed in SharedPreferences.
+`GithubAuthManager` uses GitHub OAuth Device Flow. The Android package carries only an OAuth client ID. Access/refresh material and cached granted-scope metadata are encrypted with an Android Keystore-backed AES-GCM key before being placed in SharedPreferences.
+
+New Device Flow authorizations request `repo workflow offline_access`. Backup/discovery continues to use the ordinary access token path. Recovery uses `requireRecoveryAccessToken()`, which requires the granted `workflow` scope before any recovery repository can be created or resolved. This avoids leaving a partially created target when GitHub later rejects a workflow-bearing ref update.
+
+For new authorizations, the token response's scope set is cached when GitHub returns it. Older installations can have a valid token but no cached scope metadata because previous app versions did not persist scopes. In that legacy case, recovery queries GitHub's authenticated-user endpoint and reads `X-OAuth-Scopes`, then caches the normalized set. Missing `workflow` produces a dedicated recoverable permission error and the UI offers Device Flow again as **Update GitHub permissions**. Backup and repository discovery do not require the user to reauthorize merely because recovery permission is absent.
 
 `GithubGateway` owns repository discovery, authenticated source-archive transfer, and lightweight repository feature lookup. Redirects from GitHub's API to archive storage are followed without forwarding the bearer token off GitHub's API host.
 
@@ -82,7 +87,7 @@ The main bare repository, LFS store, optional wiki mirror, and optional release 
 
 ## Resumable GitHub recovery
 
-`GithubMirrorRestorePublisher` publishes the main repository to either a newly created repository or an existing repository selected by full name. First-time recovery remains restricted to an empty Git surface and an empty release surface.
+`GithubMirrorRestorePublisher` obtains a recovery-validated OAuth token **before** target creation/resolution, then publishes the main repository to either a newly created repository or an existing repository selected by full name. First-time recovery remains restricted to an empty Git surface and an empty release surface.
 
 `RecoveryTransactionStore` persists one app-private transaction per restore. A transaction binds that restore to the stable GitHub repository ID/full name and advances monotonically through:
 
@@ -151,5 +156,6 @@ After `COMPLETED`, retention may prune older verified remote artifacts without c
 - `GithubReleaseRestoreServiceTest` verifies manifest parsing, renamed-asset SHA-256 reconciliation, starter cleanup planning, conflicting uploaded-asset rejection, and ambiguous digest rejection.
 - `RecoveryTransactionStoreTest` covers persistence, phase advancement through `RELEASES_PUBLISHED`, immutable target binding, ordering, and rebound-state rejection.
 - `GitMirrorPushServiceTest` validates empty-target push behavior, explicit preflight refusal for non-empty targets, exact post-push reconciliation, and rejection of unexpected extra refs.
+- `GithubAuthManagerTest` covers OAuth scope normalization, workflow-scope detection, and the legacy no-cache case.
 - Retention tests validate keep-all and keep-last-N selection.
 - Room/KSP compilation validates database schema/query consistency in CI.

@@ -14,6 +14,10 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
+class GithubWorkflowPermissionRequiredException : IOException(
+    "GitHub authorization is missing the workflow permission required for complete repository recovery. Update GitHub permissions and approve workflow access.",
+)
+
 data class GithubDeviceSession(
     val deviceCode: String,
     val userCode: String,
@@ -21,6 +25,17 @@ data class GithubDeviceSession(
     val expiresInSeconds: Long,
     val intervalSeconds: Long,
 )
+
+internal const val GITHUB_WORKFLOW_SCOPE = "workflow"
+
+internal fun parseGithubOauthScopes(value: String): Set<String> = value
+    .split(Regex("[\\s,]+"))
+    .map(String::trim)
+    .filter(String::isNotBlank)
+    .toSet()
+
+internal fun githubScopesContainWorkflow(value: String?): Boolean =
+    value?.let(::parseGithubOauthScopes)?.contains(GITHUB_WORKFLOW_SCOPE) == true
 
 @Singleton
 class GithubAuthManager @Inject constructor(
@@ -30,13 +45,16 @@ class GithubAuthManager @Inject constructor(
 
     fun isAuthenticated(): Boolean = secureStore.get(KEY_ACCESS_TOKEN) != null
 
+    fun hasWorkflowScopeCached(): Boolean =
+        githubScopesContainWorkflow(secureStore.get(KEY_OAUTH_SCOPES))
+
     suspend fun startDeviceFlow(): GithubDeviceSession = withContext(Dispatchers.IO) {
         requireConfigured()
         val response = postForm(
             DEVICE_CODE_URL,
             mapOf(
                 "client_id" to BuildConfig.GITHUB_CLIENT_ID,
-                "scope" to "repo offline_access",
+                "scope" to "repo workflow offline_access",
             ),
         )
         GithubDeviceSession(
@@ -94,11 +112,26 @@ class GithubAuthManager @Inject constructor(
         refresh(refreshToken)
     }
 
+    suspend fun requireRecoveryAccessToken(): String = withContext(Dispatchers.IO) {
+        val token = requireAccessToken()
+        val cached = secureStore.get(KEY_OAUTH_SCOPES)
+        val scopes = if (cached != null) {
+            parseGithubOauthScopes(cached)
+        } else {
+            fetchTokenScopes(token).also(::persistScopes)
+        }
+        if (GITHUB_WORKFLOW_SCOPE !in scopes) {
+            throw GithubWorkflowPermissionRequiredException()
+        }
+        token
+    }
+
     fun disconnect() {
         secureStore.remove(KEY_ACCESS_TOKEN)
         secureStore.remove(KEY_ACCESS_EXPIRES_AT)
         secureStore.remove(KEY_REFRESH_TOKEN)
         secureStore.remove(KEY_REFRESH_EXPIRES_AT)
+        secureStore.remove(KEY_OAUTH_SCOPES)
     }
 
     private fun refresh(refreshToken: String): String {
@@ -136,6 +169,37 @@ class GithubAuthManager @Inject constructor(
         if (refreshExpiresIn > 0) {
             secureStore.put(KEY_REFRESH_EXPIRES_AT, (now + refreshExpiresIn * 1_000L).toString())
         }
+        response.optString("scope")
+            .takeIf { it.isNotBlank() }
+            ?.let(::parseGithubOauthScopes)
+            ?.let(::persistScopes)
+    }
+
+    private fun fetchTokenScopes(token: String): Set<String> {
+        val connection = (URL(GITHUB_USER_URL).openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            connectTimeout = CONNECT_TIMEOUT_MS
+            readTimeout = READ_TIMEOUT_MS
+            setRequestProperty("Accept", "application/vnd.github+json")
+            setRequestProperty("Authorization", "Bearer $token")
+            setRequestProperty("X-GitHub-Api-Version", GITHUB_API_VERSION)
+        }
+        return try {
+            val code = connection.responseCode
+            if (code !in 200..299) {
+                val error = connection.errorStream?.bufferedReader()?.use { it.readText() }.orEmpty()
+                throw IOException("Unable to verify GitHub OAuth permissions (HTTP $code): ${error.take(300)}")
+            }
+            val header = connection.getHeaderField("X-OAuth-Scopes")
+                ?: throw IOException("GitHub did not report OAuth token scopes")
+            parseGithubOauthScopes(header)
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    private fun persistScopes(scopes: Set<String>) {
+        secureStore.put(KEY_OAUTH_SCOPES, scopes.sorted().joinToString(","))
     }
 
     private fun requireConfigured() {
@@ -180,11 +244,14 @@ class GithubAuthManager @Inject constructor(
     private companion object {
         const val DEVICE_CODE_URL = "https://github.com/login/device/code"
         const val ACCESS_TOKEN_URL = "https://github.com/login/oauth/access_token"
+        const val GITHUB_USER_URL = "https://api.github.com/user"
+        const val GITHUB_API_VERSION = "2026-03-10"
         const val DEVICE_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:device_code"
         const val KEY_ACCESS_TOKEN = "github.access-token"
         const val KEY_ACCESS_EXPIRES_AT = "github.access-token-expires-at"
         const val KEY_REFRESH_TOKEN = "github.refresh-token"
         const val KEY_REFRESH_EXPIRES_AT = "github.refresh-token-expires-at"
+        const val KEY_OAUTH_SCOPES = "github.oauth-scopes"
         const val TOKEN_EXPIRY_SKEW_MS = 60_000L
         const val CONNECT_TIMEOUT_MS = 30_000
         const val READ_TIMEOUT_MS = 30_000

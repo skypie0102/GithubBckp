@@ -39,6 +39,7 @@ enum class GithubRestoreTargetMode {
 data class HomeUiState(
     val githubConfigured: Boolean = false,
     val githubConnected: Boolean = false,
+    val githubWorkflowPermission: Boolean = false,
     val driveConnected: Boolean = false,
     val storageDestination: StorageDestination = StorageDestination.GOOGLE_DRIVE,
     val documentTreeConfigured: Boolean = false,
@@ -79,6 +80,7 @@ class HomeViewModel @Inject constructor(
         HomeUiState(
             githubConfigured = githubAuthManager.isConfigured(),
             githubConnected = githubAuthManager.isAuthenticated(),
+            githubWorkflowPermission = githubAuthManager.hasWorkflowScopeCached(),
             driveConnected = driveAuthManager.isAuthenticated(),
             storageDestination = storagePreferences.destination(),
             documentTreeConfigured = storagePreferences.isDocumentTreeConfigured(),
@@ -113,7 +115,14 @@ class HomeViewModel @Inject constructor(
                 val session = githubAuthManager.startDeviceFlow()
                 _state.update { it.copy(githubDeviceSession = session, message = null) }
                 githubAuthManager.pollUntilAuthorized(session)
-                _state.update { it.copy(githubConnected = true, githubDeviceSession = null, message = "GitHub connected") }
+                _state.update {
+                    it.copy(
+                        githubConnected = true,
+                        githubWorkflowPermission = githubAuthManager.hasWorkflowScopeCached(),
+                        githubDeviceSession = null,
+                        message = "GitHub connected",
+                    )
+                }
                 refreshRepositoriesInternal()
             }
         }
@@ -393,6 +402,14 @@ class HomeViewModel @Inject constructor(
         val restoreId = state.githubPublishRestoreId ?: return
         if (!state.githubConnected) {
             _state.update { it.copy(message = "Connect GitHub before publishing a restored mirror") }
+            return
+        }
+        if (!state.githubWorkflowPermission) {
+            _state.update {
+                it.copy(
+                    message = "Update GitHub permissions and approve workflow access before publishing a restored mirror",
+                )
+            }
             return
         }
         when (state.githubRestoreTargetMode) {

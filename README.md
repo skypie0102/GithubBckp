@@ -21,6 +21,7 @@ GitHub device authorization
 Mirror ZIP
   -> safe private import
   -> validate main Git, LFS, wiki, and release data
+  -> verify recovery OAuth permission
   -> bind recovery transaction to one GitHub repository ID
   -> verify target Git + release surfaces are empty
   -> verify/upload Git LFS objects
@@ -61,7 +62,17 @@ The app uses GitHub Device Flow so the Android package never ships an OAuth clie
 ./gradlew :app:assembleDebug -PGITHUB_CLIENT_ID=your_client_id
 ```
 
-Or export `GITHUB_CLIENT_ID`. Runtime token material is encrypted with Android Keystore-backed AES-GCM storage.
+Or export `GITHUB_CLIENT_ID`. Runtime token material and cached granted-scope metadata are encrypted with Android Keystore-backed AES-GCM storage.
+
+New authorizations request:
+
+```text
+repo workflow offline_access
+```
+
+`repo` covers private-repository access. `workflow` is required for complete disaster recovery when restored Git history contains GitHub Actions workflow files; the app verifies this recovery permission **before** creating or modifying a recovery target. `offline_access` is requested for renewable authorization when GitHub returns expiring user tokens.
+
+Older app versions did not request `workflow`. Those existing tokens remain usable for repository discovery and backups. For recovery, the app checks cached granted scopes when available; for a legacy token with no cached scope metadata it asks GitHub for the token's `X-OAuth-Scopes` and caches the result. If `workflow` is absent, the GitHub card shows **Update GitHub permissions** and recovery refuses to start until Device Flow is authorized again with the additional permission.
 
 ## Backup destinations
 
@@ -147,6 +158,8 @@ Every GitHub recovery is bound to a private app-side transaction keyed by the re
 TARGET_BOUND -> LFS_PUBLISHED -> GIT_PUBLISHED -> RELEASES_PUBLISHED
 ```
 
+Before target creation or resolution, recovery obtains a token that is verified to include the `workflow` OAuth scope. This prevents an older authorization from creating a target and then failing later when GitHub rejects workflow-file restoration.
+
 Retries cannot silently switch to another target. A new-repository retry reuses the previously created repository instead of creating a duplicate, and an existing-target retry verifies that the GitHub repository ID still matches the transaction.
 
 A crash after GitHub accepted the Git push but before the local `GIT_PUBLISHED` phase was written is reconciled narrowly: the app compares every advertised writable remote ref name and object ID with the local mirror. Only an exact match is accepted as already published; any extra or mismatched ref still fails safely.
@@ -181,7 +194,7 @@ Recovery transaction files live in app-private storage, bind a restore to a stab
 
 Key boundaries:
 
-- `GithubAuthManager` — GitHub Device Flow and encrypted token persistence
+- `GithubAuthManager` — GitHub Device Flow, encrypted token/scope persistence, and recovery-scope enforcement
 - `GithubGateway` / `GithubRestGateway` — repository discovery, feature lookup, source archive transfer
 - `BackupEngineFactory` — source snapshot vs Git mirror
 - `GitLfsPointerScanner` / `GitLfsDownloadService` — LFS backup
@@ -201,7 +214,7 @@ See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ## Next implementation slice
 
-1. Harden GitHub authorization for workflow-bearing repositories and recovery operations that require GitHub's workflow permission.
-2. Add issues and pull-request metadata backup/recovery modules.
-3. Design separately confirmed destructive recovery for non-empty repositories with explicit ref-deletion and repository-rule handling.
-4. Add richer backup/restore audit and export reporting.
+1. Add issues and pull-request metadata backup/recovery modules.
+2. Design separately confirmed destructive recovery for non-empty repositories with explicit ref-deletion and repository-rule handling.
+3. Add richer backup/restore audit and export reporting.
+4. Add organization/team metadata only after defining which GitHub identity and permission semantics are safe to reproduce.
