@@ -109,14 +109,22 @@ fun HomeScreen(viewModel: HomeViewModel) {
                     title = "GitHub",
                     detail = when {
                         !state.githubConfigured -> "OAuth client ID not configured"
-                        state.githubConnected -> "Connected"
+                        state.githubConnected && state.githubWorkflowPermission -> "Connected • full recovery permission"
+                        state.githubConnected -> "Connected • update permissions for workflow recovery"
                         else -> "Not connected"
                     },
                     icon = { Icon(Icons.Outlined.Code, contentDescription = null) },
-                    action = if (state.githubConnected) "Refresh repositories" else "Connect GitHub",
+                    action = when {
+                        !state.githubConnected -> "Connect GitHub"
+                        !state.githubWorkflowPermission -> "Update GitHub permissions"
+                        else -> "Refresh repositories"
+                    },
                     enabled = state.githubConfigured && !state.busy,
                     onClick = {
-                        if (state.githubConnected) viewModel.refreshRepositories() else viewModel.connectGithub()
+                        when {
+                            !state.githubConnected || !state.githubWorkflowPermission -> viewModel.connectGithub()
+                            else -> viewModel.refreshRepositories()
+                        }
                     },
                 )
             }
@@ -419,7 +427,7 @@ private fun GithubPublishCard(
         ) {
             Text("Restore mirror to GitHub", style = MaterialTheme.typography.titleMedium)
             Text(
-                "Recovery only writes to an empty Git repository. It restores bundled Git LFS objects first, verifies the remote advertises no Git refs, never force-pushes, and skips GitHub read-only refs/pull/*.",
+                "Recovery requires GitHub workflow permission and only starts with an empty Git/release target. It restores LFS objects, Git refs, then releases/assets; main refs are never force-pushed and GitHub read-only refs/pull/* are skipped.",
                 style = MaterialTheme.typography.bodySmall,
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -461,7 +469,7 @@ private fun GithubPublishCard(
                     onValueChange = onExistingRepositoryChange,
                     label = { Text("Existing owner/repository") },
                     supportingText = {
-                        Text("The target must exist and contain no advertised Git refs. Non-empty targets are refused.")
+                        Text("The target must exist, advertise no Git refs, and contain no GitHub releases when recovery starts.")
                     },
                     singleLine = true,
                     enabled = !busy,
