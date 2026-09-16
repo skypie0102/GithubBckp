@@ -434,6 +434,16 @@ class HomeViewModel @Inject constructor(
                         lastPublishedRepositoryUrl = result.repositoryUrl,
                         message = buildString {
                             append("Restored ${result.pushedRefCount} Git refs to ${result.repositoryFullName}")
+                            if (result.restoredLfsObjectCount > 0) {
+                                append("; ${result.restoredLfsObjectCount} LFS object")
+                                if (result.restoredLfsObjectCount != 1) append("s")
+                            }
+                            if (result.restoredReleaseCount > 0) {
+                                append("; ${result.restoredReleaseCount} release")
+                                if (result.restoredReleaseCount != 1) append("s")
+                                append(" / ${result.restoredReleaseAssetCount} asset")
+                                if (result.restoredReleaseAssetCount != 1) append("s")
+                            }
                             if (result.skippedReadOnlyRefs.isNotEmpty()) {
                                 append("; skipped ${result.skippedReadOnlyRefs.size} read-only pull-request refs")
                             }

@@ -104,7 +104,7 @@ class GitMirrorBackupEngine @Inject constructor(
                 }
                 if (releases != null) {
                     add(
-                        "Release metadata and ${releases.assetCount} release asset${if (releases.assetCount == 1) "" else "s"} are bundled and verified, but automatic GitHub release publication is not implemented yet.",
+                        "Release metadata and ${releases.assetCount} release asset${if (releases.assetCount == 1) "" else "s"} are bundled, verified, and restorable. GitHub's original latest-release selection and immutable release state are not automatically reproduced.",
                     )
                 }
             },

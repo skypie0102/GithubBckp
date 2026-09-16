@@ -30,8 +30,40 @@ class RecoveryTransactionStoreTest {
             assertEquals(5, git.pushedRefCount)
             assertEquals(listOf("refs/pull/1/head"), git.skippedReadOnlyRefs)
 
+            val releases = store.markReleasesPublished(
+                "restore-1",
+                42L,
+                GithubReleaseRestoreResult(
+                    releaseCount = 2,
+                    assetCount = 4,
+                    immutableReleaseCount = 1,
+                ),
+            )
+            assertEquals(RecoveryPhase.RELEASES_PUBLISHED, releases.phase)
+            assertEquals(2, releases.releaseCount)
+            assertEquals(4, releases.releaseAssetCount)
+
             val reloaded = RecoveryTransactionStore(root).get("restore-1")
-            assertEquals(git, reloaded)
+            assertEquals(releases, reloaded)
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun refusesReleasePhaseBeforeGitPublication() {
+        val root = Files.createTempDirectory("recovery-release-order-test").toFile()
+        try {
+            val store = RecoveryTransactionStore(root)
+            store.bind("restore-order", RecoveryTargetKind.NEW_REPOSITORY, repository(42L, "owner/recovered"))
+
+            assertThrows(IOException::class.java) {
+                store.markReleasesPublished(
+                    "restore-order",
+                    42L,
+                    GithubReleaseRestoreResult(1, 1, 0),
+                )
+            }
         } finally {
             root.deleteRecursively()
         }
