@@ -13,27 +13,28 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 interface BackupDao {
     @Upsert
-    suspend fun upsertRepositories(repositories: List<RepositoryEntity>)
+    suspend fun upsertRepositoryRows(repositories: List<RepositoryEntity>)
 
     @Query("UPDATE repositories SET isAvailable = 0")
     suspend fun markAllRepositoriesUnavailable()
 
     @Transaction
-    suspend fun reconcileRepositories(repositories: List<RepositoryEntity>) {
+    suspend fun upsertRepositories(repositories: List<RepositoryEntity>) {
         markAllRepositoriesUnavailable()
-        if (repositories.isNotEmpty()) {
-            upsertRepositories(repositories.map { it.copy(isAvailable = true) })
+        val normalized = normalizeRepositoryInventory(repositories)
+        if (normalized.isNotEmpty()) {
+            upsertRepositoryRows(normalized)
         }
     }
 
-    @Query("SELECT * FROM repositories ORDER BY owner, name")
+    @Query("SELECT * FROM repositories WHERE isAvailable = 1 ORDER BY owner, name")
     fun observeRepositories(): Flow<List<RepositoryEntity>>
 
-    @Query("SELECT * FROM repositories WHERE isAvailable = 1 ORDER BY owner, name")
+    @Query("SELECT * FROM repositories ORDER BY owner, name")
     suspend fun getRepositories(): List<RepositoryEntity>
 
-    @Query("SELECT * FROM repositories ORDER BY owner, name")
-    suspend fun getAllRepositories(): List<RepositoryEntity>
+    @Query("SELECT * FROM repositories WHERE isAvailable = 1 ORDER BY owner, name")
+    suspend fun getAvailableRepositories(): List<RepositoryEntity>
 
     @Query("SELECT * FROM repositories WHERE githubId = :githubId AND isAvailable = 1 LIMIT 1")
     suspend fun getRepository(githubId: Long): RepositoryEntity?
