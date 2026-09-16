@@ -15,6 +15,7 @@ data class RepositoryEntity(
     val isPrivate: Boolean,
     val selectedForBackup: Boolean = true,
     val lastKnownSha: String? = null,
+    val isAvailable: Boolean = true,
 )
 
 @Entity(tableName = "backups")
