@@ -13,6 +13,7 @@ GitHub device authorization
   -> mirror: Git refs/history + Git LFS objects
   -> mirror: initialized wiki history when present
   -> mirror: release metadata + verified release assets when present
+  -> mirror: issue/PR metadata + comments/reviews when present
   -> checksum artifact
   -> user-selected folder or Google Drive
   -> upload + verify
@@ -20,7 +21,7 @@ GitHub device authorization
 
 Mirror ZIP
   -> safe private import
-  -> validate main Git, LFS, wiki, and release data
+  -> validate main Git, LFS, wiki, releases, and discussion datasets
   -> verify recovery OAuth permission
   -> bind recovery transaction to one GitHub repository ID
   -> verify target Git + release surfaces are empty
@@ -34,13 +35,11 @@ Mirror ZIP
 ### Backup formats
 
 - **Source snapshot** — downloads the default branch as GitHub's TAR.GZ archive. It is compact, but not a full-history backup.
-- **Git mirror** — mirror-clones the repository, bundles all detected standard Git LFS objects, optionally bundles initialized wiki history, and preserves release metadata/assets inside one `.mirror.zip`. The artifact receives SHA-256 + MD5 integrity hashes before storage.
+- **Git mirror** — mirror-clones the repository, bundles all detected standard Git LFS objects, optionally bundles initialized wiki history, preserves release metadata/assets, and streams issue/pull-request discussion metadata into validated JSONL datasets inside one `.mirror.zip`. The artifact receives SHA-256 + MD5 integrity hashes before storage.
 
-Git mirror backup fails rather than silently succeeding when a referenced LFS object or release asset cannot be fetched or verified. Main Git, Git LFS, release metadata, and release assets are recoverable to a new or provably empty GitHub repository. Wiki history is preserved and locally verified but automatic wiki publication remains intentionally unavailable.
+Git mirror backup fails rather than silently succeeding when a referenced LFS object, release asset, or requested GitHub metadata page cannot be fetched or verified. Main Git, Git LFS, release metadata, and release assets are recoverable to a new or provably empty GitHub repository. Wiki history and discussion metadata are preserved and locally verified but are not automatically republished to GitHub.
 
-For releases, GitHub's original latest-release selection, original publication timestamps, and immutable-release state are not recreated. Those limitations remain recorded as non-fatal completeness metadata when release data is present.
-
-Issues and pull-request metadata remain future completeness modules.
+For releases, GitHub's original latest-release selection, original publication timestamps, and immutable-release state are not recreated. Discussion preservation does not bundle timeline events or referenced attachment bytes and does not attempt to impersonate original authors/timestamps during recovery. These limitations remain recorded as non-fatal completeness metadata when the corresponding data is present.
 
 ## Build
 
@@ -150,6 +149,28 @@ Release creation deliberately avoids changing GitHub's latest-release selection.
 
 See [`docs/RELEASE_BACKUP.md`](docs/RELEASE_BACKUP.md).
 
+## GitHub issue and pull request metadata backup
+
+Mirror mode preserves discussion metadata outside the Git object database using streaming JSON Lines files:
+
+```text
+github-backup/discussions/
+  manifest.json
+  issues.jsonl
+  issue-comments.jsonl
+  pull-requests.jsonl
+  review-comments.jsonl
+  reviews.jsonl
+```
+
+The raw REST response objects are retained so GitHub fields such as Markdown bodies, labels, milestones, author identities, timestamps, refs, review state, and association metadata remain available when returned by the API. Each dataset has an independent SHA-256 and record count in the versioned manifest. The implementation holds only pull-request numbers in memory while records stream to disk, avoiding one giant discussion JSON object on large repositories.
+
+Local mirror restore recomputes every dataset hash, parses every JSON line, checks record identities for duplicates/invalid values, and verifies manifest counts before retaining the restore.
+
+Automatic discussion recreation is intentionally unavailable. Creating replacement issues/comments/reviews cannot faithfully assume another user's identity or original server timestamp and may trigger notifications or automation. Timeline events and referenced attachment bytes are also outside this preservation slice.
+
+See [`docs/DISCUSSIONS_BACKUP.md`](docs/DISCUSSIONS_BACKUP.md).
+
 ## Resumable GitHub recovery
 
 Every GitHub recovery is bound to a private app-side transaction keyed by the restored mirror ID. The transaction records the exact GitHub repository ID/full name plus the recovery phase:
@@ -177,6 +198,7 @@ The app imports a Git mirror ZIP through Android's document picker and validates
 3. Revalidate bundled Git LFS objects during GitHub publication.
 4. Verify any bundled wiki mirror independently.
 5. Verify any bundled release manifest and every asset's size/SHA-256.
+6. Verify every bundled discussion dataset's SHA-256, JSON records, identities, and counts.
 
 A validated main mirror can be published to either a **new** GitHub repository or an **existing repository that is still empty**. GitHub's read-only `refs/pull/*` namespace is skipped and reported. Main refs are never force-pushed in this flow.
 
@@ -202,6 +224,7 @@ Key boundaries:
 - `GithubWikiBackupService` — wiki mirror preservation/validation
 - `GithubReleaseBackupService` — release manifest/asset preservation/validation
 - `GithubReleaseRestoreService` — idempotent release recreation and asset verification/upload
+- `GithubDiscussionBackupService` — streaming issue/PR/comment/review preservation and validation
 - `GitMirrorRestoreService` / `MirrorRestoreCoordinator` — safe local restore
 - `RecoveryTransactionStore` — stable target binding and resumable recovery phase persistence
 - `GitMirrorPushService` / `GithubMirrorRestorePublisher` — preflight, exact-resume reconciliation, and recovery orchestration
@@ -214,7 +237,7 @@ See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ## Next implementation slice
 
-1. Add issues and pull-request metadata backup/recovery modules.
-2. Design separately confirmed destructive recovery for non-empty repositories with explicit ref-deletion and repository-rule handling.
-3. Add richer backup/restore audit and export reporting.
+1. Add richer backup/restore audit and export reporting, including discussion dataset counts and completeness flags.
+2. Design an explicit archival discussion export/reconstruction workflow without impersonating authors or silently triggering notifications.
+3. Design separately confirmed destructive recovery for non-empty repositories with explicit ref-deletion and repository-rule handling.
 4. Add organization/team metadata only after defining which GitHub identity and permission semantics are safe to reproduce.
