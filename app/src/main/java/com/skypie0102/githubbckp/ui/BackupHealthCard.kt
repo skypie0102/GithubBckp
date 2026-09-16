@@ -31,18 +31,11 @@ fun BackupHealthCard(
                 style = MaterialTheme.typography.bodyMedium,
             )
 
-            val problems = summary.problemRepositories
-            if (problems.isNotEmpty()) {
+            if (summary.repositories.isNotEmpty()) {
                 Spacer(Modifier.height(2.dp))
-                problems.take(MAX_PROBLEMS_SHOWN).forEach { health ->
+                summary.repositories.forEach { health ->
                     Text(
                         text = "${health.fullName} • ${health.detailText()}",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
-                if (problems.size > MAX_PROBLEMS_SHOWN) {
-                    Text(
-                        text = "+${problems.size - MAX_PROBLEMS_SHOWN} more selected repositories need attention",
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
@@ -58,7 +51,9 @@ private fun BackupHealthSummary.headlineText(): String = when {
 }
 
 private fun RepositoryBackupHealth.detailText(): String = when (state) {
-    RepositoryBackupHealthState.PROTECTED -> "protected"
+    RepositoryBackupHealthState.PROTECTED -> latestVerifiedAtEpochMs
+        ?.let { "protected • last verified ${formatTimestamp(it)}" }
+        ?: "protected"
     RepositoryBackupHealthState.WARNING -> warningMessage
         ?.takeIf { it.isNotBlank() }
         ?.let { "verified with warning: $it" }
@@ -75,5 +70,3 @@ private fun RepositoryBackupHealth.detailText(): String = when (state) {
 
 private fun formatTimestamp(epochMs: Long): String =
     DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(epochMs))
-
-private const val MAX_PROBLEMS_SHOWN = 5
