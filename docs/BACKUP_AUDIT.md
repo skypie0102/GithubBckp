@@ -4,11 +4,11 @@ GithubBckp can export a JSON audit report for any completed backup in Recent bac
 
 ## Format
 
-The current report format is version `2` and uses:
+The current report format is version `3` and uses:
 
 ```json
 {
-  "formatVersion": 2,
+  "formatVersion": 3,
   "reportType": "github-backup-artifact-audit",
   "generatedAtEpochMs": 0,
   "repository": {},
@@ -28,13 +28,20 @@ Every new schema-v4 backup row snapshots these values before backup network work
 - default branch;
 - private/public state.
 
-Version-2 audit reports expose those values with `metadataSource: "backup-time-snapshot"`. A later repository rename, default-branch change, or privacy change therefore does not rewrite the historical audit identity.
+Audit reports expose those values with `metadataSource: "backup-time-snapshot"`. A later repository rename, default-branch change, or privacy change therefore does not rewrite the historical audit identity.
 
-Rows migrated from database schema v1-v3 cannot be assigned historical values safely. Their new snapshot columns remain null. Audit export falls back to the current local repository cache when available and reports `metadataSource: "current-local-repository-cache"`; otherwise it uses `metadataSource: "unavailable"`. Both legacy cases are also called out in the report's `limitations` array.
+Rows migrated from database schema v1-v3 cannot be assigned historical values safely. Their snapshot columns remain null. Audit export falls back to the current local repository cache when available and reports `metadataSource: "current-local-repository-cache"`; otherwise it uses `metadataSource: "unavailable"`. Both legacy cases are also called out in the report's `limitations` array.
 
 ### Backup
 
-The backup section records the persisted backup ID, backup type, terminal status, start/completion timestamps, completeness warning, and error field.
+The backup section records the persisted backup ID, backup type, origin, terminal status, start/completion timestamps, completeness warning, and error field.
+
+Database schema v6 records `origin` before backup network work begins. New WorkManager requests use:
+
+- `MANUAL` — explicitly queued from the app's manual backup action;
+- `SCHEDULED` — queued by the periodic automatic-backup controller.
+
+Rows migrated from schema v1-v5, and one-time work that was already pending before origin metadata was introduced, retain `origin: null`. The audit report describes that case as unknown rather than guessing whether a historical attempt was manual or scheduled.
 
 The app currently exposes the export action only for `COMPLETED` backups.
 
@@ -58,4 +65,4 @@ A pruned backup remains auditable even though its remote artifact no longer exis
 
 The UI uses Android's system **Create Document** flow with `application/json`. The report is written only to the URI selected by the user and does not require broad storage permission.
 
-The suggested filename uses the backup-time repository name for schema-v4 rows. Legacy rows use the current known repository name when available, otherwise the immutable numeric repository ID, plus the backup history ID.
+The suggested filename uses the backup-time repository name for schema-v4+ rows. Legacy rows use the current known repository name when available, otherwise the immutable numeric repository ID, plus the backup history ID.
