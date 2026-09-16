@@ -47,6 +47,8 @@ class BackupAuditTest {
         assertEquals("github-backup-artifact-audit", json.getString("reportType"))
         assertEquals(999, json.getLong("generatedAtEpochMs"))
         assertEquals("octo/demo", repository.getString("fullName"))
+        assertEquals("octo/demo", backup.repositoryDisplayName(currentRepository))
+        assertEquals("octo/demo", backup.repositoryDisplayName(repository = null))
         assertEquals("main", repository.getString("defaultBranch"))
         assertTrue(repository.getBoolean("private"))
         assertEquals("backup-time-snapshot", repository.getString("metadataSource"))
@@ -86,6 +88,7 @@ class BackupAuditTest {
         val repository = json.getJSONObject("repository")
 
         assertEquals("octo/legacy", repository.getString("fullName"))
+        assertEquals("octo/legacy", backup.repositoryDisplayName(currentRepository))
         assertEquals("current-local-repository-cache", repository.getString("metadataSource"))
         assertTrue(json.getJSONArray("limitations").toString().contains("pre-v4"))
     }
@@ -108,6 +111,7 @@ class BackupAuditTest {
 
         assertEquals(88, repository.getLong("githubId"))
         assertTrue(repository.isNull("fullName"))
+        assertEquals("Repository #88", backup.repositoryDisplayName(repository = null))
         assertEquals("unavailable", repository.getString("metadataSource"))
         assertEquals("UNKNOWN", json.getJSONObject("storage").getString("remoteState"))
         assertTrue(snapshot.backupAuditReportFileName().startsWith("repository-88-backup-9"))
