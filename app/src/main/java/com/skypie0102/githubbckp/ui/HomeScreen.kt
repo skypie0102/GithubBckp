@@ -46,12 +46,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.unit.dp
+import androidx.hilt.navigation.compose.hiltViewModel
+import com.skypie0102.githubbckp.backup.BackupReverificationStatus
 import com.skypie0102.githubbckp.backup.BackupStatus
 import com.skypie0102.githubbckp.backup.BackupType
 import com.skypie0102.githubbckp.backup.MirrorRestoreRecord
 import com.skypie0102.githubbckp.backup.RetentionPreferences
 import com.skypie0102.githubbckp.backup.auditReportFileName
 import com.skypie0102.githubbckp.backup.backupAuditReportFileName
+import com.skypie0102.githubbckp.backup.canReverifyBackup
 import com.skypie0102.githubbckp.backup.repositoryDisplayName
 import com.skypie0102.githubbckp.backup.toAuditJson
 import com.skypie0102.githubbckp.backup.toAuditSnapshot
@@ -71,6 +74,8 @@ import java.util.Date
 @Composable
 fun HomeScreen(viewModel: HomeViewModel) {
     val state by viewModel.state.collectAsState()
+    val reverificationViewModel: BackupReverificationViewModel = hiltViewModel()
+    val reverificationState by reverificationViewModel.state.collectAsState()
     val uriHandler = LocalUriHandler.current
     val context = LocalContext.current
     var pendingAuditRestore by remember { mutableStateOf<MirrorRestoreRecord?>(null) }
@@ -530,6 +535,12 @@ fun HomeScreen(viewModel: HomeViewModel) {
                     BackupRow(
                         backup = backup,
                         repository = repository,
+                        reverifyBusy = reverificationState.busyBackupId == backup.id,
+                        onReverify = if (backup.canReverifyBackup()) {
+                            { reverificationViewModel.reverifyBackup(backup.id) }
+                        } else {
+                            null
+                        },
                         onExportAudit = if (backup.status == BackupStatus.COMPLETED) {
                             {
                                 val snapshot = backup.toBackupAuditSnapshot(repository)
@@ -717,6 +728,8 @@ private fun RestoredMirrorRow(
 private fun BackupRow(
     backup: BackupEntity,
     repository: RepositoryEntity?,
+    reverifyBusy: Boolean,
+    onReverify: (() -> Unit)?,
     onExportAudit: (() -> Unit)?,
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
@@ -734,12 +747,46 @@ private fun BackupRow(
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
+            backup.lastReverifiedAtEpochMs?.let { timestamp ->
+                val formatted = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT)
+                    .format(Date(timestamp))
+                val label = when (backup.lastReverificationStatus) {
+                    BackupReverificationStatus.VERIFIED -> "Re-verified $formatted"
+                    BackupReverificationStatus.FAILED -> "Re-verification failed $formatted"
+                    null -> "Re-verification checked $formatted"
+                }
+                Text(
+                    label,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (backup.lastReverificationStatus == BackupReverificationStatus.FAILED) {
+                        MaterialTheme.colorScheme.error
+                    } else {
+                        MaterialTheme.colorScheme.onSurface
+                    },
+                )
+                backup.lastReverificationMessage?.let { detail ->
+                    Text(
+                        detail,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (backup.lastReverificationStatus == BackupReverificationStatus.FAILED) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                    )
+                }
+            }
             backup.warningMessage?.let { warning ->
                 Text("Completeness: $warning", style = MaterialTheme.typography.bodySmall)
             }
             backup.errorMessage?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            onReverify?.let {
+                OutlinedButton(onClick = it, enabled = !reverifyBusy) {
+                    Text(if (reverifyBusy) "Re-verifying…" else "Re-verify stored backup")
+                }
+            }
             onExportAudit?.let {
-                OutlinedButton(onClick = it) { Text("Export audit JSON") }
+                OutlinedButton(onClick = it, enabled = !reverifyBusy) { Text("Export audit JSON") }
             }
         }
     }
