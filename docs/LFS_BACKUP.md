@@ -32,4 +32,10 @@ A restored mirror retains the bundled `lfs/objects` store. Before Git refs are p
 
 That order is deliberate: recovery never publishes Git refs that would point at known-missing bundled LFS data. If an older mirror contains LFS pointers but does not contain the corresponding LFS object files, recovery fails before Git refs are published.
 
-Destructive restoration into a non-empty Git repository remains a separate, intentionally unsupported flow.
+## Personal-use recovery boundary
+
+Git LFS is part of the core supported personal recovery promise and remains in scope for backup verification and guided disaster-recovery drills.
+
+Destructive restoration into an arbitrary non-empty Git repository is intentionally **not planned**. LFS recovery remains bound to the same new/provably-empty target safety model as main Git recovery; the app will not add a force-push/ref-deletion mode merely to broaden target compatibility.
+
+See [`ROADMAP.md`](ROADMAP.md).
