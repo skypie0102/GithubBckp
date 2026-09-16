@@ -45,3 +45,30 @@ fun evaluateScheduledBackupReadiness(
         }
     }
 }
+
+fun scheduledBackupRunStatus(
+    completedAtEpochMs: Long,
+    repositoryCount: Int,
+    readiness: ScheduledBackupReadiness? = null,
+): ScheduledBackupRunStatus {
+    val normalizedCount = repositoryCount.coerceAtLeast(0)
+    if (normalizedCount == 0) {
+        return ScheduledBackupRunStatus(
+            completedAtEpochMs = completedAtEpochMs,
+            outcome = ScheduledBackupRunOutcome.SKIPPED_NO_REPOSITORIES,
+        )
+    }
+    if (readiness != null && !readiness.ready) {
+        return ScheduledBackupRunStatus(
+            completedAtEpochMs = completedAtEpochMs,
+            outcome = ScheduledBackupRunOutcome.SKIPPED_NOT_READY,
+            repositoryCount = normalizedCount,
+            blockReason = readiness.blockReason,
+        )
+    }
+    return ScheduledBackupRunStatus(
+        completedAtEpochMs = completedAtEpochMs,
+        outcome = ScheduledBackupRunOutcome.QUEUED,
+        repositoryCount = normalizedCount,
+    )
+}

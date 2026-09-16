@@ -62,4 +62,48 @@ class ScheduledBackupReadinessTest {
         assertTrue(ready.ready)
         assertNull(ready.blockReason)
     }
+
+    @Test
+    fun runStatusSeparatesNoRepositoriesBlockedAndQueuedOutcomes() {
+        val noRepositories = scheduledBackupRunStatus(
+            completedAtEpochMs = 100L,
+            repositoryCount = 0,
+        )
+        val blocked = scheduledBackupRunStatus(
+            completedAtEpochMs = 200L,
+            repositoryCount = 4,
+            readiness = ScheduledBackupReadiness(
+                ready = false,
+                blockReason = ScheduledBackupBlockReason.DRIVE_DISCONNECTED,
+            ),
+        )
+        val queued = scheduledBackupRunStatus(
+            completedAtEpochMs = 300L,
+            repositoryCount = 3,
+            readiness = ScheduledBackupReadiness(ready = true),
+        )
+
+        assertEquals(ScheduledBackupRunOutcome.SKIPPED_NO_REPOSITORIES, noRepositories.outcome)
+        assertEquals(0, noRepositories.repositoryCount)
+        assertNull(noRepositories.blockReason)
+
+        assertEquals(ScheduledBackupRunOutcome.SKIPPED_NOT_READY, blocked.outcome)
+        assertEquals(4, blocked.repositoryCount)
+        assertEquals(ScheduledBackupBlockReason.DRIVE_DISCONNECTED, blocked.blockReason)
+
+        assertEquals(ScheduledBackupRunOutcome.QUEUED, queued.outcome)
+        assertEquals(3, queued.repositoryCount)
+        assertNull(queued.blockReason)
+    }
+
+    @Test
+    fun runStatusNormalizesNegativeRepositoryCounts() {
+        val status = scheduledBackupRunStatus(
+            completedAtEpochMs = 400L,
+            repositoryCount = -5,
+        )
+
+        assertEquals(ScheduledBackupRunOutcome.SKIPPED_NO_REPOSITORIES, status.outcome)
+        assertEquals(0, status.repositoryCount)
+    }
 }

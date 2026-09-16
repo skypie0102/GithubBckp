@@ -60,6 +60,11 @@ import com.skypie0102.githubbckp.data.local.BackupEntity
 import com.skypie0102.githubbckp.data.local.RepositoryEntity
 import com.skypie0102.githubbckp.storage.StorageDestination
 import com.skypie0102.githubbckp.worker.BackupCadence
+import com.skypie0102.githubbckp.worker.ScheduledBackupBlockReason
+import com.skypie0102.githubbckp.worker.ScheduledBackupRunOutcome
+import com.skypie0102.githubbckp.worker.ScheduledBackupRunStatus
+import java.text.DateFormat
+import java.util.Date
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -353,6 +358,10 @@ fun HomeScreen(viewModel: HomeViewModel) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text("Scheduled backups", style = MaterialTheme.typography.titleMedium)
                             Text("Uses the repositories selected when the schedule runs.", style = MaterialTheme.typography.bodySmall)
+                            state.scheduledRunStatus?.let { status ->
+                                Spacer(Modifier.height(4.dp))
+                                Text(status.displayText(), style = MaterialTheme.typography.bodySmall)
+                            }
                         }
                         Switch(
                             checked = state.scheduleEnabled,
@@ -687,6 +696,24 @@ private fun BackupRow(
             }
         }
     }
+}
+
+private fun ScheduledBackupRunStatus.displayText(): String {
+    val timestamp = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT)
+        .format(Date(completedAtEpochMs))
+    val detail = when (outcome) {
+        ScheduledBackupRunOutcome.QUEUED ->
+            "queued $repositoryCount repositor${if (repositoryCount == 1) "y" else "ies"}"
+        ScheduledBackupRunOutcome.SKIPPED_NO_REPOSITORIES ->
+            "skipped because no selected, available repositories were found"
+        ScheduledBackupRunOutcome.SKIPPED_NOT_READY -> when (blockReason) {
+            ScheduledBackupBlockReason.GITHUB_DISCONNECTED -> "skipped because GitHub is disconnected"
+            ScheduledBackupBlockReason.DRIVE_DISCONNECTED -> "skipped because Google Drive needs authorization"
+            ScheduledBackupBlockReason.DOCUMENT_TREE_MISSING -> "skipped because the backup folder is not configured"
+            null -> "skipped because backup prerequisites were unavailable"
+        }
+    }
+    return "Last automatic check $timestamp: $detail."
 }
 
 private fun StorageDestination.displayName(): String = when (this) {
