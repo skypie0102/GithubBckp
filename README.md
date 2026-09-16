@@ -34,7 +34,7 @@ Mirror ZIP
   -> persist resumable recovery phases
 ```
 
-Completed backups and imported mirrors also expose JSON audit reports. Scheduled runs expose live child-backup progress.
+Completed backups and imported mirrors expose JSON audit reports. Scheduled runs expose live child-backup progress. The Home screen also shows repository-level backup health, and the app can notify about failed attempts and overdue scheduled-backup health.
 
 ### Backup formats
 
@@ -62,16 +62,19 @@ These boundaries keep recovery behavior safe and maintenance cost appropriate fo
 
 See [`docs/ROADMAP.md`](docs/ROADMAP.md) for the active reliability roadmap.
 
-## Active roadmap
+## Reliability roadmap
 
-The remaining planned product work is reliability-focused:
+Completed:
 
-1. **Backup health dashboard** — show selected repositories that are protected, warning, failed, stale, or have never had a verified backup. Tracked in #33.
-2. **Failure and overdue-backup notifications** — surface problems without requiring the app to be opened regularly. Tracked in #34.
-3. **On-demand backup re-verification** — re-open/re-download an existing stored artifact and prove it is still intact. Tracked in #35.
-4. **Guided disaster-recovery drill** — make a safe recovery test routine rather than something first attempted during an emergency. Tracked in #36.
+1. **Backup health dashboard (#33)** — every selected/available repository is classified as protected, warning, failed, stale, or never backed up using the latest attempt and latest non-pruned verified backup.
+2. **Failure and overdue-backup notifications (#34)** — failed backups can notify after durable failure recording; repeat failures are rate-limited; overdue selected repositories are checked locally and grouped into deduplicated alerts.
 
-After these four items, feature development should stop by default unless personal usage exposes a concrete recurring problem. Reliability, compatibility, security, and recovery-safety fixes remain in scope.
+Remaining planned product work:
+
+3. **On-demand backup re-verification (#35)** — re-open/re-download an existing stored artifact and prove it is still intact.
+4. **Guided disaster-recovery drill (#36)** — make a safe recovery test routine rather than something first attempted during an emergency.
+
+After the remaining two items, feature development should stop by default unless personal usage exposes a concrete recurring problem. Reliability, compatibility, security, and recovery-safety fixes remain in scope.
 
 ## Build
 
@@ -129,11 +132,19 @@ The Drive adapter uses Google Play services `AuthorizationClient` with `drive.fi
 
 This adapter is intentionally treated as personal/internal functionality.
 
-## Automatic backups and retention
+## Automatic backups, health, notifications, and retention
 
-Automatic backup settings support disabled, daily, or weekly execution and source-snapshot or Git-mirror format. WorkManager execution is opportunistic rather than an exact alarm. Scheduled work requires unmetered connectivity, battery-not-low, and storage-not-low constraints.
+Automatic backup settings support disabled, daily, or weekly execution and source-snapshot or Git-mirror format. WorkManager execution is opportunistic rather than an exact alarm. Scheduled backup jobs require unmetered connectivity, battery-not-low, and storage-not-low constraints.
+
+The backup-health model considers a scheduled repository overdue after two cadence windows: 48 hours for a daily schedule and 14 days for a weekly schedule. A lightweight local health worker checks once per day while automatic backups are enabled. It evaluates only currently selected/available repositories and requires no network access.
+
+Failed attempts can notify after the failed backup row has been written. Repeated failures for the same repository and backup format are rate-limited to one alert per six hours. Overdue repositories are grouped into one notification and remain deduplicated until their health recovers or a different repository newly becomes overdue. Tapping an alert opens the Home screen and its Backup health surface.
+
+Android 13+ requires notification permission. The app requests it once; denying or disabling notifications does not affect backup execution, only the alert surface.
 
 Retention defaults to **Keep all**. Users can instead keep the newest 3, 5, or 10 verified artifacts per repository and backup format. Provider identity is persisted with every new completed backup, so deletion is routed through the provider that originally created the remote artifact even if the active destination later changes.
+
+See [`docs/SCHEDULED_BACKUPS.md`](docs/SCHEDULED_BACKUPS.md).
 
 ## Git LFS backup and recovery
 
@@ -234,7 +245,8 @@ Key boundaries include:
 - `GitMirrorRestoreService` / `MirrorRestoreCoordinator` — safe local restore
 - `RecoveryTransactionStore` / `GithubMirrorRestorePublisher` — resumable safe publication
 - `StorageRouter` — provider-aware upload, verification, deletion
-- `BackupScheduler` / `ScheduledBackupWorker` — manual and periodic scheduling
+- `BackupScheduler` / `ScheduledBackupWorker` / `BackupHealthCheckWorker` — backup scheduling and local health monitoring
+- `BackupProblemNotifier` — rate-limited failure and deduplicated overdue alerts
 - `BackupRetentionManager` — keep-last-N pruning
 - `BackupCoordinator` — durable Room state transitions
 
