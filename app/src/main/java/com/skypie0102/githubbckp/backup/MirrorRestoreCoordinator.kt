@@ -19,6 +19,17 @@ data class MirrorRestoreRecord(
     val createdAtEpochMs: Long,
     val refCount: Int,
     val referencedObjectsVerified: Int,
+    val detailsAvailable: Boolean = true,
+    val lfsObjectCount: Int = 0,
+    val wikiRefCount: Int = 0,
+    val wikiReferencedObjectsVerified: Int = 0,
+    val releaseCount: Int = 0,
+    val releaseAssetCount: Int = 0,
+    val issueCount: Int = 0,
+    val pullRequestCount: Int = 0,
+    val issueCommentCount: Int = 0,
+    val reviewCommentCount: Int = 0,
+    val reviewCount: Int = 0,
 )
 
 @Singleton
@@ -55,6 +66,17 @@ class MirrorRestoreCoordinator @Inject constructor(
                 createdAtEpochMs = createdAt,
                 refCount = result.refNames.size,
                 referencedObjectsVerified = result.referencedObjectsVerified,
+                detailsAvailable = true,
+                lfsObjectCount = result.lfsObjectCount,
+                wikiRefCount = result.wikiRefNames.size,
+                wikiReferencedObjectsVerified = result.wikiReferencedObjectsVerified,
+                releaseCount = result.releaseCount,
+                releaseAssetCount = result.releaseAssetCount,
+                issueCount = result.issueCount,
+                pullRequestCount = result.pullRequestCount,
+                issueCommentCount = result.issueCommentCount,
+                reviewCommentCount = result.reviewCommentCount,
+                reviewCount = result.reviewCount,
             )
             writeMetadata(entryDirectory, record)
             record
@@ -75,17 +97,24 @@ class MirrorRestoreCoordinator @Inject constructor(
     }
 
     suspend fun requireRepositoryDirectory(id: String): File = withContext(Dispatchers.IO) {
-        val root = restoresRoot.canonicalFile
-        val entry = File(root, id).canonicalFile
-        check(entry.parentFile == root) { "Invalid restore identifier" }
+        val entry = requireEntryDirectory(id)
         check(readMetadata(entry) != null) { "Restored mirror is missing or invalid" }
         File(entry, REPOSITORY_DIRECTORY_NAME).canonicalFile
     }
 
+    suspend fun exportAuditReport(id: String, destination: Uri) = withContext(Dispatchers.IO) {
+        val entry = requireEntryDirectory(id)
+        val record = readMetadata(entry)
+            ?: error("Restored mirror is missing or invalid")
+        val report = record.toAuditSnapshot().toAuditJson().toString(2)
+        context.contentResolver.openOutputStream(destination, "wt")
+            ?.bufferedWriter()
+            ?.use { writer -> writer.write(report) }
+            ?: error("Unable to create the restore audit report")
+    }
+
     suspend fun deleteRestore(id: String) = withContext(Dispatchers.IO) {
-        val root = restoresRoot.canonicalFile
-        val candidate = File(root, id).canonicalFile
-        check(candidate.parentFile == root) { "Invalid restore identifier" }
+        val candidate = requireEntryDirectory(id)
         if (candidate.exists() && !candidate.deleteRecursively()) {
             error("Unable to delete restored mirror")
         }
@@ -93,6 +122,13 @@ class MirrorRestoreCoordinator @Inject constructor(
 
     private val restoresRoot: File
         get() = File(context.filesDir, RESTORES_DIRECTORY_NAME).apply { mkdirs() }
+
+    private fun requireEntryDirectory(id: String): File {
+        val root = restoresRoot.canonicalFile
+        val candidate = File(root, id).canonicalFile
+        check(candidate.parentFile == root) { "Invalid restore identifier" }
+        return candidate
+    }
 
     private fun queryDisplayName(uri: Uri): String? =
         context.contentResolver.query(
@@ -107,11 +143,22 @@ class MirrorRestoreCoordinator @Inject constructor(
 
     private fun writeMetadata(directory: File, record: MirrorRestoreRecord) {
         val metadata = JSONObject()
+            .put("version", METADATA_VERSION)
             .put("id", record.id)
             .put("archiveName", record.archiveName)
             .put("createdAtEpochMs", record.createdAtEpochMs)
             .put("refCount", record.refCount)
             .put("referencedObjectsVerified", record.referencedObjectsVerified)
+            .put("lfsObjectCount", record.lfsObjectCount)
+            .put("wikiRefCount", record.wikiRefCount)
+            .put("wikiReferencedObjectsVerified", record.wikiReferencedObjectsVerified)
+            .put("releaseCount", record.releaseCount)
+            .put("releaseAssetCount", record.releaseAssetCount)
+            .put("issueCount", record.issueCount)
+            .put("pullRequestCount", record.pullRequestCount)
+            .put("issueCommentCount", record.issueCommentCount)
+            .put("reviewCommentCount", record.reviewCommentCount)
+            .put("reviewCount", record.reviewCount)
         File(directory, METADATA_FILE_NAME).writeText(metadata.toString())
     }
 
@@ -120,12 +167,26 @@ class MirrorRestoreCoordinator @Inject constructor(
         check(File(repository, "HEAD").isFile)
         check(File(repository, "objects").isDirectory)
         val json = JSONObject(File(directory, METADATA_FILE_NAME).readText())
+        val id = json.getString("id")
+        check(id == directory.name)
+        val version = json.optInt("version", 1)
         MirrorRestoreRecord(
-            id = json.getString("id"),
+            id = id,
             archiveName = json.getString("archiveName"),
             createdAtEpochMs = json.getLong("createdAtEpochMs"),
             refCount = json.getInt("refCount"),
             referencedObjectsVerified = json.getInt("referencedObjectsVerified"),
+            detailsAvailable = version >= METADATA_VERSION,
+            lfsObjectCount = json.optInt("lfsObjectCount", 0),
+            wikiRefCount = json.optInt("wikiRefCount", 0),
+            wikiReferencedObjectsVerified = json.optInt("wikiReferencedObjectsVerified", 0),
+            releaseCount = json.optInt("releaseCount", 0),
+            releaseAssetCount = json.optInt("releaseAssetCount", 0),
+            issueCount = json.optInt("issueCount", 0),
+            pullRequestCount = json.optInt("pullRequestCount", 0),
+            issueCommentCount = json.optInt("issueCommentCount", 0),
+            reviewCommentCount = json.optInt("reviewCommentCount", 0),
+            reviewCount = json.optInt("reviewCount", 0),
         )
     }.getOrNull()
 
@@ -135,6 +196,7 @@ class MirrorRestoreCoordinator @Inject constructor(
         .ifBlank { "mirror-backup.zip" }
 
     private companion object {
+        const val METADATA_VERSION = 2
         const val RESTORES_DIRECTORY_NAME = "restored-mirrors"
         const val REPOSITORY_DIRECTORY_NAME = "repository.git"
         const val METADATA_FILE_NAME = "restore.json"
