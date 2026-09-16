@@ -78,7 +78,7 @@ class DocumentTreeStorageProvider @Inject constructor(
             digests.md5.equals(remoteBackup.checksumMd5, ignoreCase = true)
     }
 
-    override suspend fun download(remoteBackup: RemoteBackup, destination: File) = withContext(Dispatchers.IO) {
+    override suspend fun download(remoteBackup: RemoteBackup, destination: File): Unit = withContext(Dispatchers.IO) {
         destination.parentFile?.mkdirs()
         val input = context.contentResolver.openInputStream(Uri.parse(remoteBackup.id))
             ?: throw IOException("Backup file is no longer available")
@@ -87,6 +87,7 @@ class DocumentTreeStorageProvider @Inject constructor(
                 source.copyTo(output, bufferSize = BUFFER_SIZE)
             }
         }
+        Unit
     }
 
     override suspend fun delete(remoteBackup: RemoteBackup) = withContext(Dispatchers.IO) {
