@@ -86,20 +86,24 @@ Run these checks on the signed release build before tagging it as known-good:
 3. Repository discovery and selection, including at least one private repository if private backup is used.
 4. Manual source-snapshot backup to the normal destination.
 5. Manual Git-mirror backup containing representative history, branches/tags, and Git LFS if available.
-6. Verify the completed backup appears in history with the correct destination/provenance.
-7. Import a mirror and complete a recovery to a new or provably empty GitHub repository.
-8. Confirm restored refs and representative content; for applicable test repositories also confirm LFS objects and release assets.
-9. Configure an automatic backup, allow one scheduled run to complete, and confirm live run progress/history.
-10. Exercise a recoverable failure (for example temporary network loss or unavailable destination). Confirm a failure notification is shown after the failure is persisted, tapping it opens the app, then retry and confirm the final state is correct.
-11. Confirm repeated failures for the same repository/format do not create notification storms inside the six-hour rate-limit window.
-12. For the backup-health dashboard, confirm a successful repository reports protected, an intentionally old scheduled backup reports stale, and a failed attempt after the latest success reports failed until a later success clears it.
-13. Exercise or simulate an overdue repository and confirm the grouped overdue notification appears once, remains deduplicated on the next health check, and can notify again after the repository recovers and later becomes overdue again.
-14. Disable automatic backups and confirm overdue notification state is cleared; re-enable and confirm the new schedule receives a fresh two-cadence grace window for repositories without a verified backup.
-15. Reboot the device and confirm persisted authorization/settings/history still behave as expected.
+6. Verify each completed backup appears in history with the correct destination/provenance.
+7. Tap **Re-verify stored backup** for the source snapshot. Confirm the full remote artifact is read, the row records a `VERIFIED` result/timestamp, and no new remote backup object is created.
+8. Re-verify the Git mirror. Confirm the result reports successful remote-byte verification plus safe local mirror/module validation; the operation must not publish anything to GitHub.
+9. Export the backup audit JSON after re-verification and confirm `latestReverification` contains the recorded timestamp/result/detail. Exporting the JSON again must not itself perform another remote read.
+10. If retention has pruned an older artifact, confirm that historical row remains auditable but does not offer re-verification.
+11. Import a mirror and complete a recovery to a new or provably empty GitHub repository.
+12. Confirm restored refs and representative content; for applicable test repositories also confirm LFS objects and release assets.
+13. Configure an automatic backup, allow one scheduled run to complete, and confirm live run progress/history.
+14. Exercise a recoverable failure (for example temporary network loss or unavailable destination). Confirm a failure notification is shown after the failure is persisted, tapping it opens the app, then retry and confirm the final state is correct.
+15. Confirm repeated failures for the same repository/format do not create notification storms inside the six-hour rate-limit window.
+16. For the backup-health dashboard, confirm a successful repository reports protected, an intentionally old scheduled backup reports stale, and a failed attempt after the latest success reports failed until a later success clears it.
+17. Exercise or simulate an overdue repository and confirm the grouped overdue notification appears once, remains deduplicated on the next health check, and can notify again after the repository recovers and later becomes overdue again.
+18. Disable automatic backups and confirm overdue notification state is cleared; re-enable and confirm the new schedule receives a fresh two-cadence grace window for repositories without a verified backup.
+19. Reboot the device and confirm persisted authorization/settings/history/re-verification results still behave as expected.
 
 If notification permission is intentionally denied, backup execution must continue normally; record that failure/overdue alerts are unavailable until notifications are enabled in Android settings.
 
-A failure in backup integrity, restore validation, recovery target safety, authentication, signing, notification behavior included in the candidate, or another explicitly included feature is a release blocker. Cosmetic work and features explicitly cut in [`ROADMAP.md`](ROADMAP.md) are not blockers.
+A failure in backup integrity, on-demand re-verification, restore validation, recovery target safety, authentication, signing, notification behavior included in the candidate, or another explicitly included feature is a release blocker. Cosmetic work and features explicitly cut in [`ROADMAP.md`](ROADMAP.md) are not blockers.
 
 ## 6. Personal-use recovery promise
 
