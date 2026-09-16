@@ -75,6 +75,10 @@ fun HomeScreen(viewModel: HomeViewModel) {
     val context = LocalContext.current
     var pendingAuditRestore by remember { mutableStateOf<MirrorRestoreRecord?>(null) }
     var pendingBackupAudit by remember { mutableStateOf<Pair<BackupEntity, RepositoryEntity?>?>(null) }
+    var repositorySearchQuery by remember { mutableStateOf("") }
+    val visibleRepositories = remember(state.repositories, repositorySearchQuery) {
+        filterRepositories(state.repositories, repositorySearchQuery)
+    }
     val driveLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartIntentSenderForResult(),
     ) { result ->
@@ -324,18 +328,54 @@ fun HomeScreen(viewModel: HomeViewModel) {
                     horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
                     Text("Repositories", style = MaterialTheme.typography.titleLarge)
-                    Text("${state.repositories.count { it.selectedForBackup }} selected")
+                    Text("${state.repositories.count { it.selectedForBackup }} of ${state.repositories.size} selected")
                 }
             }
 
             if (state.repositories.isEmpty()) {
                 item { Text("Connect GitHub and refresh to discover repositories.") }
             } else {
-                items(state.repositories, key = { it.githubId }) { repository ->
-                    RepositoryRow(
-                        repository = repository,
-                        onSelectedChange = { selected -> viewModel.setRepositorySelected(repository.githubId, selected) },
+                item {
+                    OutlinedTextField(
+                        value = repositorySearchQuery,
+                        onValueChange = { repositorySearchQuery = it },
+                        label = { Text("Search repositories") },
+                        supportingText = { Text("${visibleRepositories.size} shown") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
                     )
+                }
+                item {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(
+                            onClick = { viewModel.setAllRepositoriesSelected(true) },
+                            enabled = !state.busy,
+                        ) {
+                            Text("Select all")
+                        }
+                        OutlinedButton(
+                            onClick = { viewModel.setAllRepositoriesSelected(false) },
+                            enabled = !state.busy,
+                        ) {
+                            Text("Select none")
+                        }
+                    }
+                }
+                item {
+                    Text(
+                        "Search filters the visible list only. Select all / Select none applies to every available repository.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                if (visibleRepositories.isEmpty()) {
+                    item { Text("No repositories match the current search.") }
+                } else {
+                    items(visibleRepositories, key = { it.githubId }) { repository ->
+                        RepositoryRow(
+                            repository = repository,
+                            onSelectedChange = { selected -> viewModel.setRepositorySelected(repository.githubId, selected) },
+                        )
+                    }
                 }
                 item {
                     Button(
