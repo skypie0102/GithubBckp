@@ -21,7 +21,8 @@ class ScheduledBackupWorker(
             applicationContext,
             ScheduledBackupWorkerDependencies::class.java,
         )
-        val settings = dependencies.schedulePreferences().settings()
+        val schedulePreferences = dependencies.schedulePreferences()
+        val settings = schedulePreferences.settings()
         if (!settings.enabled) return Result.success()
 
         val repositoryIds = dependencies.backupDao()
@@ -30,7 +31,15 @@ class ScheduledBackupWorker(
             .filter { it.selectedForBackup }
             .map { it.githubId }
             .toList()
-        if (repositoryIds.isEmpty()) return Result.success()
+        if (repositoryIds.isEmpty()) {
+            schedulePreferences.saveRunStatus(
+                scheduledBackupRunStatus(
+                    completedAtEpochMs = System.currentTimeMillis(),
+                    repositoryCount = 0,
+                ),
+            )
+            return Result.success()
+        }
 
         val storagePreferences = dependencies.storagePreferences()
         val readiness = evaluateScheduledBackupReadiness(
@@ -39,11 +48,27 @@ class ScheduledBackupWorker(
             driveAuthenticated = dependencies.googleDriveAuthManager().isAuthenticated(),
             documentTreeConfigured = storagePreferences.isDocumentTreeConfigured(),
         )
-        if (!readiness.ready) return Result.success()
+        if (!readiness.ready) {
+            schedulePreferences.saveRunStatus(
+                scheduledBackupRunStatus(
+                    completedAtEpochMs = System.currentTimeMillis(),
+                    repositoryCount = repositoryIds.size,
+                    readiness = readiness,
+                ),
+            )
+            return Result.success()
+        }
 
         dependencies.backupScheduler().enqueueScheduled(
             repositoryIds = repositoryIds,
             type = settings.backupType,
+        )
+        schedulePreferences.saveRunStatus(
+            scheduledBackupRunStatus(
+                completedAtEpochMs = System.currentTimeMillis(),
+                repositoryCount = repositoryIds.size,
+                readiness = readiness,
+            ),
         )
         return Result.success()
     }
