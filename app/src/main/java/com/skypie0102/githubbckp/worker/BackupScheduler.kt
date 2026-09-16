@@ -32,6 +32,7 @@ class BackupScheduler @Inject constructor(
             repositoryIds = repositoryIds,
             type = type,
             origin = BackupOrigin.MANUAL,
+            scheduledRunId = null,
             constraints = manualConstraints(),
             originTag = TAG_MANUAL,
         )
@@ -40,11 +41,13 @@ class BackupScheduler @Inject constructor(
     fun enqueueScheduled(
         repositoryIds: List<Long>,
         type: BackupType,
+        scheduledRunId: String,
     ) {
         enqueueWithConstraints(
             repositoryIds = repositoryIds,
             type = type,
             origin = BackupOrigin.SCHEDULED,
+            scheduledRunId = scheduledRunId,
             constraints = scheduledConstraints(),
             originTag = TAG_SCHEDULED,
         )
@@ -91,6 +94,7 @@ class BackupScheduler @Inject constructor(
         repositoryIds: List<Long>,
         type: BackupType,
         origin: BackupOrigin,
+        scheduledRunId: String?,
         constraints: Constraints,
         originTag: String,
     ) {
@@ -102,6 +106,7 @@ class BackupScheduler @Inject constructor(
                         RepositoryBackupWorker.KEY_REPOSITORY_ID to repositoryId,
                         RepositoryBackupWorker.KEY_BACKUP_TYPE to type.name,
                         RepositoryBackupWorker.KEY_BACKUP_ORIGIN to origin.name,
+                        RepositoryBackupWorker.KEY_SCHEDULED_RUN_ID to scheduledRunId,
                     ),
                 )
                 .addTag("backup-$repositoryId")
