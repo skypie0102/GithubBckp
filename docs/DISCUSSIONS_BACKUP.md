@@ -1,6 +1,6 @@
 # GitHub issue and pull request metadata backup
 
-Git mirror backups can preserve GitHub discussion metadata that is not part of the Git object database. This module is preservation and local validation only; it does not currently recreate discussions on a target repository.
+Git mirror backups preserve GitHub discussion metadata that is not part of the Git object database. For the personal-use product this module is intentionally **preservation and local validation only**; native discussion recreation on a target repository is not planned.
 
 ## Bundled data
 
@@ -49,8 +49,10 @@ The whole `.mirror.zip` still receives the normal artifact SHA-256 and MD5 check
 
 ## Recovery boundary
 
-Automatic GitHub discussion recreation is deliberately not enabled yet. GitHub APIs can create new issues/comments/reviews, but a recreated object cannot faithfully assume another user's identity or original server timestamp, and creation can trigger notifications and automation. Timeline events and referenced attachment bytes are also outside this first preservation slice.
+Native discussion recreation is deliberately outside the personal-use roadmap. GitHub APIs can create new issues/comments/reviews, but recreated objects cannot faithfully assume another user's identity or original server timestamp, and writes may trigger notifications or automation. The maintenance and safety cost is not justified for the intended use of the app.
+
+Timeline events and referenced attachment bytes are also intentionally outside scope. The backup preserves the discussion records returned by the supported REST surfaces and records the limitation rather than pretending to provide perfect GitHub-state cloning.
 
 A mirror containing discussion metadata therefore carries a non-fatal completeness warning: the metadata is preserved and locally verified, but it is not automatically republished to GitHub.
 
-A future publication design should distinguish archival reconstruction from native GitHub objects and must define explicit semantics for authorship attribution, timestamps, numbering conflicts, labels/milestones, notification suppression, and retry/idempotency before writes are enabled.
+See [`ROADMAP.md`](ROADMAP.md) for the current personal-use scope decisions.
