@@ -1,5 +1,6 @@
 package com.skypie0102.githubbckp.data.local
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 import com.skypie0102.githubbckp.backup.BackupStatus
@@ -15,6 +16,7 @@ data class RepositoryEntity(
     val isPrivate: Boolean,
     val selectedForBackup: Boolean = true,
     val lastKnownSha: String? = null,
+    @ColumnInfo(defaultValue = "1") val isAvailable: Boolean = true,
 )
 
 @Entity(tableName = "backups")
