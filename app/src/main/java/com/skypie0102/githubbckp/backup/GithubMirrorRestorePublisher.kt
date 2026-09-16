@@ -15,6 +15,8 @@ data class GithubRestorePublishResult(
     val repositoryUrl: String,
     val pushedRefCount: Int,
     val restoredLfsObjectCount: Int,
+    val restoredReleaseCount: Int,
+    val restoredReleaseAssetCount: Int,
     val skippedReadOnlyRefs: List<String>,
 )
 
@@ -25,6 +27,7 @@ class GithubMirrorRestorePublisher @Inject constructor(
     private val authManager: GithubAuthManager,
     private val lfsPointerScanner: GitLfsPointerScanner,
     private val lfsUploadService: GitLfsUploadService,
+    private val releaseRestoreService: GithubReleaseRestoreService,
     private val pushService: GitMirrorPushService,
     private val transactionStore: RecoveryTransactionStore,
 ) {
@@ -117,12 +120,15 @@ class GithubMirrorRestorePublisher @Inject constructor(
             withContext(Dispatchers.IO) {
                 var transaction = initialTransaction
                 if (transaction.phase == RecoveryPhase.TARGET_BOUND) {
-                    // Refuse a non-empty target before any LFS object can be uploaded.
-                    // The Git push performs the same empty check again immediately
-                    // before publishing refs, which protects against a concurrent writer.
+                    // A first-time recovery target must be empty across both the
+                    // Git surface and release surface before any LFS bytes move.
                     pushService.requireRemoteEmpty(
                         remoteUri = repository.cloneUrl,
                         credentialsProvider = credentials,
+                    )
+                    releaseRestoreService.requireNoExistingReleases(
+                        repositoryFullName = repository.fullName,
+                        accessToken = token,
                     )
                     val lfsPointers = lfsPointerScanner.scan(repositoryDirectory)
                     val lfsObjectCount = lfsUploadService.uploadAll(
@@ -159,14 +165,29 @@ class GithubMirrorRestorePublisher @Inject constructor(
                     )
                 }
 
-                check(transaction.phase == RecoveryPhase.GIT_PUBLISHED) {
-                    "Recovery transaction did not reach Git publication"
+                if (transaction.phase == RecoveryPhase.GIT_PUBLISHED) {
+                    val releaseResult = releaseRestoreService.publishBundledReleases(
+                        repositoryFullName = repository.fullName,
+                        accessToken = token,
+                        repositoryDirectory = repositoryDirectory,
+                    )
+                    transaction = transactionStore.markReleasesPublished(
+                        restoreId = restoreId,
+                        repositoryId = repository.id,
+                        result = releaseResult,
+                    )
+                }
+
+                check(transaction.phase == RecoveryPhase.RELEASES_PUBLISHED) {
+                    "Recovery transaction did not reach release publication"
                 }
                 GithubRestorePublishResult(
                     repositoryFullName = repository.fullName,
                     repositoryUrl = repository.htmlUrl,
                     pushedRefCount = transaction.pushedRefCount,
                     restoredLfsObjectCount = transaction.lfsObjectCount,
+                    restoredReleaseCount = transaction.releaseCount,
+                    restoredReleaseAssetCount = transaction.releaseAssetCount,
                     skippedReadOnlyRefs = transaction.skippedReadOnlyRefs,
                 )
             }
