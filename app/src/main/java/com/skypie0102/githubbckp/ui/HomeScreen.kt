@@ -403,6 +403,10 @@ fun HomeScreen(viewModel: HomeViewModel) {
                                 Spacer(Modifier.height(4.dp))
                                 Text(status.displayText(), style = MaterialTheme.typography.bodySmall)
                             }
+                            state.scheduledRunProgress?.let { progress ->
+                                Spacer(Modifier.height(2.dp))
+                                Text(progress.progressDisplayText(), style = MaterialTheme.typography.bodySmall)
+                            }
                         }
                         Switch(
                             checked = state.scheduleEnabled,

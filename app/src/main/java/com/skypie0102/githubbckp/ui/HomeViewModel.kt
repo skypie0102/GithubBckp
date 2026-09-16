@@ -23,12 +23,16 @@ import com.skypie0102.githubbckp.storage.drive.GoogleDriveAuthManager
 import com.skypie0102.githubbckp.worker.BackupCadence
 import com.skypie0102.githubbckp.worker.BackupScheduleSettings
 import com.skypie0102.githubbckp.worker.BackupScheduler
+import com.skypie0102.githubbckp.worker.ScheduledBackupRunOutcome
+import com.skypie0102.githubbckp.worker.ScheduledBackupRunProgress
 import com.skypie0102.githubbckp.worker.ScheduledBackupRunStatus
+import com.skypie0102.githubbckp.worker.summarizeScheduledBackupRun
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -50,6 +54,7 @@ data class HomeUiState(
     val scheduleCadence: BackupCadence = BackupCadence.DAILY,
     val scheduledBackupType: BackupType = BackupType.GIT_MIRROR,
     val scheduledRunStatus: ScheduledBackupRunStatus? = null,
+    val scheduledRunProgress: ScheduledBackupRunProgress? = null,
     val retentionKeepCount: Int = RetentionPreferences.KEEP_ALL,
     val githubDeviceSession: GithubDeviceSession? = null,
     val repositories: List<RepositoryEntity> = emptyList(),
@@ -109,8 +114,30 @@ class HomeViewModel @Inject constructor(
             }
         }
         viewModelScope.launch {
-            backupScheduler.observeScheduledRunStatus().collect { status ->
-                _state.update { it.copy(scheduledRunStatus = status) }
+            backupScheduler.observeScheduledRunStatus().collectLatest { status ->
+                _state.update {
+                    it.copy(
+                        scheduledRunStatus = status,
+                        scheduledRunProgress = null,
+                    )
+                }
+                val currentStatus = status ?: return@collectLatest
+                if (currentStatus.outcome != ScheduledBackupRunOutcome.QUEUED) return@collectLatest
+                val runId = currentStatus.scheduledRunId
+                    ?.trim()
+                    ?.takeIf { it.isNotEmpty() }
+                    ?: return@collectLatest
+
+                backupDao.observeBackupsForScheduledRun(runId).collect { backups ->
+                    val progress = summarizeScheduledBackupRun(currentStatus, backups)
+                    _state.update { current ->
+                        if (current.scheduledRunStatus?.scheduledRunId == runId) {
+                            current.copy(scheduledRunProgress = progress)
+                        } else {
+                            current
+                        }
+                    }
+                }
             }
         }
         viewModelScope.launch { refreshRestores() }
