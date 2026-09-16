@@ -38,6 +38,7 @@ data class BackupRequest(
     val repository: RepositoryRef,
     val type: BackupType,
     val origin: BackupOrigin? = null,
+    val scheduledRunId: String? = null,
 )
 
 data class BackupArtifact(
