@@ -12,11 +12,51 @@ val githubClientIdForBuildConfig = githubClientId
     .replace("\\", "\\\\")
     .replace("\"", "\\\"")
 
+val releaseStoreFile = providers.gradleProperty("RELEASE_STORE_FILE")
+    .orElse(providers.environmentVariable("RELEASE_STORE_FILE"))
+    .orNull
+val releaseStorePassword = providers.gradleProperty("RELEASE_STORE_PASSWORD")
+    .orElse(providers.environmentVariable("RELEASE_STORE_PASSWORD"))
+    .orNull
+val releaseKeyAlias = providers.gradleProperty("RELEASE_KEY_ALIAS")
+    .orElse(providers.environmentVariable("RELEASE_KEY_ALIAS"))
+    .orNull
+val releaseKeyPassword = providers.gradleProperty("RELEASE_KEY_PASSWORD")
+    .orElse(providers.environmentVariable("RELEASE_KEY_PASSWORD"))
+    .orNull
+
+val releaseSigningValues = listOf(
+    releaseStoreFile,
+    releaseStorePassword,
+    releaseKeyAlias,
+    releaseKeyPassword,
+)
+val releaseSigningConfigured = releaseSigningValues.all { !it.isNullOrBlank() }
+val releaseSigningPartiallyConfigured = releaseSigningValues.any { !it.isNullOrBlank() } && !releaseSigningConfigured
+
+if (releaseSigningPartiallyConfigured) {
+    throw GradleException(
+        "Release signing is partially configured. Set RELEASE_STORE_FILE, RELEASE_STORE_PASSWORD, " +
+            "RELEASE_KEY_ALIAS, and RELEASE_KEY_PASSWORD together, or leave all four unset.",
+    )
+}
+
 android {
     namespace = "com.skypie0102.githubbckp"
     compileSdk {
         version = release(37) {
             minorApiLevel = 0
+        }
+    }
+
+    signingConfigs {
+        if (releaseSigningConfigured) {
+            create("release") {
+                storeFile = file(releaseStoreFile!!)
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
         }
     }
 
@@ -34,6 +74,9 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = false
+            if (releaseSigningConfigured) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
