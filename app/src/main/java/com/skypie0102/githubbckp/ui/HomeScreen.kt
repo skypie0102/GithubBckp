@@ -178,6 +178,10 @@ fun HomeScreen(viewModel: HomeViewModel) {
                 }
             }
 
+            if (state.backupHealth.selectedCount > 0) {
+                item { BackupHealthCard(summary = state.backupHealth) }
+            }
+
             item {
                 ConnectionCard(
                     title = "GitHub",
