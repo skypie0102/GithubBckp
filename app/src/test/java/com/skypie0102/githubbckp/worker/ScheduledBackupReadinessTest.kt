@@ -68,10 +68,12 @@ class ScheduledBackupReadinessTest {
         val noRepositories = scheduledBackupRunStatus(
             completedAtEpochMs = 100L,
             repositoryCount = 0,
+            scheduledRunId = "run-empty",
         )
         val blocked = scheduledBackupRunStatus(
             completedAtEpochMs = 200L,
             repositoryCount = 4,
+            scheduledRunId = "run-blocked",
             readiness = ScheduledBackupReadiness(
                 ready = false,
                 blockReason = ScheduledBackupBlockReason.DRIVE_DISCONNECTED,
@@ -80,30 +82,36 @@ class ScheduledBackupReadinessTest {
         val queued = scheduledBackupRunStatus(
             completedAtEpochMs = 300L,
             repositoryCount = 3,
+            scheduledRunId = " run-queued ",
             readiness = ScheduledBackupReadiness(ready = true),
         )
 
         assertEquals(ScheduledBackupRunOutcome.SKIPPED_NO_REPOSITORIES, noRepositories.outcome)
         assertEquals(0, noRepositories.repositoryCount)
+        assertEquals("run-empty", noRepositories.scheduledRunId)
         assertNull(noRepositories.blockReason)
 
         assertEquals(ScheduledBackupRunOutcome.SKIPPED_NOT_READY, blocked.outcome)
         assertEquals(4, blocked.repositoryCount)
+        assertEquals("run-blocked", blocked.scheduledRunId)
         assertEquals(ScheduledBackupBlockReason.DRIVE_DISCONNECTED, blocked.blockReason)
 
         assertEquals(ScheduledBackupRunOutcome.QUEUED, queued.outcome)
         assertEquals(3, queued.repositoryCount)
+        assertEquals("run-queued", queued.scheduledRunId)
         assertNull(queued.blockReason)
     }
 
     @Test
-    fun runStatusNormalizesNegativeRepositoryCounts() {
+    fun runStatusNormalizesNegativeCountsAndBlankRunIds() {
         val status = scheduledBackupRunStatus(
             completedAtEpochMs = 400L,
             repositoryCount = -5,
+            scheduledRunId = "   ",
         )
 
         assertEquals(ScheduledBackupRunOutcome.SKIPPED_NO_REPOSITORIES, status.outcome)
         assertEquals(0, status.repositoryCount)
+        assertNull(status.scheduledRunId)
     }
 }
