@@ -22,6 +22,8 @@ The same checks run again after a mirror ZIP is imported through the local resto
 
 ## GitHub publication boundary
 
-Automatic publication of bundled wiki history back to GitHub is intentionally not implemented yet. GitHub documents cloning a wiki after its initial page exists, but does not expose a documented REST API for creating wiki pages. The app therefore avoids relying on an undocumented initialization flow or overwriting an existing target wiki.
+Automatic publication of bundled wiki history back to GitHub is intentionally outside the personal-use roadmap. GitHub documents cloning a wiki after its initial page exists, but does not expose a documented REST API for creating wiki pages. The app therefore avoids undocumented initialization behavior and avoids overwriting an existing target wiki.
 
-Backups that actually contain wiki history persist a non-fatal completeness warning. Main Git refs and Git LFS recovery continue to work, and the bundled wiki remains preserved in the local restored mirror for a future documented/safe publication path.
+Backups that contain wiki history persist a non-fatal completeness warning. Main Git refs, Git LFS, and supported release recovery continue to work, while the bundled wiki remains available as a validated archival Git mirror for manual recovery if it is ever needed.
+
+This is a deliberate scope/safety decision rather than a blocker for the personal release. See [`ROADMAP.md`](ROADMAP.md).
