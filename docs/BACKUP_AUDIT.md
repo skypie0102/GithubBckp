@@ -4,11 +4,11 @@ GithubBckp can export a JSON audit report for any completed backup in Recent bac
 
 ## Format
 
-The current report format is version `3` and uses:
+The current report format is version `4` and uses:
 
 ```json
 {
-  "formatVersion": 3,
+  "formatVersion": 4,
   "reportType": "github-backup-artifact-audit",
   "generatedAtEpochMs": 0,
   "repository": {},
@@ -34,7 +34,7 @@ Rows migrated from database schema v1-v3 cannot be assigned historical values sa
 
 ### Backup
 
-The backup section records the persisted backup ID, backup type, origin, terminal status, start/completion timestamps, completeness warning, and error field.
+The backup section records the persisted backup ID, backup type, origin, scheduled-run correlation ID, terminal status, start/completion timestamps, completeness warning, and error field.
 
 Database schema v6 records `origin` before backup network work begins. New WorkManager requests use:
 
@@ -42,6 +42,12 @@ Database schema v6 records `origin` before backup network work begins. New WorkM
 - `SCHEDULED` — queued by the periodic automatic-backup controller.
 
 Rows migrated from schema v1-v5, and one-time work that was already pending before origin metadata was introduced, retain `origin: null`. The audit report describes that case as unknown rather than guessing whether a historical attempt was manual or scheduled.
+
+Database schema v7 adds nullable `scheduledRunId`. Every new periodic controller execution generates one UUID and passes it to each scheduled repository WorkRequest it creates. Backup rows that execute from that fan-out persist the same ID, allowing multiple repository outcomes from one automatic run to be correlated in exported audit reports. Manual backups intentionally keep `scheduledRunId: null`.
+
+Rows migrated from schema v1-v6, and scheduled one-time work already pending before correlation was introduced, retain `scheduledRunId: null`. The report marks a scheduled row with no run ID as legacy rather than fabricating an identifier.
+
+Scheduled repository work continues to use WorkManager unique-work `KEEP` semantics. If a controller run requests a repository/backup-format pair while older unique work for that same pair is still active, WorkManager keeps the older work and the newer controller run does not create a second child backup row. A run ID therefore correlates child work that actually executes; it is not a claim that every requested fan-out entry produced a distinct backup attempt.
 
 The app currently exposes the export action only for `COMPLETED` backups.
 

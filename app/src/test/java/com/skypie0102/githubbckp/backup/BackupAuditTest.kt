@@ -38,6 +38,7 @@ class BackupAuditTest {
             repositoryDefaultBranchAtBackup = "main",
             repositoryPrivateAtBackup = true,
             origin = BackupOrigin.SCHEDULED,
+            scheduledRunId = "run-123",
         )
 
         val snapshot = backup.toBackupAuditSnapshot(currentRepository)
@@ -45,7 +46,7 @@ class BackupAuditTest {
         val repository = json.getJSONObject("repository")
         val backupJson = json.getJSONObject("backup")
 
-        assertEquals(3, json.getInt("formatVersion"))
+        assertEquals(4, json.getInt("formatVersion"))
         assertEquals("github-backup-artifact-audit", json.getString("reportType"))
         assertEquals(999, json.getLong("generatedAtEpochMs"))
         assertEquals("octo/demo", repository.getString("fullName"))
@@ -56,6 +57,7 @@ class BackupAuditTest {
         assertEquals("backup-time-snapshot", repository.getString("metadataSource"))
         assertEquals("GIT_MIRROR", backupJson.getString("type"))
         assertEquals("SCHEDULED", backupJson.getString("origin"))
+        assertEquals("run-123", backupJson.getString("scheduledRunId"))
         assertEquals("COMPLETED", backupJson.getString("status"))
         assertEquals("DELETED_BY_RETENTION", json.getJSONObject("storage").getString("remoteState"))
         assertEquals(
@@ -65,6 +67,8 @@ class BackupAuditTest {
         assertEquals("abc123", json.getJSONObject("integrityVerification").getString("artifactSha256"))
         assertFalse(json.getJSONArray("limitations").toString().contains("current local repository cache"))
         assertFalse(json.getJSONArray("limitations").toString().contains("origin tracking"))
+        assertFalse(json.getJSONArray("limitations").toString().contains("predates scheduled-run correlation"))
+        assertTrue(json.getJSONArray("limitations").toString().contains("unique-work KEEP"))
         assertTrue(snapshot.backupAuditReportFileName().contains("octo-demo-backup-7"))
     }
 
@@ -96,6 +100,7 @@ class BackupAuditTest {
         assertEquals("octo/legacy", backup.repositoryDisplayName(currentRepository))
         assertEquals("current-local-repository-cache", repository.getString("metadataSource"))
         assertTrue(backupJson.isNull("origin"))
+        assertTrue(backupJson.isNull("scheduledRunId"))
         assertTrue(json.getJSONArray("limitations").toString().contains("pre-v4"))
         assertTrue(json.getJSONArray("limitations").toString().contains("origin"))
     }
@@ -123,8 +128,33 @@ class BackupAuditTest {
         assertEquals("Repository #88", backup.repositoryDisplayName(repository = null))
         assertEquals("unavailable", repository.getString("metadataSource"))
         assertEquals("MANUAL", backupJson.getString("origin"))
+        assertTrue(backupJson.isNull("scheduledRunId"))
         assertEquals("UNKNOWN", json.getJSONObject("storage").getString("remoteState"))
         assertFalse(json.getJSONArray("limitations").toString().contains("origin tracking"))
+        assertFalse(json.getJSONArray("limitations").toString().contains("scheduled-run correlation"))
         assertTrue(snapshot.backupAuditReportFileName().startsWith("repository-88-backup-9"))
+    }
+
+    @Test
+    fun scheduledBackupWithoutRunIdIsExplicitlyMarkedAsLegacyCorrelation() {
+        val backup = BackupEntity(
+            id = 10,
+            repositoryId = 99,
+            type = BackupType.GIT_MIRROR,
+            status = BackupStatus.FAILED,
+            startedAtEpochMs = 10,
+            completedAtEpochMs = 20,
+            origin = BackupOrigin.SCHEDULED,
+        )
+
+        val json = backup.toBackupAuditSnapshot(repository = null)
+            .toBackupAuditJson(generatedAtEpochMs = 30)
+        val backupJson = json.getJSONObject("backup")
+        val limitations = json.getJSONArray("limitations").toString()
+
+        assertEquals("SCHEDULED", backupJson.getString("origin"))
+        assertTrue(backupJson.isNull("scheduledRunId"))
+        assertTrue(limitations.contains("predates scheduled-run correlation"))
+        assertTrue(limitations.contains("unique-work KEEP"))
     }
 }

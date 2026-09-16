@@ -26,6 +26,9 @@ class RepositoryBackupWorker(
         }.getOrElse { return Result.failure() }
         val origin = inputData.getString(KEY_BACKUP_ORIGIN)
             ?.let { value -> runCatching { BackupOrigin.valueOf(value) }.getOrNull() }
+        val scheduledRunId = inputData.getString(KEY_SCHEDULED_RUN_ID)
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
 
         val dependencies = EntryPointAccessors.fromApplication(
             applicationContext,
@@ -38,6 +41,7 @@ class RepositoryBackupWorker(
                 repository = repository.toRepositoryRef(),
                 type = type,
                 origin = origin,
+                scheduledRunId = scheduledRunId,
             ),
         )
         return if (success) Result.success() else Result.failure()
@@ -47,6 +51,7 @@ class RepositoryBackupWorker(
         const val KEY_REPOSITORY_ID = "repository_id"
         const val KEY_BACKUP_TYPE = "backup_type"
         const val KEY_BACKUP_ORIGIN = "backup_origin"
+        const val KEY_SCHEDULED_RUN_ID = "scheduled_run_id"
     }
 }
 
