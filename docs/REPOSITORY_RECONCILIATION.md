@@ -34,6 +34,16 @@ The ViewModel reads all cached rows before discovery so existing selection prefe
 
 A repository that later reappears in discovery is reactivated automatically and keeps its previous selection preference.
 
+## Backup-health boundary
+
+The personal backup-health dashboard follows the same active-inventory semantics. Only repositories that are both currently available and selected for backup are included in health totals or overdue/failure attention lists.
+
+Historical backups belonging to an unavailable repository remain visible in history/audit exports but do not create a false ongoing health alert for something the current account can no longer back up. If the repository later reappears and is still selected, it automatically re-enters health evaluation using its retained history.
+
+This same rule will apply to the notification roadmap item so unavailable/unselected repositories cannot create repeated overdue alerts.
+
 ## Safety boundary
 
 Availability is based on the most recent **successful full discovery response**. A transient network/API error does not deactivate repositories because reconciliation does not begin until discovery has completed successfully.
+
+See [`ROADMAP.md`](ROADMAP.md) for the current personal-use reliability priorities.
