@@ -1,6 +1,7 @@
 package com.skypie0102.githubbckp.ui
 
 import android.app.Activity
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -37,13 +38,20 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.unit.dp
 import com.skypie0102.githubbckp.backup.BackupType
 import com.skypie0102.githubbckp.backup.MirrorRestoreRecord
 import com.skypie0102.githubbckp.backup.RetentionPreferences
+import com.skypie0102.githubbckp.backup.auditReportFileName
+import com.skypie0102.githubbckp.backup.toAuditJson
+import com.skypie0102.githubbckp.backup.toAuditSnapshot
 import com.skypie0102.githubbckp.data.local.BackupEntity
 import com.skypie0102.githubbckp.data.local.RepositoryEntity
 import com.skypie0102.githubbckp.storage.StorageDestination
@@ -54,6 +62,8 @@ import com.skypie0102.githubbckp.worker.BackupCadence
 fun HomeScreen(viewModel: HomeViewModel) {
     val state by viewModel.state.collectAsState()
     val uriHandler = LocalUriHandler.current
+    val context = LocalContext.current
+    var pendingAuditRestore by remember { mutableStateOf<MirrorRestoreRecord?>(null) }
     val driveLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartIntentSenderForResult(),
     ) { result ->
@@ -71,6 +81,29 @@ fun HomeScreen(viewModel: HomeViewModel) {
     ) { uri ->
         if (uri != null) viewModel.restoreMirrorArchive(uri)
         else viewModel.restoreArchiveSelectionCancelled()
+    }
+    val auditLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/json"),
+    ) { uri ->
+        val restore = pendingAuditRestore
+        pendingAuditRestore = null
+        if (uri != null && restore != null) {
+            runCatching {
+                val report = restore.toAuditSnapshot().toAuditJson().toString(2)
+                context.contentResolver.openOutputStream(uri, "wt")
+                    ?.bufferedWriter()
+                    ?.use { writer -> writer.write(report) }
+                    ?: error("Unable to create audit report")
+            }.onSuccess {
+                Toast.makeText(context, "Restore audit report exported", Toast.LENGTH_SHORT).show()
+            }.onFailure { throwable ->
+                Toast.makeText(
+                    context,
+                    throwable.message ?: "Unable to export audit report",
+                    Toast.LENGTH_LONG,
+                ).show()
+            }
+        }
     }
 
     Scaffold(topBar = { TopAppBar(title = { Text("GitHub Backup") }) }) { padding ->
@@ -239,7 +272,7 @@ fun HomeScreen(viewModel: HomeViewModel) {
             item {
                 Text(
                     text = if (state.backupType == BackupType.GIT_MIRROR) {
-                        "Git mirror preserves Git refs/history and bundles every detected Git LFS object after size + SHA-256 verification. Recovery uploads and verifies bundled LFS objects before publishing Git refs."
+                        "Git mirror preserves Git refs/history and bundles every detected Git LFS object after size + SHA-256 verification. It also preserves supported wiki, release, and discussion metadata modules."
                     } else {
                         "Source snapshot is smaller, but contains only the selected branch snapshot and is not a full Git backup."
                     },
@@ -352,7 +385,7 @@ fun HomeScreen(viewModel: HomeViewModel) {
             item { Text("Restore Git mirror", style = MaterialTheme.typography.titleLarge) }
             item {
                 Text(
-                    "Choose a Git mirror ZIP created by this app. It is copied into private app storage, extracted with path-traversal protection, and every advertised ref tip is verified before the restored copy is kept.",
+                    "Choose a Git mirror ZIP created by this app. It is copied into private app storage, extracted with path-traversal protection, and Git refs, referenced LFS objects, plus bundled metadata modules are verified before the restored copy is kept.",
                     style = MaterialTheme.typography.bodyMedium,
                 )
             }
@@ -374,6 +407,10 @@ fun HomeScreen(viewModel: HomeViewModel) {
                         restore = restore,
                         busy = state.busy,
                         onPublish = { viewModel.beginGithubPublish(restore) },
+                        onExportAudit = {
+                            pendingAuditRestore = restore
+                            auditLauncher.launch(restore.auditReportFileName())
+                        },
                         onDelete = { viewModel.deleteRestoredMirror(restore.id) },
                     )
                 }
@@ -528,14 +565,45 @@ private fun RestoredMirrorRow(
     restore: MirrorRestoreRecord,
     busy: Boolean,
     onPublish: () -> Unit,
+    onExportAudit: () -> Unit,
     onDelete: () -> Unit,
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(restore.archiveName, style = MaterialTheme.typography.titleSmall)
-            Text("${restore.refCount} refs • ${restore.referencedObjectsVerified} ref-tip objects verified")
+            Text("${restore.refCount} refs • ${restore.referencedObjectsVerified} ref-tip objects • ${restore.lfsObjectCount} LFS objects")
+            if (restore.detailsAvailable) {
+                if (restore.wikiRefCount > 0) {
+                    Text(
+                        "Wiki: ${restore.wikiRefCount} refs • ${restore.wikiReferencedObjectsVerified} ref-tip objects",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                if (restore.releaseCount > 0) {
+                    Text(
+                        "Releases: ${restore.releaseCount} releases • ${restore.releaseAssetCount} assets",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                val discussionCount = restore.issueCount + restore.pullRequestCount + restore.issueCommentCount +
+                    restore.reviewCommentCount + restore.reviewCount
+                if (discussionCount > 0) {
+                    Text(
+                        "Discussions: ${restore.issueCount} issues • ${restore.pullRequestCount} PRs • " +
+                            "${restore.issueCommentCount} comments • ${restore.reviewCommentCount} review comments • " +
+                            "${restore.reviewCount} reviews",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            } else {
+                Text(
+                    "Imported by an older app version; optional module counts were not recorded.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
             Text("Stored privately on this device.", style = MaterialTheme.typography.bodySmall)
             Button(onClick = onPublish, enabled = !busy) { Text("Restore to GitHub") }
+            OutlinedButton(onClick = onExportAudit, enabled = !busy) { Text("Export audit JSON") }
             OutlinedButton(onClick = onDelete, enabled = !busy) { Text("Delete restored copy") }
         }
     }
