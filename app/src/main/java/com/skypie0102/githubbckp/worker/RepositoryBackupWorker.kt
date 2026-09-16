@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.skypie0102.githubbckp.backup.BackupCoordinator
+import com.skypie0102.githubbckp.backup.BackupOrigin
 import com.skypie0102.githubbckp.backup.BackupRequest
 import com.skypie0102.githubbckp.backup.BackupType
 import com.skypie0102.githubbckp.data.local.BackupDao
@@ -23,6 +24,8 @@ class RepositoryBackupWorker(
         val type = runCatching {
             BackupType.valueOf(inputData.getString(KEY_BACKUP_TYPE) ?: BackupType.SOURCE_ARCHIVE.name)
         }.getOrElse { return Result.failure() }
+        val origin = inputData.getString(KEY_BACKUP_ORIGIN)
+            ?.let { value -> runCatching { BackupOrigin.valueOf(value) }.getOrNull() }
 
         val dependencies = EntryPointAccessors.fromApplication(
             applicationContext,
@@ -34,6 +37,7 @@ class RepositoryBackupWorker(
             BackupRequest(
                 repository = repository.toRepositoryRef(),
                 type = type,
+                origin = origin,
             ),
         )
         return if (success) Result.success() else Result.failure()
@@ -42,6 +46,7 @@ class RepositoryBackupWorker(
     companion object {
         const val KEY_REPOSITORY_ID = "repository_id"
         const val KEY_BACKUP_TYPE = "backup_type"
+        const val KEY_BACKUP_ORIGIN = "backup_origin"
     }
 }
 
