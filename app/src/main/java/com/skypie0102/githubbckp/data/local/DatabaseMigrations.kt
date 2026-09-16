@@ -40,4 +40,10 @@ object DatabaseMigrations {
             db.execSQL("ALTER TABLE backups ADD COLUMN origin TEXT")
         }
     }
+
+    val MIGRATION_6_7 = object : Migration(6, 7) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE backups ADD COLUMN scheduledRunId TEXT")
+        }
+    }
 }
