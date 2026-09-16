@@ -11,6 +11,7 @@ import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
 import dagger.hilt.android.EntryPointAccessors
 import dagger.hilt.components.SingletonComponent
+import java.util.UUID
 
 class ScheduledBackupWorker(
     appContext: Context,
@@ -24,6 +25,7 @@ class ScheduledBackupWorker(
         val schedulePreferences = dependencies.schedulePreferences()
         val settings = schedulePreferences.settings()
         if (!settings.enabled) return Result.success()
+        val scheduledRunId = UUID.randomUUID().toString()
 
         val repositoryIds = dependencies.backupDao()
             .getAvailableRepositories()
@@ -36,6 +38,7 @@ class ScheduledBackupWorker(
                 scheduledBackupRunStatus(
                     completedAtEpochMs = System.currentTimeMillis(),
                     repositoryCount = 0,
+                    scheduledRunId = scheduledRunId,
                 ),
             )
             return Result.success()
@@ -53,6 +56,7 @@ class ScheduledBackupWorker(
                 scheduledBackupRunStatus(
                     completedAtEpochMs = System.currentTimeMillis(),
                     repositoryCount = repositoryIds.size,
+                    scheduledRunId = scheduledRunId,
                     readiness = readiness,
                 ),
             )
@@ -62,11 +66,13 @@ class ScheduledBackupWorker(
         dependencies.backupScheduler().enqueueScheduled(
             repositoryIds = repositoryIds,
             type = settings.backupType,
+            scheduledRunId = scheduledRunId,
         )
         schedulePreferences.saveRunStatus(
             scheduledBackupRunStatus(
                 completedAtEpochMs = System.currentTimeMillis(),
                 repositoryCount = repositoryIds.size,
+                scheduledRunId = scheduledRunId,
                 readiness = readiness,
             ),
         )
