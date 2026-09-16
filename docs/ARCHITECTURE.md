@@ -20,6 +20,7 @@ BackupCoordinator
    |            +-- GitLfsPointerScanner / GitLfsDownloadService
    |            +-- GithubWikiBackupService
    |            +-- GithubReleaseBackupService
+   |            +-- GithubDiscussionBackupService
    +-- StorageRouter
    |     +-- DocumentTreeStorageProvider
    |     +-- GoogleDriveStorageProvider
@@ -31,6 +32,7 @@ MirrorRestoreCoordinator
 GitMirrorRestoreService
    +-- GithubWikiBackupService (validation)
    +-- GithubReleaseBackupService (manifest/assets validation)
+   +-- GithubDiscussionBackupService (JSONL/hash validation)
    |
 GithubMirrorRestorePublisher
    +-- GithubAuthManager (recovery scope enforcement)
@@ -71,9 +73,17 @@ If repository metadata reports the wiki feature enabled, `GithubWikiBackupServic
 
 Asset bytes are downloaded from GitHub's release-asset endpoint using `Accept: application/octet-stream`. The app manually follows redirects, requires HTTPS, and only sends the GitHub bearer token while the request host is `api.github.com`. Every asset must match GitHub's reported size and a locally computed SHA-256. When the API supplies a `sha256:` asset digest, it is independently cross-checked.
 
-The main bare repository, LFS store, optional wiki mirror, and optional release directory are packaged as one `.mirror.zip`. The final artifact receives SHA-256 plus MD5 for destination-level verification.
+### Issues, pull requests, comments, and reviews
 
-`BackupArtifact` can carry non-fatal completeness warnings. Git/LFS and release data are recoverable through the supported empty-target transaction flow. Wiki history is preservation/local-validation only. Release backups also retain a warning because source latest-release selection, source publication timestamps, and immutable-release state are not recreated by the recovery API flow.
+`GithubDiscussionBackupService` preserves GitHub discussion data outside the Git object database. It reads repository issues with `state=all`, repository pull requests with `state=all`, repository-wide issue comments, repository-wide pull-request review comments, and the review list for each discovered pull request. API requests use 100-item pagination.
+
+The service intentionally stores the raw REST response objects rather than mapping them into a narrow app model. That preserves GitHub-provided metadata fields without requiring an app schema migration whenever GitHub adds response fields. For global comment/review datasets the app adds only a stable parent-number field when the parent is otherwise represented by endpoint context or an API URL.
+
+To bound memory use, discussion records stream directly into JSON Lines files under `github-backup/discussions/`. Only discovered pull-request numbers are retained in memory for the per-PR review pass. A versioned `manifest.json` records per-dataset counts and SHA-256 hashes for `issues.jsonl`, `issue-comments.jsonl`, `pull-requests.jsonl`, `review-comments.jsonl`, and `reviews.jsonl`.
+
+The main bare repository, LFS store, optional wiki mirror, optional release directory, and optional discussion directory are packaged as one `.mirror.zip`. The final artifact receives SHA-256 plus MD5 for destination-level verification.
+
+`BackupArtifact` can carry non-fatal completeness warnings. Git/LFS and release data are recoverable through the supported empty-target transaction flow. Wiki and discussion data are preservation/local-validation only. Release backups retain a warning because source latest-release selection, source publication timestamps, and immutable-release state are not recreated. Discussion backups retain a warning because automatic recreation, timeline events, and referenced attachment bytes are not implemented.
 
 ## Local mirror restore
 
@@ -81,7 +91,8 @@ The main bare repository, LFS store, optional wiki mirror, and optional release 
 
 - main bare Git repository: advertised ref tips must exist in the object database;
 - optional wiki mirror: opened independently as a bare repository and its ref tips verified;
-- optional releases: supported manifest version, safe asset paths, file existence, size, and SHA-256 all verified.
+- optional releases: supported manifest version, safe asset paths, file existence, size, and SHA-256 all verified;
+- optional discussions: fixed dataset names, safe paths, per-file SHA-256, JSONL parsing, positive GitHub identities/numbers, duplicate identities, and manifest counts all verified.
 
 `MirrorRestoreCoordinator` keeps validated restores in private app storage with lightweight metadata and reloads valid records across app restarts.
 
@@ -115,7 +126,7 @@ GitHub-owned `refs/pull/*` refs from the source mirror are skipped and reported 
 
 The transaction mechanism is deliberately narrow: it makes retries idempotent for the target this restore already owns; it does not authorize arbitrary overwrite or force-push into a live repository.
 
-Wiki publication is not automated because GitHub does not expose a documented wiki-page initialization API. Arbitrary destructive recovery into a non-empty repository remains unavailable.
+Wiki publication is not automated because GitHub does not expose a documented wiki-page initialization API. Discussion publication is not automated because native recreation cannot faithfully assume original authors/timestamps and can trigger notifications/automation. Arbitrary destructive recovery into a non-empty repository remains unavailable.
 
 ## Storage routing and retention
 
@@ -141,8 +152,8 @@ QUEUED -> DOWNLOADING -> CHECKSUM -> UPLOADING -> VERIFYING -> COMPLETED
 Git mirror:
 
 ```text
-QUEUED -> DOWNLOADING (Git + LFS + wiki + releases) -> PACKAGING -> CHECKSUM -> UPLOADING -> VERIFYING -> COMPLETED
-                 \-----------------------------------------------------------------------------------------> FAILED
+QUEUED -> DOWNLOADING (Git + LFS + wiki + releases + discussions) -> PACKAGING -> CHECKSUM -> UPLOADING -> VERIFYING -> COMPLETED
+                 \------------------------------------------------------------------------------------------------------> FAILED
 ```
 
 After `COMPLETED`, retention may prune older verified remote artifacts without changing historical completion state.
@@ -154,6 +165,7 @@ After `COMPLETED`, retention may prune older verified remote artifacts without c
 - LFS scanner tests discover real pointer blobs; download/upload tests cover Batch API parsing, errors, already-present objects, and integrity checks.
 - `GithubReleaseBackupServiceTest` verifies valid assets, corrupt-asset rejection, and manifest path-traversal rejection.
 - `GithubReleaseRestoreServiceTest` verifies manifest parsing, renamed-asset SHA-256 reconciliation, starter cleanup planning, conflicting uploaded-asset rejection, and ambiguous digest rejection.
+- `GithubDiscussionBackupServiceTest` verifies valid mixed issue/PR datasets, SHA-256 tamper rejection, and duplicate-identity rejection.
 - `RecoveryTransactionStoreTest` covers persistence, phase advancement through `RELEASES_PUBLISHED`, immutable target binding, ordering, and rebound-state rejection.
 - `GitMirrorPushServiceTest` validates empty-target push behavior, explicit preflight refusal for non-empty targets, exact post-push reconciliation, and rejection of unexpected extra refs.
 - `GithubAuthManagerTest` covers OAuth scope normalization, workflow-scope detection, and the legacy no-cache case.

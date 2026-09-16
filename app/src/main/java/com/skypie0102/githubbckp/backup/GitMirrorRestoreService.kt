@@ -18,17 +18,23 @@ data class MirrorRestoreResult(
     val wikiReferencedObjectsVerified: Int = 0,
     val releaseCount: Int = 0,
     val releaseAssetCount: Int = 0,
+    val issueCount: Int = 0,
+    val pullRequestCount: Int = 0,
+    val issueCommentCount: Int = 0,
+    val reviewCommentCount: Int = 0,
+    val reviewCount: Int = 0,
 )
 
 /**
  * Restore primitive for GIT_MIRROR artifacts. It extracts the bare repository,
- * verifies advertised main-repository ref tips, bundled wiki history, and any
- * bundled release metadata/assets before retaining the local restore.
+ * verifies advertised main-repository ref tips and every bundled metadata
+ * module before retaining the local restore.
  */
 @Singleton
 class GitMirrorRestoreService @Inject constructor(
     private val wikiBackupService: GithubWikiBackupService,
     private val releaseBackupService: GithubReleaseBackupService,
+    private val discussionBackupService: GithubDiscussionBackupService,
 ) {
     suspend fun restore(
         archive: File,
@@ -61,6 +67,7 @@ class GitMirrorRestoreService @Inject constructor(
             }
         val wikiResult = wikiBackupService.validateBundledWiki(destination)
         val releaseResult = releaseBackupService.validateBundledReleases(destination)
+        val discussionResult = discussionBackupService.validateBundledDiscussions(destination)
 
         MirrorRestoreResult(
             refNames = mainResult.first,
@@ -69,6 +76,11 @@ class GitMirrorRestoreService @Inject constructor(
             wikiReferencedObjectsVerified = wikiResult?.referencedObjectsVerified ?: 0,
             releaseCount = releaseResult?.releaseCount ?: 0,
             releaseAssetCount = releaseResult?.assetCount ?: 0,
+            issueCount = discussionResult?.issueCount ?: 0,
+            pullRequestCount = discussionResult?.pullRequestCount ?: 0,
+            issueCommentCount = discussionResult?.issueCommentCount ?: 0,
+            reviewCommentCount = discussionResult?.reviewCommentCount ?: 0,
+            reviewCount = discussionResult?.reviewCount ?: 0,
         )
     }
 

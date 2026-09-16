@@ -21,6 +21,7 @@ class GitMirrorRestoreServiceTest {
     private val service = GitMirrorRestoreService(
         GithubWikiBackupService(),
         GithubReleaseBackupService(),
+        GithubDiscussionBackupService(),
     )
 
     @Test
