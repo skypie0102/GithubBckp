@@ -6,7 +6,7 @@ The architecture optimizes for three properties:
 
 1. **Integrity** — a backup is not treated as successful until its bytes/checksums and supported module data are verified.
 2. **Recoverability** — recovery is explicit, target-bound, resumable, and refuses ambiguous or unsafe remote state.
-3. **Operator confidence** — history, audit exports, backup-health presentation, and notifications make silent failure increasingly difficult.
+3. **Operator confidence** — history, audit exports, backup-health presentation, notifications, and fresh stored-artifact re-verification make silent failure increasingly difficult.
 
 See [`ROADMAP.md`](ROADMAP.md) for active priorities and explicit non-goals.
 
@@ -17,6 +17,14 @@ Compose UI
    |
 HomeViewModel
    +-- backup health presentation
+   |
+BackupReverificationViewModel
+   |
+BackupReverificationService
+   +-- StorageRouter -> original provider read-only download
+   +-- local size / SHA-256 / MD5 recomputation
+   +-- GitMirrorRestoreService.validate() for mirror backups
+   +-- Room re-verification result persistence
    |
 BackupScheduler
    +-- ScheduledBackupWorker
@@ -123,13 +131,13 @@ See [`DISCUSSIONS_BACKUP.md`](DISCUSSIONS_BACKUP.md).
 
 ## Storage routing and retention
 
-`StorageRouter` sends artifacts to the configured destination and records enough provider identity to later verify/delete the same remote object even if the active destination changes.
+`StorageRouter` routes upload, lightweight verification, read-only download, and deletion through the provider associated with the operation. Persisted provider identity lets later retention or re-verification address the same remote object even if the user changes the active destination.
 
-`DocumentTreeStorageProvider` reopens saved files and verifies size/SHA-256/MD5. `GoogleDriveStorageProvider` uses resumable upload and remote checksum metadata.
+`DocumentTreeStorageProvider` reopens saved files and can stream the persisted document URI back into app-private cache. `GoogleDriveStorageProvider` uses resumable upload, remote checksum metadata, and authenticated file-byte download through the Drive API.
 
 `BackupRetentionManager` supports keep-all or keep-last-N pruning per repository and backup format. Pruning marks the historical backup row with `remoteDeletedAtEpochMs` rather than erasing history.
 
-The backup-health model therefore ignores retention-pruned completions when deciding whether a repository still has a current verified artifact.
+The backup-health model therefore ignores retention-pruned completions when deciding whether a repository still has a current verified artifact. Pruned rows also cannot be on-demand re-verified because their remote object is intentionally gone.
 
 ## Background execution
 
@@ -186,6 +194,22 @@ The notifier stores the current overdue repository-ID set in app-private SharedP
 
 Android 13+ notification delivery is gated by `POST_NOTIFICATIONS`. `MainActivity` asks once; the notification layer also checks runtime permission and OS notification enablement before posting. Lack of permission never changes backup execution or persisted health state.
 
+## On-demand stored-artifact re-verification
+
+Database schema v9 adds three nullable fields to each backup row: latest re-verification timestamp, status, and detail. Existing rows migrate with all fields unset.
+
+`BackupReverificationService` accepts only completed, non-pruned rows that still contain the provider identity, remote object identity, byte size, SHA-256, and MD5 persisted at creation time. The current destination is irrelevant; `StorageRouter` routes the read to the provider recorded on that backup row.
+
+The provider downloads the complete object to a temporary file below app cache. `BackupReverificationService` recomputes size, SHA-256, and MD5 locally and requires all three to match the persisted verified values. Google Drive metadata alone is therefore insufficient for a successful on-demand check.
+
+For `GIT_MIRROR` rows, the service then calls `GitMirrorRestoreService.validate()` against the temporary archive. This deliberately reuses the same safe extraction and module-validation path as restore instead of creating a second Git/LFS/wiki/release/discussion validator. No GitHub publication path is reachable from re-verification.
+
+The temporary download and validation scratch directory are deleted in `finally`. The remote artifact is never updated or replaced. Success and failure both persist as separate re-verification state; the historical backup status remains `COMPLETED` because it describes creation-time success, not present-day readability.
+
+`BackupReverificationViewModel` provides a narrow UI action state so only one re-verification is launched at a time. The normal Recent backups Room flow refreshes the row after the result is persisted.
+
+See [`BACKUP_AUDIT.md`](BACKUP_AUDIT.md).
+
 ## Local mirror restore
 
 `GitMirrorRestoreService` rejects ZIP entries escaping the restore root and validates every bundled module before the restored copy is retained:
@@ -218,7 +242,7 @@ The transaction mechanism deliberately does **not** authorize arbitrary non-empt
 
 ## Audit reporting
 
-Completed backup rows can export JSON audit/history reports. Exporting a backup audit does not re-download the artifact; it reports the integrity/provenance data persisted when the backup was verified. Roadmap issue #35 adds explicit on-demand re-verification for users who want fresh proof that an older remote artifact still exists and matches its recorded integrity data.
+Completed backup rows can export JSON audit/history reports. Exporting a backup audit never initiates a remote read; format v5 reports creation-time integrity/provenance plus the latest separately recorded on-demand re-verification result, if one exists.
 
 See [`BACKUP_AUDIT.md`](BACKUP_AUDIT.md).
 
@@ -251,6 +275,7 @@ The JVM suite covers, among other things:
 - retention selection;
 - backup-health state classification;
 - overdue-notification policy and failure rate-limit boundaries;
+- re-verification eligibility and size/SHA-256/MD5 mismatch detection;
 - scheduled-run readiness/progress presentation.
 
 Room/KSP compilation validates database schema/query consistency in CI. The repository CI gate builds debug and release variants, runs JVM tests, and runs Android lint.
