@@ -14,6 +14,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.flow.Flow
 
 @Singleton
 class BackupScheduler @Inject constructor(
@@ -47,6 +48,10 @@ class BackupScheduler @Inject constructor(
     }
 
     fun scheduleSettings(): BackupScheduleSettings = schedulePreferences.settings()
+
+    fun scheduledRunStatus(): ScheduledBackupRunStatus? = schedulePreferences.runStatus()
+
+    fun observeScheduledRunStatus(): Flow<ScheduledBackupRunStatus?> = schedulePreferences.observeRunStatus()
 
     fun updateSchedule(settings: BackupScheduleSettings) {
         schedulePreferences.save(settings)
