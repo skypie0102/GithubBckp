@@ -1,6 +1,8 @@
 # Personal release process
 
-This project is currently intended for personal/internal use rather than public app-store distribution.
+This project is intended for personal/internal use rather than public app-store distribution. The release process therefore optimizes for a reproducible signed APK, real-device backup/recovery confidence, and preserving the signing key for future upgrades.
+
+The active reliability roadmap lives in [`ROADMAP.md`](ROADMAP.md). Roadmap items are prioritized product improvements; a feature that is intentionally outside scope is not a release blocker merely because GitHub could theoretically support more state.
 
 ## 1. Freeze and verify the code
 
@@ -11,6 +13,8 @@ Before producing a release APK:
 ```
 
 CI runs the same build/test gate. `assembleRelease` is expected to work without signing configuration so CI can verify the release variant without holding private keys.
+
+Do not tag a known-good build from a commit whose CI gate is failing.
 
 ## 2. Create and protect a signing key
 
@@ -42,7 +46,7 @@ export RELEASE_KEY_PASSWORD='...'
 
 Do not place secrets in tracked files or shell history. A partially configured signing setup intentionally fails the Gradle configuration step rather than silently creating the wrong artifact.
 
-The GitHub OAuth client ID is still supplied independently:
+The GitHub OAuth client ID is supplied independently:
 
 ```bash
 export GITHUB_CLIENT_ID='...'
@@ -87,11 +91,18 @@ Run these checks on the signed release build before tagging it as known-good:
 8. Configure an automatic backup, allow one scheduled run to complete, and confirm live run progress/history.
 9. Exercise a recoverable failure (for example temporary network loss or unavailable destination), then retry and confirm the final state is correct.
 10. Reboot the device and confirm persisted authorization/settings/history still behave as expected.
+11. If the candidate contains the backup-health dashboard, confirm a successful repository reports protected, an intentionally old scheduled backup reports stale, and a failed attempt after the latest success reports failed until a later success clears it.
 
-A failure in backup integrity, restore validation, recovery target safety, authentication, or release signing is a release blocker. Cosmetic or future-scope items can be deferred for a personal release.
+A failure in backup integrity, restore validation, recovery target safety, authentication, signing, or a feature explicitly included in the candidate is a release blocker. Cosmetic work and features explicitly cut in [`ROADMAP.md`](ROADMAP.md) are not blockers.
 
-## 6. Tag the known-good build
+## 6. Personal-use recovery promise
 
-Only after the real-device gate passes, tag the exact commit used to build the APK. For the current version line, use an RC tag until the device gate is complete, then promote the known-good commit to the intended version tag.
+A known-good release is expected to preserve and recover the supported surfaces documented by the repository. It is **not** expected to recreate every server-managed GitHub behavior.
 
-Keep the signed APK, its SHA-256, release notes, and the signing keystore backup together in secure storage.
+In particular, the personal product intentionally does not promise destructive overwrite of live repositories, native discussion recreation, automatic wiki publication, organization/team reconstruction, or exact historical release semantics. Keeping those operations out of the release promise reduces the risk of a recovery tool damaging live state.
+
+## 7. Tag the known-good build
+
+Only after the real-device gate passes, tag the exact commit used to build the APK. Use an RC ref/tag until device validation is complete, then promote the exact known-good commit to the intended personal version tag.
+
+Keep the signed APK, its SHA-256, release notes, and signing-keystore backup together in secure storage.

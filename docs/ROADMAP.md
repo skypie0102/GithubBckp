@@ -15,7 +15,7 @@ The supported recovery promise is intentionally narrow:
 
 ## Active roadmap
 
-### P0 — Backup health dashboard
+### P0 — Backup health dashboard — #33
 
 Goal: make silent backup failure obvious without reading raw history.
 
@@ -28,7 +28,7 @@ Acceptance criteria:
 - surface a compact top-level summary and the repositories that need attention;
 - keep the health calculation pure and unit tested.
 
-### P0 — Failure and overdue-backup notifications
+### P0 — Failure and overdue-backup notifications — #34
 
 Goal: make the app useful even when it is not opened regularly.
 
@@ -37,10 +37,10 @@ Acceptance criteria:
 - notify when a backup attempt reaches `FAILED`;
 - notify when scheduled backup health becomes overdue for selected repositories;
 - avoid notification storms by grouping/rate-limiting repeated failures;
-- deep-link or otherwise lead the user to actionable in-app state;
+- lead the user to actionable in-app state;
 - do not notify for intentionally unavailable/unselected repositories.
 
-### P1 — On-demand backup re-verification
+### P1 — On-demand backup re-verification — #35
 
 Goal: prove that an older stored artifact is still present and readable, instead of relying only on verification performed when it was created.
 
@@ -53,7 +53,7 @@ Acceptance criteria:
 - persist/display the latest re-verification result and timestamp;
 - never mutate the remote backup while verifying it.
 
-### P1 — Guided disaster-recovery drill
+### P1 — Guided disaster-recovery drill — #36
 
 Goal: make recovery testing a routine operation rather than something first attempted during an emergency.
 

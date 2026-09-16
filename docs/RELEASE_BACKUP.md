@@ -67,12 +67,14 @@ When a reusable remote asset exposes a `sha256:` digest, that digest is compared
 
 After every bundled release and asset has been reconciled, `RecoveryTransactionStore` advances the restore to `RELEASES_PUBLISHED` and persists release/asset counts. A crash before that phase is written simply resumes the reconciliation process on the same repository ID.
 
-## Remaining release semantics
+## Personal-use recovery boundary
 
-The backup preserves source timestamps and immutable-state metadata for audit/completeness reporting, but GitHub's recovery surface does not let this flow reproduce all source-side semantics exactly. In particular, the app does not restore:
+The backup preserves source timestamps and immutable-state metadata for audit/completeness reporting, but exact server-side release semantics are intentionally outside the personal-use roadmap. The app does not restore:
 
 - the original latest-release selection;
 - original creation/publication timestamps;
 - immutable release state.
 
-These are completeness limitations, not missing asset bytes: release metadata and binary assets are still preserved, verified, and replayed through the transaction-backed recovery flow.
+These are accepted completeness limitations rather than pending feature work. Release metadata and binary assets remain preserved, verified, and replayed through the transaction-backed recovery flow.
+
+See [`ROADMAP.md`](ROADMAP.md) for the current scope decisions.

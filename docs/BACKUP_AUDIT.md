@@ -72,3 +72,11 @@ A pruned backup remains auditable even though its remote artifact no longer exis
 The UI uses Android's system **Create Document** flow with `application/json`. The report is written only to the URI selected by the user and does not require broad storage permission.
 
 The suggested filename uses the backup-time repository name for schema-v4+ rows. Legacy rows use the current known repository name when available, otherwise the immutable numeric repository ID, plus the backup history ID.
+
+## Relation to the personal reliability roadmap
+
+Backup-health status and audit export use the persisted history created when a backup completed; neither operation re-reads the remote bytes. Roadmap issue #35 adds an explicit **on-demand re-verification** operation for the different question: "does this older stored artifact still exist and still match its recorded integrity data today?"
+
+That future operation will remain read-only with respect to the remote backup and will record/display a fresh verification result rather than changing the meaning of the historical completion record.
+
+See [`ROADMAP.md`](ROADMAP.md).
