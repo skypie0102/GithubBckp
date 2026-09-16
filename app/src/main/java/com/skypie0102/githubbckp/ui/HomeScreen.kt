@@ -715,6 +715,7 @@ private fun BackupRow(
         Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(backup.repositoryDisplayName(repository), style = MaterialTheme.typography.titleSmall)
             Text("${backup.type.name.replace('_', ' ')} • ${backup.status.name}")
+            Text(backup.originDisplayText(), style = MaterialTheme.typography.bodySmall)
             backup.storageProvider?.let { provider ->
                 Text(
                     if (backup.remoteDeletedAtEpochMs == null) {
@@ -751,7 +752,10 @@ private fun ScheduledBackupRunStatus.displayText(): String {
             null -> "skipped because backup prerequisites were unavailable"
         }
     }
-    return "Last automatic check $timestamp: $detail."
+    val runSuffix = shortScheduledRunId(scheduledRunId)
+        ?.let { " • run $it" }
+        .orEmpty()
+    return "Last automatic check $timestamp: $detail$runSuffix."
 }
 
 private fun StorageDestination.displayName(): String = when (this) {
