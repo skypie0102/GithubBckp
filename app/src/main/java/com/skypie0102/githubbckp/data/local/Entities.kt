@@ -42,4 +42,5 @@ data class BackupEntity(
     val repositoryDefaultBranchAtBackup: String? = null,
     val repositoryPrivateAtBackup: Boolean? = null,
     val origin: BackupOrigin? = null,
+    val scheduledRunId: String? = null,
 )
