@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Transaction
 import androidx.room.Upsert
 import com.skypie0102.githubbckp.backup.BackupStatus
 import com.skypie0102.githubbckp.backup.BackupType
@@ -14,16 +15,30 @@ interface BackupDao {
     @Upsert
     suspend fun upsertRepositories(repositories: List<RepositoryEntity>)
 
+    @Query("UPDATE repositories SET isAvailable = 0")
+    suspend fun markAllRepositoriesUnavailable()
+
+    @Transaction
+    suspend fun reconcileRepositories(repositories: List<RepositoryEntity>) {
+        markAllRepositoriesUnavailable()
+        if (repositories.isNotEmpty()) {
+            upsertRepositories(repositories.map { it.copy(isAvailable = true) })
+        }
+    }
+
     @Query("SELECT * FROM repositories ORDER BY owner, name")
     fun observeRepositories(): Flow<List<RepositoryEntity>>
 
-    @Query("SELECT * FROM repositories ORDER BY owner, name")
+    @Query("SELECT * FROM repositories WHERE isAvailable = 1 ORDER BY owner, name")
     suspend fun getRepositories(): List<RepositoryEntity>
 
-    @Query("SELECT * FROM repositories WHERE githubId = :githubId LIMIT 1")
+    @Query("SELECT * FROM repositories ORDER BY owner, name")
+    suspend fun getAllRepositories(): List<RepositoryEntity>
+
+    @Query("SELECT * FROM repositories WHERE githubId = :githubId AND isAvailable = 1 LIMIT 1")
     suspend fun getRepository(githubId: Long): RepositoryEntity?
 
-    @Query("UPDATE repositories SET selectedForBackup = :selected WHERE githubId = :githubId")
+    @Query("UPDATE repositories SET selectedForBackup = :selected WHERE githubId = :githubId AND isAvailable = 1")
     suspend fun setRepositorySelected(githubId: Long, selected: Boolean)
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
