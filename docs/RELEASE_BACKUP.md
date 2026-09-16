@@ -1,6 +1,6 @@
-# GitHub release backup
+# GitHub release backup and recovery
 
-Git mirror backups preserve GitHub release metadata and binary release assets inside the same `.mirror.zip` artifact.
+Git mirror backups preserve GitHub release metadata and binary release assets inside the same `.mirror.zip` artifact, and the target-bound recovery transaction can later recreate/reconcile those releases after Git refs exist.
 
 ## Discovery and metadata
 
@@ -40,8 +40,39 @@ After a mirror ZIP is imported, release data is revalidated before the restored 
 
 This makes release assets part of local disaster-recovery validation rather than unverified opaque files.
 
-## GitHub publication boundary
+## GitHub publication
 
-Automatic recreation of releases and upload of their assets to a target GitHub repository is intentionally not implemented in this slice. Git refs need to exist before releases can be faithfully recreated, but a release-publication failure after the Git push would leave a non-empty partially recovered target. The current recovery safety model deliberately refuses non-empty targets, so retry/resume semantics must be designed before release publication is enabled.
+Release publication is a post-Git recovery phase. The recovery transaction must first reach `GIT_PUBLISHED`, which guarantees the release tags/commits are already available in the bound target repository.
 
-Backups that contain release metadata therefore persist a non-fatal completeness warning. Main Git refs and Git LFS recovery remain supported, while the release manifest/assets stay preserved and locally verified for a future idempotent publication phase.
+On the first recovery attempt, the target's release surface must be empty before any LFS/Git write starts. After Git publication, `GithubReleaseRestoreService` processes the bundled manifest:
+
+- a missing release is created from the backed-up tag, target commitish, name, body, draft flag, and prerelease flag;
+- an existing release with the same tag can be reused only when its name/body/draft/prerelease metadata matches;
+- any unexpected target release tag is treated as conflicting state and fails recovery.
+
+Creation deliberately sets `make_latest=false`, so restoring older releases does not unexpectedly change the repository's current latest-release selection.
+
+## Idempotent asset recovery
+
+Asset publication is designed for interrupted/retried recovery:
+
+1. If an uploaded asset with the expected name exists, its size and SHA-256 must match before it is reused.
+2. If GitHub normalized/renamed the filename, one unique uploaded asset with the expected size and SHA-256 digest can be reconciled to the bundled asset.
+3. Multiple possible digest matches are ambiguous and fail safely.
+4. A GitHub `starter` asset left by a failed/interrupted upload is deleted and the upload is retried.
+5. A conflicting fully uploaded asset is never silently deleted or overwritten.
+6. After all expected assets are accounted for, any unexpected leftover target asset fails recovery.
+
+When a reusable remote asset exposes a `sha256:` digest, that digest is compared directly. When no digest is available, the asset is downloaded again and SHA-256 is recomputed before the app accepts it as restored.
+
+After every bundled release and asset has been reconciled, `RecoveryTransactionStore` advances the restore to `RELEASES_PUBLISHED` and persists release/asset counts. A crash before that phase is written simply resumes the reconciliation process on the same repository ID.
+
+## Remaining release semantics
+
+The backup preserves source timestamps and immutable-state metadata for audit/completeness reporting, but GitHub's recovery surface does not let this flow reproduce all source-side semantics exactly. In particular, the app does not restore:
+
+- the original latest-release selection;
+- original creation/publication timestamps;
+- immutable release state.
+
+These are completeness limitations, not missing asset bytes: release metadata and binary assets are still preserved, verified, and replayed through the transaction-backed recovery flow.
