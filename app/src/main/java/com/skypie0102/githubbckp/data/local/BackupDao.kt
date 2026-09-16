@@ -100,6 +100,16 @@ interface BackupDao {
         """
         SELECT * FROM backups
         WHERE repositoryId = :repositoryId
+        ORDER BY startedAtEpochMs DESC, id DESC
+        LIMIT 1
+        """,
+    )
+    suspend fun getLatestBackup(repositoryId: Long): BackupEntity?
+
+    @Query(
+        """
+        SELECT * FROM backups
+        WHERE repositoryId = :repositoryId
           AND type = :type
           AND status = 'COMPLETED'
           AND storageProvider IS NOT NULL

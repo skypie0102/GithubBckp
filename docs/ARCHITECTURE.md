@@ -6,7 +6,7 @@ The architecture optimizes for three properties:
 
 1. **Integrity** — a backup is not treated as successful until its bytes/checksums and supported module data are verified.
 2. **Recoverability** — recovery is explicit, target-bound, resumable, and refuses ambiguous or unsafe remote state.
-3. **Operator confidence** — history, audit exports, scheduled-run progress, and the reliability roadmap make silent failure increasingly difficult.
+3. **Operator confidence** — history, audit exports, backup-health presentation, and notifications make silent failure increasingly difficult.
 
 See [`ROADMAP.md`](ROADMAP.md) for active priorities and explicit non-goals.
 
@@ -18,9 +18,12 @@ Compose UI
 HomeViewModel
    +-- backup health presentation
    |
-BackupScheduler / ScheduledBackupWorker
+BackupScheduler
+   +-- ScheduledBackupWorker
+   +-- BackupHealthCheckWorker
    |
 RepositoryBackupWorker
+   +-- BackupProblemNotifier
    |
 BackupCoordinator
    +-- BackupEngineFactory
@@ -70,7 +73,7 @@ For legacy installations without cached scope metadata, recovery queries GitHub'
 
 Room retains repository rows so selection/history survive temporary disappearance from GitHub discovery. `RepositoryEntity.isAvailable` is reconciled only after a successful complete discovery response.
 
-Unavailable repositories are hidden from active selection and excluded from scheduled work, but historical backup rows are retained. If a repository later reappears, its prior selection preference can be reused.
+Unavailable repositories are hidden from active selection and excluded from scheduled work, health alerts, and overdue notification evaluation, but historical backup rows are retained. If a repository later reappears, its prior selection preference can be reused.
 
 See [`REPOSITORY_RECONCILIATION.md`](REPOSITORY_RECONCILIATION.md).
 
@@ -130,11 +133,13 @@ The backup-health model therefore ignores retention-pruned completions when deci
 
 ## Background execution
 
-Manual backups enqueue one repository worker per selected repository. Periodic work uses a WorkManager controller that reads the currently selected, available repositories at execution time and fans out repository work.
+Manual backups enqueue one repository worker per selected repository. Periodic backup work uses a WorkManager controller that reads the currently selected, available repositories at execution time and fans out repository work.
 
-Scheduled work requires unmetered networking, battery-not-low, and storage-not-low constraints. WorkManager execution is opportunistic rather than exact.
+Scheduled backup jobs require unmetered networking, battery-not-low, and storage-not-low constraints. WorkManager execution is opportunistic rather than exact.
 
 Each scheduled controller run persists an outcome and, when work is queued, a correlation ID. Child backup rows persist that same ID so the UI can summarize live completion/failure/cancellation/progress for the run.
+
+While automatic backups are enabled, `BackupScheduler` also maintains `BackupHealthCheckWorker`, a separate local periodic worker that runs every 24 hours after an initial one-hour delay. It needs no network because it evaluates persisted Room history and schedule metadata. Disabling the schedule cancels both periodic workers and clears overdue-notification state.
 
 See [`SCHEDULED_BACKUPS.md`](SCHEDULED_BACKUPS.md).
 
@@ -159,8 +164,6 @@ After `COMPLETED`, retention may prune an older verified remote artifact without
 
 ## Backup-health presentation
 
-Roadmap issue #33 adds a repository-level health model without changing the database schema.
-
 `BackupDao.observeBackupHealthHistory()` returns at most the rows needed to classify each repository: the latest attempt and the latest non-pruned verified completion. `BackupHealthPresentation` combines those rows with the currently selected repository inventory.
 
 Health states are:
@@ -173,7 +176,15 @@ Health states are:
 
 The calculation is intentionally pure/testable and does not depend on the fixed-size Recent backups UI list. A later successful backup clears an earlier failure.
 
-Roadmap issue #34 will reuse the same concepts for grouped/rate-limited failure and overdue notifications.
+## Backup problem notifications
+
+`RepositoryBackupWorker` receives the boolean result from `BackupCoordinator`. When the coordinator has already persisted a `FAILED` row, the worker resolves the repository again and only notifies if the repository is still available and selected. `BackupProblemNotifier` rate-limits repeated failure notifications for the same repository/backup format to one every six hours. Notification taps open `MainActivity`, where the Home health card and backup history show the actionable state.
+
+Overdue alerts are evaluated separately by `BackupHealthCheckWorker`. Its pure notification policy uses the same two-cadence freshness window as the Home health model. For repositories with no successful backup, `BackupSchedulePreferences` persists the schedule-enable timestamp and uses it as the start of the same grace window.
+
+The notifier stores the current overdue repository-ID set in app-private SharedPreferences. It emits one grouped alert only when at least one repository newly enters that set. Repositories that recover are removed on the next health check, allowing a later independent overdue episode to notify again. Turning automatic backups off explicitly clears this state.
+
+Android 13+ notification delivery is gated by `POST_NOTIFICATIONS`. `MainActivity` asks once; the notification layer also checks runtime permission and OS notification enablement before posting. Lack of permission never changes backup execution or persisted health state.
 
 ## Local mirror restore
 
@@ -239,6 +250,7 @@ The JVM suite covers, among other things:
 - OAuth scope normalization and legacy scope discovery;
 - retention selection;
 - backup-health state classification;
+- overdue-notification policy and failure rate-limit boundaries;
 - scheduled-run readiness/progress presentation.
 
 Room/KSP compilation validates database schema/query consistency in CI. The repository CI gate builds debug and release variants, runs JVM tests, and runs Android lint.

@@ -44,6 +44,17 @@ class RepositoryBackupWorker(
                 scheduledRunId = scheduledRunId,
             ),
         )
+        if (!success) {
+            val currentRepository = dependencies.backupDao().getRepository(repositoryId)
+            if (currentRepository?.selectedForBackup == true) {
+                val latestAttempt = dependencies.backupDao().getLatestBackup(repositoryId)
+                dependencies.backupProblemNotifier().notifyBackupFailure(
+                    repository = currentRepository,
+                    type = type,
+                    errorMessage = latestAttempt?.errorMessage,
+                )
+            }
+        }
         return if (success) Result.success() else Result.failure()
     }
 
@@ -60,4 +71,5 @@ class RepositoryBackupWorker(
 interface BackupWorkerDependencies {
     fun backupDao(): BackupDao
     fun backupCoordinator(): BackupCoordinator
+    fun backupProblemNotifier(): BackupProblemNotifier
 }
