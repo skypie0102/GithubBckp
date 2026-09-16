@@ -19,6 +19,8 @@ import org.junit.Test
 
 class GitMirrorRestoreServiceTest {
     private val service = GitMirrorRestoreService(
+        GitLfsPointerScanner(),
+        GitLfsObjectStore(),
         GithubWikiBackupService(),
         GithubReleaseBackupService(),
         GithubDiscussionBackupService(),
@@ -77,6 +79,7 @@ class GitMirrorRestoreServiceTest {
             assertTrue(result.refNames.any { it.startsWith("refs/heads/") })
             assertTrue(result.refNames.contains("refs/tags/v1"))
             assertTrue(result.referencedObjectsVerified >= 2)
+            assertTrue(result.lfsObjectCount == 0)
             assertTrue(result.wikiRefNames.any { it.startsWith("refs/heads/") })
             assertTrue(result.wikiReferencedObjectsVerified >= 1)
             assertTrue(result.releaseCount == 1)
