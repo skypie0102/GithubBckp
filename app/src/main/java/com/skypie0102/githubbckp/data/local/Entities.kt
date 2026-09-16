@@ -34,4 +34,8 @@ data class BackupEntity(
     val remoteDeletedAtEpochMs: Long? = null,
     val warningMessage: String? = null,
     val errorMessage: String? = null,
+    val repositoryOwnerAtBackup: String? = null,
+    val repositoryNameAtBackup: String? = null,
+    val repositoryDefaultBranchAtBackup: String? = null,
+    val repositoryPrivateAtBackup: Boolean? = null,
 )

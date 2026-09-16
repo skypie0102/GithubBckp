@@ -19,4 +19,13 @@ object DatabaseMigrations {
             db.execSQL("ALTER TABLE backups ADD COLUMN warningMessage TEXT")
         }
     }
+
+    val MIGRATION_3_4 = object : Migration(3, 4) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE backups ADD COLUMN repositoryOwnerAtBackup TEXT")
+            db.execSQL("ALTER TABLE backups ADD COLUMN repositoryNameAtBackup TEXT")
+            db.execSQL("ALTER TABLE backups ADD COLUMN repositoryDefaultBranchAtBackup TEXT")
+            db.execSQL("ALTER TABLE backups ADD COLUMN repositoryPrivateAtBackup INTEGER")
+        }
+    }
 }

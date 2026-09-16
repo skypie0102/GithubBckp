@@ -4,11 +4,11 @@ GithubBckp can export a JSON audit report for any completed backup in Recent bac
 
 ## Format
 
-The current report format is version `1` and uses:
+The current report format is version `2` and uses:
 
 ```json
 {
-  "formatVersion": 1,
+  "formatVersion": 2,
   "reportType": "github-backup-artifact-audit",
   "generatedAtEpochMs": 0,
   "repository": {},
@@ -21,7 +21,16 @@ The current report format is version `1` and uses:
 
 ### Repository
 
-The immutable repository identifier available in backup history is the numeric GitHub repository ID. Owner/name, default branch, and privacy values are added when that repository is still present in the app's current repository cache. Those display fields are explicitly labeled as current-cache metadata and must not be interpreted as a backup-time snapshot.
+Every new schema-v4 backup row snapshots these values before backup network work begins:
+
+- numeric GitHub repository ID;
+- owner and repository name;
+- default branch;
+- private/public state.
+
+Version-2 audit reports expose those values with `metadataSource: "backup-time-snapshot"`. A later repository rename, default-branch change, or privacy change therefore does not rewrite the historical audit identity.
+
+Rows migrated from database schema v1-v3 cannot be assigned historical values safely. Their new snapshot columns remain null. Audit export falls back to the current local repository cache when available and reports `metadataSource: "current-local-repository-cache"`; otherwise it uses `metadataSource: "unavailable"`. Both legacy cases are also called out in the report's `limitations` array.
 
 ### Backup
 
@@ -49,4 +58,4 @@ A pruned backup remains auditable even though its remote artifact no longer exis
 
 The UI uses Android's system **Create Document** flow with `application/json`. The report is written only to the URI selected by the user and does not require broad storage permission.
 
-The suggested filename includes the current known repository name when available, otherwise the immutable numeric repository ID, plus the backup history ID.
+The suggested filename uses the backup-time repository name for schema-v4 rows. Legacy rows use the current known repository name when available, otherwise the immutable numeric repository ID, plus the backup history ID.

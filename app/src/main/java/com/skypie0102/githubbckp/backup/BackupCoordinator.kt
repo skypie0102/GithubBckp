@@ -25,6 +25,10 @@ class BackupCoordinator @Inject constructor(
                 type = request.type,
                 status = BackupStatus.QUEUED,
                 startedAtEpochMs = startedAt,
+                repositoryOwnerAtBackup = request.repository.owner,
+                repositoryNameAtBackup = request.repository.name,
+                repositoryDefaultBranchAtBackup = request.repository.defaultBranch,
+                repositoryPrivateAtBackup = request.repository.isPrivate,
             ),
         )
         var artifact: BackupArtifact? = null
