@@ -75,6 +75,9 @@ fun BackupEntity.toBackupAuditSnapshot(repository: RepositoryEntity?): BackupAud
     )
 }
 
+fun BackupEntity.repositoryDisplayName(repository: RepositoryEntity?): String =
+    toBackupAuditSnapshot(repository).repositoryFullName ?: "Repository #$repositoryId"
+
 fun BackupAuditSnapshot.toBackupAuditJson(
     generatedAtEpochMs: Long = System.currentTimeMillis(),
 ): JSONObject {
