@@ -9,6 +9,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.CancellationException
 
 enum class BackupReverificationStatus {
     VERIFIED,
@@ -105,7 +106,8 @@ class BackupReverificationService @Inject constructor(
                 "Remote artifact bytes verified against stored size, SHA-256, and MD5"
             }
             persistResult(backup.id, BackupReverificationStatus.VERIFIED, message)
-        } catch (throwable: Throwable) {
+        } catch (throwable: Exception) {
+            if (throwable is CancellationException) throw throwable
             val message = (throwable.message ?: throwable.javaClass.simpleName).take(MAX_RESULT_MESSAGE_LENGTH)
             persistResult(backup.id, BackupReverificationStatus.FAILED, message)
         } finally {
