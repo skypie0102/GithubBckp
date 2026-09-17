@@ -15,8 +15,8 @@ class GithubWorkflowPermissionRequiredException : IOException(
 )
 
 /**
- * Kept as a compatibility type for older UI state. Device Flow is no longer
- * used; personal GitHub authentication is provided directly with a PAT.
+ * Compatibility type for the pre-PAT Home UI state. Device Flow is no longer
+ * an authentication path and these sessions are never created by normal use.
  */
 data class GithubDeviceSession(
     val deviceCode: String,
@@ -63,6 +63,20 @@ class GithubAuthManager @Inject constructor(
         secureStore.put(KEY_TOKEN_SCOPES, validation.scopes.sorted().joinToString(","))
         secureStore.put(KEY_GITHUB_LOGIN, validation.login)
         validation
+    }
+
+    /**
+     * Compatibility guard for the old HomeScreen action. The real connection
+     * UI is GithubTokenOverlay; no OAuth app/client ID is used anymore.
+     */
+    suspend fun startDeviceFlow(): GithubDeviceSession = withContext(Dispatchers.IO) {
+        throw IOException("GitHub Device Flow has been removed. Enter a personal access token in the GitHub token panel.")
+    }
+
+    suspend fun pollUntilAuthorized(session: GithubDeviceSession): String = withContext(Dispatchers.IO) {
+        @Suppress("UNUSED_VARIABLE")
+        val ignored = session
+        throw IOException("GitHub Device Flow has been removed. Enter a personal access token in the GitHub token panel.")
     }
 
     suspend fun requireAccessToken(): String = withContext(Dispatchers.IO) {
