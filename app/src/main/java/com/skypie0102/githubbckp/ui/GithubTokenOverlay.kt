@@ -38,6 +38,9 @@ fun GithubTokenOverlay(
     LaunchedEffect(homeState.githubConnected) {
         showDialog = !homeState.githubConnected
     }
+    LaunchedEffect(tokenState.entryRequestVersion) {
+        if (tokenState.entryRequestVersion > 0L) showDialog = true
+    }
     LaunchedEffect(tokenState.connectionVersion) {
         if (tokenState.connectionVersion > 0L) {
             token = ""
