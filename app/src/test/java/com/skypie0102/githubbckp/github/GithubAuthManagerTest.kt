@@ -8,20 +8,20 @@ import org.junit.Test
 class GithubAuthManagerTest {
     @Test
     fun parsesCommaAndWhitespaceSeparatedScopes() {
-        val scopes = parseGithubOauthScopes("repo, workflow   offline_access,repo")
+        val scopes = parseGithubOauthScopes("repo, workflow   gist,repo")
 
-        assertEquals(setOf("repo", "workflow", "offline_access"), scopes)
+        assertEquals(setOf("repo", "workflow", "gist"), scopes)
     }
 
     @Test
-    fun detectsWorkflowPermissionFromCachedScopeText() {
-        assertTrue(githubScopesContainWorkflow("repo, workflow, offline_access"))
+    fun detectsWorkflowPermissionFromClassicPatScopes() {
+        assertTrue(githubScopesContainWorkflow("repo, workflow"))
         assertTrue(githubScopesContainWorkflow("repo workflow"))
-        assertFalse(githubScopesContainWorkflow("repo, offline_access"))
+        assertFalse(githubScopesContainWorkflow("repo, gist"))
     }
 
     @Test
-    fun legacyTokenWithoutCachedScopeMetadataIsNotAssumedToHaveWorkflowPermission() {
+    fun tokenWithoutReportedClassicScopesIsNotAssumedToHaveWorkflowPermission() {
         assertFalse(githubScopesContainWorkflow(null))
         assertFalse(githubScopesContainWorkflow(""))
     }
