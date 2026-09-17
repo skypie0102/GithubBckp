@@ -3,6 +3,7 @@ package com.skypie0102.githubbckp.backup
 import android.content.Context
 import com.skypie0102.githubbckp.data.local.BackupDao
 import com.skypie0102.githubbckp.data.local.BackupEntity
+import com.skypie0102.githubbckp.storage.RemoteBackup
 import com.skypie0102.githubbckp.storage.StorageProvider
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
@@ -15,7 +16,6 @@ class BackupCoordinator @Inject constructor(
     private val backupDao: BackupDao,
     private val backupEngineFactory: BackupEngineFactory,
     private val storageProvider: StorageProvider,
-    private val retentionManager: BackupRetentionManager,
 ) {
     suspend fun run(request: BackupRequest): Boolean {
         val startedAt = System.currentTimeMillis()
@@ -44,13 +44,26 @@ class BackupCoordinator @Inject constructor(
                 onProgress = { backupDao.updateBackupStatus(backupId, it) },
             )
 
+            // Existing verified objects are candidates for in-place replacement.
+            // The newest one is reused by providers that support it. Older
+            // duplicates from previous app versions are cleaned after the new
+            // bytes have been verified.
+            val previousBackups = backupDao.getRetainableBackups(request.repository.id, request.type)
+            val previousRemote = previousBackups.firstOrNull()?.toRemoteBackupOrNull()
+
             backupDao.updateBackupStatus(backupId, BackupStatus.UPLOADING)
-            val remoteBackup = storageProvider.upload(artifact)
+            val remoteBackup = storageProvider.upload(
+                artifact = artifact,
+                existing = previousRemote,
+            )
 
             backupDao.updateBackupStatus(backupId, BackupStatus.VERIFYING)
             check(storageProvider.verify(remoteBackup)) {
                 "Remote backup verification failed"
             }
+
+            val cleanupWarnings = cleanupSupersededBackups(previousBackups, remoteBackup)
+            val warnings = artifact.warnings + cleanupWarnings
 
             backupDao.completeBackup(
                 backupId = backupId,
@@ -62,12 +75,11 @@ class BackupCoordinator @Inject constructor(
                 remoteFileName = remoteBackup.name,
                 remoteSizeBytes = remoteBackup.sizeBytes,
                 remoteChecksumMd5 = remoteBackup.checksumMd5,
-                warningMessage = artifact.warnings
+                warningMessage = warnings
                     .takeIf { it.isNotEmpty() }
                     ?.joinToString("\n")
                     ?.take(MAX_WARNING_LENGTH),
             )
-            retentionManager.prune(request.repository.id, request.type)
             true
         } catch (throwable: Throwable) {
             backupDao.failBackup(
@@ -81,6 +93,42 @@ class BackupCoordinator @Inject constructor(
             artifact?.file?.delete()
             artifact?.file?.parentFile?.deleteRecursively()
         }
+    }
+
+    private suspend fun cleanupSupersededBackups(
+        previousBackups: List<BackupEntity>,
+        current: RemoteBackup,
+    ): List<String> = buildList {
+        previousBackups.forEach { backup ->
+            val previous = backup.toRemoteBackupOrNull() ?: return@forEach
+            if (previous.provider == current.provider && previous.id == current.id) {
+                // This provider updated the existing object in place. The old
+                // history row no longer owns a distinct remote artifact.
+                backupDao.markRemoteDeleted(backup.id, System.currentTimeMillis())
+                return@forEach
+            }
+            runCatching {
+                storageProvider.delete(previous)
+                backupDao.markRemoteDeleted(backup.id, System.currentTimeMillis())
+            }.onFailure { throwable ->
+                add(
+                    "Verified the current mirror, but could not remove an older duplicate " +
+                        "${previous.name}: ${throwable.message ?: throwable.javaClass.simpleName}",
+                )
+            }
+        }
+    }
+
+    private fun BackupEntity.toRemoteBackupOrNull(): RemoteBackup? {
+        val provider = storageProvider ?: return null
+        return RemoteBackup(
+            id = remoteFileId ?: return null,
+            name = remoteFileName ?: return null,
+            sizeBytes = remoteSizeBytes ?: return null,
+            checksumSha256 = checksumSha256 ?: return null,
+            checksumMd5 = remoteChecksumMd5 ?: return null,
+            provider = provider,
+        )
     }
 
     private companion object {
