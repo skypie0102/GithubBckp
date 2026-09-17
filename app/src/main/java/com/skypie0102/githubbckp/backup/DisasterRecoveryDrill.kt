@@ -98,6 +98,13 @@ class DisasterRecoveryDrillService @Inject constructor(
         runCatching { parseResult(JSONObject(file.readText())) }.getOrNull()
     }
 
+    suspend fun deleteResult(restoreId: String) = withContext(Dispatchers.IO) {
+        val file = resultFile(restoreId)
+        if (file.exists() && !file.delete()) {
+            throw IOException("Unable to delete disaster-recovery drill result")
+        }
+    }
+
     private suspend fun verifyAndPersist(
         record: MirrorRestoreRecord,
         publishResult: GithubRestorePublishResult,
