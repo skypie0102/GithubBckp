@@ -34,7 +34,7 @@ Mirror ZIP
   -> persist resumable recovery phases
 ```
 
-Completed backups and imported mirrors expose JSON audit reports. Scheduled runs expose live child-backup progress. The Home screen shows repository-level backup health, the app can notify about failed attempts and overdue scheduled-backup health, and eligible completed backups can be freshly re-verified by reading their stored bytes again.
+Completed backups and imported mirrors expose JSON audit reports. Scheduled runs expose live child-backup progress. The Home screen shows repository-level backup health, the app can notify about failed attempts and overdue scheduled-backup health, eligible completed backups can be freshly re-verified by reading their stored bytes again, and validated mirrors can be used in a guided private disaster-recovery drill.
 
 ### Backup formats
 
@@ -60,7 +60,7 @@ The following are deliberate non-goals rather than unfinished release blockers:
 
 These boundaries keep recovery behavior safe and maintenance cost appropriate for a personal tool.
 
-See [`docs/ROADMAP.md`](docs/ROADMAP.md) for the active reliability roadmap.
+See [`docs/ROADMAP.md`](docs/ROADMAP.md) for the reliability roadmap and feature-freeze rule.
 
 ## Reliability roadmap
 
@@ -69,12 +69,9 @@ Completed:
 1. **Backup health dashboard (#33)** — every selected/available repository is classified as protected, warning, failed, stale, or never backed up using the latest attempt and latest non-pruned verified backup.
 2. **Failure and overdue-backup notifications (#34)** — failed backups can notify after durable failure recording; repeat failures are rate-limited; overdue selected repositories are checked locally and grouped into deduplicated alerts.
 3. **On-demand backup re-verification (#35)** — completed, non-pruned artifacts can be reread through their original provider, rehashed locally, and—when they are Git mirrors—run through the existing safe mirror/module validator.
+4. **Guided disaster-recovery drill (#36)** — a validated mirror can be rehearsed against a private new or provably empty target, with module capability guidance, isolated resumable drill transactions, post-publication Git verification, and a durable local drill result.
 
-Remaining planned product work:
-
-4. **Guided disaster-recovery drill (#36)** — make a safe recovery test routine rather than something first attempted during an emergency.
-
-After the remaining item, feature development should stop by default unless personal usage exposes a concrete recurring problem. Reliability, compatibility, security, and recovery-safety fixes remain in scope.
+There are no active product-feature roadmap items. Feature development is frozen by default unless personal usage exposes a concrete recurring problem. Reliability, compatibility, security, and recovery-safety fixes remain in scope.
 
 ## Build
 
@@ -198,13 +195,15 @@ See [`docs/DISCUSSIONS_BACKUP.md`](docs/DISCUSSIONS_BACKUP.md).
 
 ## Resumable GitHub recovery
 
-Every recovery is bound to a private app-side transaction keyed by the restored mirror ID. It records the exact target repository identity plus the recovery phase:
+Ordinary recovery is bound to a private app-side transaction keyed by the restored mirror ID. It records the exact target repository identity plus the recovery phase:
 
 ```text
 TARGET_BOUND -> LFS_PUBLISHED -> GIT_PUBLISHED -> RELEASES_PUBLISHED
 ```
 
 Retries cannot silently switch to another target. Recovery reuses or reconciles only state belonging to the same transaction. First-time recovery requires an empty Git target and no pre-existing releases; arbitrary non-empty overwrite is intentionally unavailable.
+
+Recovery drills use separate deterministic transaction keys derived from the restored mirror, target kind, and target identity. This keeps drill retries resumable without consuming or changing the ordinary recovery binding for that restored mirror.
 
 ## Mirror restoration
 
@@ -218,6 +217,22 @@ The app imports a Git mirror ZIP through Android's document picker and validates
 6. verify every bundled discussion dataset's SHA-256, JSON records, identities, and counts.
 
 A validated mirror can then be published to either a **new** GitHub repository or an **existing repository that is still empty**. GitHub-owned `refs/pull/*` refs are skipped and reported. Main refs are never force-pushed.
+
+## Guided disaster-recovery drill
+
+The **Recovery drill** surface turns a validated imported mirror into a repeatable rehearsal rather than waiting for an emergency to exercise recovery.
+
+A drill:
+
+- requires a new private repository or an existing private repository that is still empty across Git refs and GitHub releases;
+- shows which present modules will be republished automatically: Git refs/history, Git LFS objects, and releases/assets;
+- shows wiki history and issue/pull-request discussion datasets as archival-only when present;
+- reuses the same recovery OAuth checks, empty-target guards, LFS upload verification, non-force Git publication, release/asset verification, and resumable recovery phases as ordinary recovery;
+- performs an additional read-only post-publication comparison of every writable local Git ref against the remote advertised ref and exact object ID;
+- records the latest successful drill result in app-private JSON and shows the target and verified counts on later app launches;
+- never deletes the drill repository automatically.
+
+A drill's transaction key is isolated from ordinary recovery and from drills targeting another repository. Retrying the same drill target can therefore resume safely without preventing a later real recovery to a different target.
 
 ## On-demand backup re-verification
 
@@ -233,7 +248,7 @@ See [`docs/BACKUP_AUDIT.md`](docs/BACKUP_AUDIT.md).
 
 ## Audit reporting
 
-Completed backups can export JSON history/audit reports without triggering another remote read. Backup-audit format v5 includes the latest recorded on-demand re-verification result when one exists. Imported mirrors can export module-level restore audit reports including Git, LFS, wiki, release, and discussion counts.
+Completed backups can export JSON history/audit reports without triggering another remote read. Backup-audit format v5 includes the latest recorded on-demand re-verification result when one exists. Imported mirrors can export module-level restore audit reports including Git, LFS, wiki, release, and discussion counts. The latest successful recovery-drill result is persisted separately in app-private JSON as an operational rehearsal record.
 
 See [`docs/BACKUP_AUDIT.md`](docs/BACKUP_AUDIT.md) and [`docs/RESTORE_AUDIT.md`](docs/RESTORE_AUDIT.md).
 
@@ -241,7 +256,7 @@ See [`docs/BACKUP_AUDIT.md`](docs/BACKUP_AUDIT.md) and [`docs/RESTORE_AUDIT.md`]
 
 Do **not** commit OAuth client secrets, access/refresh tokens, signing keys, or generated `local.properties`.
 
-Git credentials are passed to JGit's transport layer rather than embedded in repository URLs. Temporary source/mirror and re-verification artifacts live below app cache and are removed after each operation. Redirected archive/LFS/release downloads do not forward GitHub authentication to unrelated hosts. Recovery transaction files live in app-private storage and bind a restore to a stable GitHub repository ID.
+Git credentials are passed to JGit's transport layer rather than embedded in repository URLs. Temporary source/mirror and re-verification artifacts live below app cache and are removed after each operation. Redirected archive/LFS/release downloads do not forward GitHub authentication to unrelated hosts. Recovery transaction files and recovery-drill result files live in app-private storage; ordinary recovery and drill transactions use separate bindings.
 
 ## Architecture
 
@@ -255,7 +270,8 @@ Key boundaries include:
 - `GithubReleaseBackupService` / `GithubReleaseRestoreService` — release preservation/recovery
 - `GithubDiscussionBackupService` — issue/PR metadata preservation/validation
 - `GitMirrorRestoreService` / `MirrorRestoreCoordinator` — safe local restore
-- `RecoveryTransactionStore` / `GithubMirrorRestorePublisher` — resumable safe publication
+- `RecoveryTransactionStore` / `GithubMirrorRestorePublisher` — resumable safe publication with independently selectable transaction keys
+- `DisasterRecoveryDrillService` / `GitMirrorPushService.verifyPublished` — private guided rehearsal, isolated drill transactions, post-publication Git verification, and local drill results
 - `StorageRouter` — provider-aware upload, verification, read-only download, and deletion
 - `BackupReverificationService` — fresh remote-byte verification and optional mirror/module validation
 - `BackupScheduler` / `ScheduledBackupWorker` / `BackupHealthCheckWorker` — backup scheduling and local health monitoring
