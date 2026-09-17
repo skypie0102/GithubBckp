@@ -97,7 +97,6 @@ class GitMirrorBackupEngine @Inject constructor(
         val digests = calculateDigests(archive)
         BackupArtifact(
             repository = request.repository,
-            type = BackupType.GIT_MIRROR,
             file = archive,
             checksumSha256 = digests.sha256,
             checksumMd5 = digests.md5,
