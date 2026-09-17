@@ -7,7 +7,8 @@ GithubBckp is a personal/internal disaster-recovery tool. The roadmap optimizes 
 The active product is intentionally small:
 
 - each selected repository has one current Git mirror at the configured personal destination;
-- manual and automatic runs update that logical mirror instead of creating intentional timestamped generations;
+- manual and automatic runs replace that logical mirror instead of creating intentional timestamped generations;
+- a replacement is verified and committed before the previous verified remote object is retired;
 - mirrors preserve Git refs/history, referenced Git LFS objects, initialized wiki history when available, releases/assets, and supported issue/PR discussion metadata;
 - imported mirrors are validated locally before they are retained;
 - main Git, Git LFS, and releases/assets can be recovered to a new or provably empty GitHub repository;
@@ -22,9 +23,9 @@ Source snapshots, configurable retention/version-history controls, GitHub Device
 
 ### Backup health dashboard — complete
 
-The Home screen classifies every currently selected, available repository as protected, warning, failed-after-last-success, stale, or never backed up. Health uses the latest attempt and latest completed backup row that still represents a current remote object rather than the fixed-size Recent backup activity list.
+The Home screen classifies every currently selected, available repository as protected, warning, failed-after-last-success, stale, or never backed up. Health uses the latest Git-mirror attempt and latest completed Git-mirror row that still represents a current remote object rather than the fixed-size Recent backup activity list.
 
-Automatic-backup staleness uses two cadence windows to account for WorkManager's opportunistic execution.
+Legacy source-snapshot rows remain historical data but do not satisfy current mirror health. Automatic-backup staleness uses two cadence windows to account for WorkManager's opportunistic execution.
 
 ### Failure and overdue-backup notifications — complete
 
@@ -34,6 +35,7 @@ The app can surface backup trouble without remaining open:
 - repeated failures for the same repository/mirror are rate-limited;
 - automatic-backup health is checked locally while scheduling is enabled;
 - repositories become overdue after two cadence windows;
+- legacy source snapshots do not suppress mirror overdue alerts;
 - overdue repositories are grouped and deduplicated;
 - unavailable and unselected repositories are excluded;
 - disabling automatic backups clears overdue-notification state;
@@ -60,10 +62,11 @@ The active backup path has been simplified around one current mirror per reposit
 
 - new manual and scheduled work always requests `GIT_MIRROR`;
 - source-archive creation paths and format selectors are removed;
-- mirror filenames are stable instead of timestamped;
-- Google Drive can update the persisted file ID in place;
-- document-tree storage rewrites the existing document when possible;
-- older distinct duplicates are removed only after the new mirror verifies successfully, and cleanup failure is recorded as a warning rather than invalidating the verified current mirror;
+- local mirror artifact names are stable instead of timestamped;
+- Google Drive uploads a distinct resumable replacement so the previous verified file remains untouched until the new object verifies and is committed;
+- document-tree storage writes and fully rehashes a sibling staging document before the previous verified document is retired;
+- `BackupCoordinator` records the verified replacement as `COMPLETED` before cleanup begins;
+- older duplicates are removed only after the new mirror verifies successfully, and cleanup failure is warning-only rather than invalidating the verified current mirror;
 - configurable keep-last-N retention has been removed;
 - historical Room rows remain available for activity/audit compatibility.
 
