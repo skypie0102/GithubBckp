@@ -41,9 +41,9 @@ class DocumentTreeStorageProvider @Inject constructor(
             .findOrCreateDirectory(artifact.repository.owner)
             .findOrCreateDirectory(artifact.repository.name)
 
-        // Reuse only a document that is discoverable below the *currently selected*
-        // repository folder. A persisted URI from an older document-tree selection
-        // must not silently keep receiving backups after the user changes folders.
+        // Resolve the previous logical mirror only inside the *currently selected*
+        // tree. A persisted URI from an older tree selection must never silently
+        // keep receiving writes after the user chooses a different folder.
         val recordedDocument = existing
             ?.takeIf { it.provider == StorageDestination.DOCUMENT_TREE }
             ?.name
@@ -54,9 +54,9 @@ class DocumentTreeStorageProvider @Inject constructor(
         val currentDocument = recordedDocument ?: stableDocument
 
         // Never truncate the last known-good document while producing its
-        // replacement. Write a sibling first, verify its full bytes locally, then
-        // retire the previous document. If the process dies while writing the
-        // staged file, the current verified mirror remains untouched.
+        // replacement. Write a sibling first and verify its full bytes locally.
+        // BackupCoordinator independently verifies and persists this staged object
+        // before it asks the provider to retire the previous document.
         val stagedName = "${artifact.file.name}.pending-${System.nanoTime()}"
         val stagedDocument = repositoryFolder.createFile(mimeType(artifact), stagedName)
             ?: throw IOException("Could not create a staged mirror in the selected folder")
@@ -65,17 +65,12 @@ class DocumentTreeStorageProvider @Inject constructor(
             writeArtifact(artifact, stagedDocument, onProgress)
             requireArtifactDigests(artifact, stagedDocument)
 
-            if (currentDocument != null && currentDocument.uri != stagedDocument.uri) {
-                // Best effort: coordinator cleanup is deliberately idempotent and
-                // retries removal after its independent provider verification.
-                runCatching { currentDocument.delete() }
-            }
-
+            // If no stable-name document exists, normalize immediately. Otherwise
+            // keep the verified staging name until coordinator cleanup removes the
+            // previous current object. The next successful update can normalize it.
             val stableStillExists = repositoryFolder.findFile(artifact.file.name)
                 ?.takeIf { it.exists() && it.uri != stagedDocument.uri }
             if (stableStillExists == null && stagedDocument.name != artifact.file.name) {
-                // Rename is cosmetic. If the provider cannot rename, keep the
-                // verified staged document and persist its actual URI/name.
                 stagedDocument.renameTo(artifact.file.name)
             }
 
