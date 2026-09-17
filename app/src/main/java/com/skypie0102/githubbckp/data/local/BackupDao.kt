@@ -84,6 +84,9 @@ interface BackupDao {
         warningMessage: String?,
     )
 
+    @Query("UPDATE backups SET warningMessage = :warningMessage WHERE id = :backupId AND status = 'COMPLETED'")
+    suspend fun updateCompletedBackupWarning(backupId: Long, warningMessage: String?)
+
     @Query(
         """
         UPDATE backups
