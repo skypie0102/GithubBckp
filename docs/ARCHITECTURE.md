@@ -68,13 +68,13 @@ There is no user-facing retention/version-history policy anymore. Historical dat
 
 ### Google Drive
 
-`GoogleDriveStorageProvider` uses resumable upload. New repositories create a Drive file; subsequent runs use a resumable `PATCH` session against the existing Drive file ID when available. Provider metadata stores the mirror checksum and repository identity for verification.
+`GoogleDriveStorageProvider` uses resumable upload. New repositories create a Drive file; subsequent runs use a resumable `PATCH` session against the existing Drive file ID when available. If that persisted file ID is no longer visible to the currently authorized Google account, a 404 falls back to creating the current mirror in the active account instead of failing solely because of stale account-bound history.
 
-Drive authorization is handled separately by `GoogleDriveAuthManager` with Google Play services `AuthorizationClient` and the `drive.file` scope. Authorization failures expose the installed package name and certificate SHA-1 so an Android OAuth-client signing mismatch can be diagnosed instead of silently appearing to do nothing.
+Provider metadata stores the mirror checksum and repository identity for verification. Drive authorization is handled separately by `GoogleDriveAuthManager` with Google Play services `AuthorizationClient` and the `drive.file` scope. Authorization failures expose the installed package name and certificate SHA-1 so an Android OAuth-client signing mismatch can be diagnosed instead of silently appearing to do nothing.
 
 ### Document-tree storage
 
-`DocumentTreeStorageProvider` uses Android's Storage Access Framework. It locates the previously stored document by persisted URI or stable filename and truncates/replaces that document. It can best-effort rename a legacy timestamped file to the stable mirror name.
+`DocumentTreeStorageProvider` uses Android's Storage Access Framework. Reuse is limited to documents discoverable under the **currently selected** repository folder, by the stable filename or the prior recorded name. A persisted URI from an older tree selection is not reused directly, so changing the backup folder actually moves future mirror updates to the new destination. A legacy timestamped file in the selected tree can still be best-effort renamed to the stable mirror name.
 
 ## Background execution
 
