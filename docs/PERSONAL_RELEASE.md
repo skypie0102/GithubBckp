@@ -61,7 +61,7 @@ Get the signing fingerprint with:
 
 Use the SHA-1 for the signing configuration used by the `personal` variant. Because `personal` is signed with the local debug keystore, this will normally match the debug signing fingerprint.
 
-If the account picker closes but Drive does not connect, the app now reports the installed package name and signing SHA-1 in the authorization error/cancellation message. Compare those exact values with the Android OAuth client in Google Cloud Console.
+If the account picker closes but Drive does not connect, the app reports the installed package name and signing SHA-1 in the authorization error/cancellation message. Compare those exact values with the Android OAuth client in Google Cloud Console.
 
 Changing or losing the signing keystore changes the certificate fingerprint. In that case, either restore the previous keystore or update the Google Android OAuth client with the new SHA-1 before Drive authorization can succeed.
 
@@ -87,18 +87,20 @@ If Android reports a signature mismatch, the currently installed APK was signed 
 
 Validate the exact APK you intend to keep:
 
-1. Enter a GitHub PAT and confirm repository discovery works.
-2. Connect Google Drive, if used, and confirm authorization returns to the app as connected.
-3. Select representative repositories, including private/LFS repositories when applicable.
-4. Run a manual backup and confirm exactly one current `.mirror.zip` is present per repository at the selected destination.
-5. Run another manual backup and confirm that logical mirror is updated rather than intentionally creating another timestamped generation.
-6. Enable automatic backups and confirm a scheduled run updates the same logical mirror.
-7. Re-verify the stored mirror and confirm no new remote object is created.
-8. Restore a representative mirror locally and verify Git refs/LFS/module validation succeeds.
-9. Exercise a temporary network/storage failure and confirm the app records the failure without presenting an incomplete backup as verified.
-10. Reboot the device and confirm the encrypted PAT, destination selection, schedules, and history remain usable.
+1. Enter a GitHub PAT and confirm repository discovery works, including at least one private repository if private backup is part of your normal use.
+2. Connect the destination you intend to use. For Google Drive, confirm authorization returns to the app as connected; for a backup folder, confirm the selected document tree remains usable after leaving and reopening the app.
+3. Select representative repositories, including an LFS repository when applicable, and run a manual mirror backup.
+4. Confirm the completed activity row reports a current verified mirror at the selected destination and that the stored bytes can be freshly re-verified.
+5. Run another manual update for the same repository. Confirm the replacement becomes current only after verification and that the previous remote object is then removed. A temporary extra object is acceptable only while replacement/cleanup is in progress; persistent cleanup residue must be surfaced as a warning rather than silently treated as a second intentional generation.
+6. Exercise replacement failure before completion—for example by interrupting connectivity or making the destination temporarily unavailable during upload. Confirm the failed attempt is recorded and the **previous verified mirror remains readable and re-verifiable**.
+7. If using a document-tree destination, change to a different backup folder and run another update. Confirm the new current mirror is written under the newly selected tree rather than continuing to modify the old tree through a persisted URI.
+8. If using Google Drive, retry after a failed/interrupted upload and confirm the app can converge back to one current verified object; cleanup of an already-missing old object should not block success.
+9. Enable automatic backups and allow a scheduled run to complete. Confirm the scheduled child work produces a mirror update and that legacy source-snapshot history, if present from an older version, does not make current mirror health look protected by itself.
+10. Re-verify the stored current mirror and confirm the operation reads the full remote object without creating another backup object.
+11. Restore a representative mirror locally and verify Git refs/LFS/module validation succeeds, then exercise normal recovery only against a new or provably empty GitHub target if recovery is part of your personal workflow.
+12. Reboot the device and confirm the encrypted PAT, destination selection, schedules, mirror health/history, and re-verification behavior remain usable.
 
-A failure in mirror integrity, Google Drive authorization when Drive is part of the setup, scheduled execution, or recovery is a blocker for a known-good personal build.
+A failure in replacement safety, mirror integrity, Google Drive authorization when Drive is part of the setup, document-tree destination switching, scheduled execution, re-verification, or recovery is a blocker for a known-good personal build.
 
 ## 7. Preserve the known-good build
 
