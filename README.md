@@ -9,7 +9,7 @@ The product goal is deliberately narrow: make personal GitHub backups boring, ve
 The core backup and recovery flows are implemented:
 
 ```text
-GitHub device authorization
+GitHub personal access token
   -> discover/select repositories
   -> source snapshot or Git mirror
   -> mirror: Git refs/history + Git LFS objects
@@ -24,7 +24,7 @@ GitHub device authorization
 Mirror ZIP
   -> safe private import
   -> validate main Git, LFS, wiki, releases, and discussion datasets
-  -> verify recovery OAuth permission
+  -> verify recovery token permission
   -> bind recovery transaction to one GitHub repository ID
   -> verify target Git + release surfaces are empty
   -> verify/upload Git LFS objects
@@ -99,27 +99,26 @@ app/build/outputs/apk/debug/app-debug.apk
 
 Gradle/Android tooling signs that debug APK automatically with the local Android debug keystore. GithubBckp does not use a custom release-keystore workflow for personal deployment. The release variant remains in CI only as a compile check.
 
+No GitHub client ID, OAuth App, token, or other GitHub credential is required at build time. GitHub authentication is configured after installation.
+
 For personal APK building, Google Drive certificate setup, and real-device validation, see [`docs/PERSONAL_RELEASE.md`](docs/PERSONAL_RELEASE.md).
 
-## GitHub OAuth setup
+## GitHub authentication
 
-The app uses GitHub Device Flow so the Android package never ships an OAuth client secret. Create a GitHub OAuth App, enable **Device Flow**, then provide only its client ID locally:
+GithubBckp uses a personal GitHub token rather than GitHub OAuth Device Flow. On first launch, enter a GitHub personal access token in the masked **GitHub token** panel. The app validates the token against GitHub before saving it, then stores it through the existing Android Keystore-backed encrypted `SecureStore`.
 
-```bash
-./gradlew :app:assembleDebug -PGITHUB_CLIENT_ID=your_client_id
-```
+The token is never embedded in the APK or repository and there is no `GITHUB_CLIENT_ID` build setting.
 
-Or export `GITHUB_CLIENT_ID`. Runtime token material and cached granted-scope metadata are encrypted with Android Keystore-backed AES-GCM storage.
-
-New authorizations request:
+For the simplest full personal backup/recovery setup, use a **classic personal access token** with:
 
 ```text
-repo workflow offline_access
+repo
+workflow
 ```
 
-`repo` covers private-repository access. `workflow` is required for recovery when restored Git history contains GitHub Actions workflow files. `offline_access` is requested for renewable authorization when GitHub returns expiring user tokens.
+`repo` gives the app access to private repositories covered by the token. `workflow` is required for complete recovery when restored Git history contains GitHub Actions workflow files. A valid token without `workflow` can still be used for repository discovery/backups that its permissions allow, but recovery remains guarded until suitable workflow permission is available.
 
-Older tokens without cached scope metadata remain usable for discovery and backup. Recovery checks the granted scopes before creating or modifying a target and asks for Device Flow authorization again if `workflow` is missing.
+The same stored token is used for GitHub REST calls, authenticated archive downloads, Git mirror/LFS operations, release preservation, and recovery publication. Replacing the token revalidates it before overwriting the currently stored credential.
 
 ## Backup destinations
 
@@ -146,6 +145,8 @@ For the normal personal debug APK, obtain that fingerprint with:
 ```
 
 Register the `SHA1` shown for the `debug` variant. If the local debug keystore changes, the APK certificate changes too, so the Android OAuth client must be updated with the new debug SHA-1 before Google Drive authorization will work for that build. The app does not persist Google access tokens.
+
+Google Drive authorization is independent from the GitHub personal access token.
 
 This adapter is intentionally treated as personal/internal functionality.
 
@@ -247,7 +248,7 @@ A drill:
 - requires a new private repository or an existing private repository that is still empty across Git refs and GitHub releases;
 - shows which present modules will be republished automatically: Git refs/history, Git LFS objects, and releases/assets;
 - shows wiki history and issue/pull-request discussion datasets as archival-only when present;
-- reuses the same recovery OAuth checks, empty-target guards, LFS upload verification, non-force Git publication, release/asset publication verification, and resumable recovery phases as ordinary recovery;
+- reuses the same PAT permission checks, empty-target guards, LFS upload verification, non-force Git publication, release/asset publication verification, and resumable recovery phases as ordinary recovery;
 - independently compares every writable local Git ref with the remote advertised ref and exact object ID after publication;
 - requires every referenced LFS object to be advertised for download by the target, then re-downloads and SHA-256 checks a deterministic sample of up to three objects;
 - re-lists releases and assets after publication and verifies the expected release metadata plus every asset's size and SHA-256, downloading an asset when GitHub does not expose a digest;
@@ -278,15 +279,16 @@ See [`docs/BACKUP_AUDIT.md`](docs/BACKUP_AUDIT.md), [`docs/RESTORE_AUDIT.md`](do
 
 ## Security
 
-Do **not** commit OAuth client secrets, access/refresh tokens, keystores, or generated `local.properties`.
+Do **not** commit GitHub personal access tokens, Google credentials/tokens, keystores, or generated `local.properties`.
 
-Git credentials are passed to JGit's transport layer rather than embedded in repository URLs. Temporary source/mirror, re-verification, and drill-verification artifacts live below app cache and are removed after each operation. Redirected archive/LFS/release downloads do not forward GitHub authentication to unrelated hosts. Recovery transaction files and recovery-drill result files live in app-private storage; ordinary recovery and drill transactions use separate bindings.
+The GitHub PAT is entered at runtime, validated before persistence, and stored through Android Keystore-backed encrypted storage. Git credentials are passed to JGit's transport layer rather than embedded in repository URLs. Temporary source/mirror, re-verification, and drill-verification artifacts live below app cache and are removed after each operation. Redirected archive/LFS/release downloads do not forward GitHub authentication to unrelated hosts. Recovery transaction files and recovery-drill result files live in app-private storage; ordinary recovery and drill transactions use separate bindings.
 
 ## Architecture
 
 Key boundaries include:
 
-- `GithubAuthManager` — Device Flow, encrypted token/scope persistence, recovery-scope enforcement
+- `GithubAuthManager` — PAT validation, encrypted token/scope persistence, recovery-scope enforcement
+- `GithubTokenOverlay` / `GithubTokenViewModel` — masked runtime token entry and replacement
 - `GithubGateway` / `GithubRestGateway` — repository discovery and GitHub API access
 - `BackupEngineFactory` — source snapshot vs Git mirror
 - `GitLfsPointerScanner` / `GitLfsDownloadService` / `GitLfsUploadService` — LFS preservation, recovery, and drill read-back verification
