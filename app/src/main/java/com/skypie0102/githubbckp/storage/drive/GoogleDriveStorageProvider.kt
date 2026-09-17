@@ -24,7 +24,6 @@ class GoogleDriveStorageProvider @Inject constructor(
 ) : StorageProvider {
     override suspend fun upload(
         artifact: BackupArtifact,
-        existing: RemoteBackup?,
         onProgress: suspend (uploadedBytes: Long, totalBytes: Long) -> Unit,
     ): RemoteBackup = withContext(Dispatchers.IO) {
         val token = authManager.requireAccessToken()
@@ -43,9 +42,7 @@ class GoogleDriveStorageProvider @Inject constructor(
         // Always create the replacement as a distinct Drive object. The previous
         // verified object remains untouched until BackupCoordinator verifies and
         // commits this new object, then cleanup retires the old ID. This avoids an
-        // interrupted in-place PATCH corrupting the only known-good mirror.
-        @Suppress("UNUSED_VARIABLE")
-        val previous = existing
+        // interrupted upload corrupting the only known-good mirror.
         val sessionUrl = createResumableSession(
             token = token,
             metadata = metadata,
