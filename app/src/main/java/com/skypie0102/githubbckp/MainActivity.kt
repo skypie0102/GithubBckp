@@ -13,6 +13,7 @@ import androidx.activity.viewModels
 import androidx.compose.foundation.layout.Box
 import androidx.core.content.ContextCompat
 import com.skypie0102.githubbckp.ui.DisasterRecoveryDrillOverlay
+import com.skypie0102.githubbckp.ui.GithubTokenOverlay
 import com.skypie0102.githubbckp.ui.HomeScreen
 import com.skypie0102.githubbckp.ui.HomeViewModel
 import com.skypie0102.githubbckp.ui.theme.GithubBckpTheme
@@ -34,6 +35,7 @@ class MainActivity : ComponentActivity() {
                 Box {
                     HomeScreen(viewModel)
                     DisasterRecoveryDrillOverlay(viewModel)
+                    GithubTokenOverlay(viewModel)
                 }
             }
         }
