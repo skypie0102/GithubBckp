@@ -49,20 +49,28 @@ Implemented behavior:
 - exported backup-audit JSON includes the latest recorded re-verification result;
 - re-verification never changes the historical `COMPLETED` backup result and never mutates the remote artifact.
 
+### P1 — Guided disaster-recovery drill — #36 — complete
+
+Recovery testing is now an explicit, repeatable workflow rather than something first attempted during an emergency.
+
+Implemented behavior:
+
+- start a drill from any locally imported and validated Git mirror;
+- choose a newly created private repository or an existing private repository that is still provably empty;
+- reuse the existing recovery safety pipeline for target emptiness, LFS publication, non-force Git publication, release reconciliation, and stable target identity;
+- isolate drill transaction keys from normal recovery transactions so repeated drills do not consume the mirror's real-recovery binding;
+- show that main Git, Git LFS, and releases/assets are automatic publication surfaces while wiki and discussion metadata are archival-only;
+- after publication, require every writable Git ref to match the local mirror by ref name and object ID;
+- require every bundled LFS object to be remotely available and re-download a bounded representative sample for size/SHA-256 verification;
+- re-list restored releases/assets and verify their metadata, sizes, and SHA-256 values, downloading asset bytes when GitHub does not expose a digest;
+- persist `VERIFIED` or `FAILED` drill records and export a concise JSON audit;
+- never automatically delete a drill repository or bypass the existing recovery safety checks.
+
+See [`RECOVERY_DRILL.md`](RECOVERY_DRILL.md).
+
 ## Active roadmap
 
-### P1 — Guided disaster-recovery drill — #36
-
-Goal: make recovery testing a routine operation rather than something first attempted during an emergency.
-
-Acceptance criteria:
-
-- guide the user from a selected verified mirror through safe import and recovery;
-- require a new or provably empty private GitHub target;
-- show which modules can be republished automatically and which are archival only;
-- verify representative Git refs plus applicable LFS and release assets after publication;
-- produce a concise drill result/audit record;
-- do not automatically delete repositories or bypass existing recovery safety checks.
+There are currently **no active feature-roadmap items**. The reliability roadmap is complete for the personal-use product boundary above.
 
 ## Later only if personal use creates a real need
 
@@ -89,4 +97,4 @@ These cuts are deliberate safety/maintenance decisions, not release blockers.
 
 ## Priority rule
 
-After the remaining active roadmap item is complete, feature development should stop by default. New features require a concrete problem observed during personal use. Reliability fixes, compatibility fixes, security fixes, and recovery-safety improvements remain in scope at any time.
+Feature development now stops by default. New features require a concrete problem observed during personal use. Reliability fixes, compatibility fixes, security fixes, recovery-safety improvements, dependency maintenance, and verified device/release hardening remain in scope at any time.
