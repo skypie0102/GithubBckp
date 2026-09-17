@@ -87,7 +87,19 @@ The normal repository gate verifies debug + release variants, JVM tests, and lin
 ./gradlew :app:assembleDebug :app:assembleRelease :app:testDebugUnitTest :app:lintDebug
 ```
 
-For personal release signing and real-device validation, see [`docs/PERSONAL_RELEASE.md`](docs/PERSONAL_RELEASE.md).
+The personal install artifact is the debug APK:
+
+```bash
+./gradlew :app:assembleDebug
+```
+
+```text
+app/build/outputs/apk/debug/app-debug.apk
+```
+
+Gradle/Android tooling signs that debug APK automatically with the local Android debug keystore. GithubBckp does not use a custom release-keystore workflow for personal deployment. The release variant remains in CI only as a compile check.
+
+For personal APK building, Google Drive certificate setup, and real-device validation, see [`docs/PERSONAL_RELEASE.md`](docs/PERSONAL_RELEASE.md).
 
 ## GitHub OAuth setup
 
@@ -125,7 +137,15 @@ The app reopens each saved document and verifies byte count, SHA-256, and MD5 be
 
 ### Google Drive
 
-The Drive adapter uses Google Play services `AuthorizationClient` with `drive.file`, resumable upload, and remote checksum verification. Configure an Android OAuth client for package `com.skypie0102.githubbckp` and register the signing certificate SHA-1. The app does not persist Google access tokens.
+The Drive adapter uses Google Play services `AuthorizationClient` with `drive.file`, resumable upload, and remote checksum verification. Configure an Android OAuth client for package `com.skypie0102.githubbckp` and register the SHA-1 of the certificate that signs the installed APK.
+
+For the normal personal debug APK, obtain that fingerprint with:
+
+```bash
+./gradlew :app:signingReport
+```
+
+Register the `SHA1` shown for the `debug` variant. If the local debug keystore changes, the APK certificate changes too, so the Android OAuth client must be updated with the new debug SHA-1 before Google Drive authorization will work for that build. The app does not persist Google access tokens.
 
 This adapter is intentionally treated as personal/internal functionality.
 
@@ -258,7 +278,7 @@ See [`docs/BACKUP_AUDIT.md`](docs/BACKUP_AUDIT.md), [`docs/RESTORE_AUDIT.md`](do
 
 ## Security
 
-Do **not** commit OAuth client secrets, access/refresh tokens, signing keys, or generated `local.properties`.
+Do **not** commit OAuth client secrets, access/refresh tokens, keystores, or generated `local.properties`.
 
 Git credentials are passed to JGit's transport layer rather than embedded in repository URLs. Temporary source/mirror, re-verification, and drill-verification artifacts live below app cache and are removed after each operation. Redirected archive/LFS/release downloads do not forward GitHub authentication to unrelated hosts. Recovery transaction files and recovery-drill result files live in app-private storage; ordinary recovery and drill transactions use separate bindings.
 
