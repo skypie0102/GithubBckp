@@ -11,7 +11,8 @@ The supported recovery promise is intentionally narrow:
 - imported mirrors are validated locally before they are retained;
 - main Git, Git LFS, and releases/assets can be recovered to a new or provably empty GitHub repository;
 - wiki and discussion data are preservation/local-validation surfaces rather than automated GitHub publication surfaces;
-- recovery never force-pushes or destructively rewrites an arbitrary non-empty repository.
+- recovery never force-pushes or destructively rewrites an arbitrary non-empty repository;
+- GitHub authentication is supplied at runtime with a locally encrypted personal access token; no GitHub OAuth application identity is built into the APK.
 
 ## Completed reliability work
 
@@ -58,7 +59,7 @@ Implemented behavior:
 - the drill starts from a locally validated imported mirror;
 - the UI identifies Git/LFS/releases as automatically republishable when present and wiki/discussion datasets as archival-only;
 - drills require either a newly created private repository or an existing private repository that is still provably empty;
-- the normal recovery publisher remains responsible for OAuth scope checks, empty-target checks, LFS publication, non-force Git publication, release/asset publication, and resumable phases;
+- the normal recovery publisher remains responsible for PAT permission checks, empty-target checks, LFS publication, non-force Git publication, release/asset publication, and resumable phases;
 - drill transactions use isolated target-specific transaction keys, so a rehearsal cannot consume the restored mirror's normal recovery binding and retries of the same rehearsal remain resumable;
 - after publication, every writable Git ref is compared with the remote advertised ref/object ID; LFS and release-asset counts are reported only after their existing remote verification succeeds;
 - the latest successful drill result is stored in app-private JSON and shown with the restored mirror;
