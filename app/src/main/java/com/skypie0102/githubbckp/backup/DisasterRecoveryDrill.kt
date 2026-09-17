@@ -6,6 +6,8 @@ import com.skypie0102.githubbckp.github.GithubRepositoryRestoreGateway
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
 import java.io.IOException
+import java.nio.charset.StandardCharsets
+import java.security.MessageDigest
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.Dispatchers
@@ -54,6 +56,19 @@ fun MirrorRestoreRecord.toDisasterRecoveryDrillPlan(): DisasterRecoveryDrillPlan
     )
 }
 
+internal fun disasterRecoveryDrillTransactionKey(
+    restoreId: String,
+    target: DisasterRecoveryDrillTarget,
+    targetIdentity: String,
+): String {
+    val normalizedTarget = targetIdentity.trim().lowercase()
+    val digest = MessageDigest.getInstance("SHA-256")
+        .digest(normalizedTarget.toByteArray(StandardCharsets.UTF_8))
+        .joinToString(separator = "") { byte -> "%02x".format(byte) }
+        .take(20)
+    return "drill-$restoreId-${target.name.lowercase()}-$digest"
+}
+
 @Singleton
 class DisasterRecoveryDrillService @Inject constructor(
     @ApplicationContext private val context: Context,
@@ -68,10 +83,16 @@ class DisasterRecoveryDrillService @Inject constructor(
         repositoryName: String,
     ): DisasterRecoveryDrillResult {
         val record = requireRestore(restoreId)
+        val normalizedName = repositoryName.trim()
         val publishResult = restorePublisher.publishToNewRepository(
             restoreId = restoreId,
-            repositoryName = repositoryName,
+            repositoryName = normalizedName,
             isPrivate = true,
+            transactionKey = disasterRecoveryDrillTransactionKey(
+                restoreId = restoreId,
+                target = DisasterRecoveryDrillTarget.NEW_PRIVATE_REPOSITORY,
+                targetIdentity = normalizedName,
+            ),
         )
         return verifyAndPersist(record, publishResult)
     }
@@ -88,6 +109,11 @@ class DisasterRecoveryDrillService @Inject constructor(
         val publishResult = restorePublisher.publishToExistingEmptyRepository(
             restoreId = restoreId,
             repositoryFullName = repository.fullName,
+            transactionKey = disasterRecoveryDrillTransactionKey(
+                restoreId = restoreId,
+                target = DisasterRecoveryDrillTarget.EXISTING_EMPTY_PRIVATE_REPOSITORY,
+                targetIdentity = repository.fullName,
+            ),
         )
         return verifyAndPersist(record, publishResult)
     }
