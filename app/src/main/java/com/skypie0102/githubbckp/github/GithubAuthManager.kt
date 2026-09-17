@@ -10,44 +10,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
-/**
- * Compatibility type retained so older UI state can compile while personal-token
- * setup replaces GitHub Device Flow. New code should not create device sessions.
- */
-data class GithubDeviceSession(
-    val deviceCode: String,
-    val userCode: String,
-    val verificationUri: String,
-    val expiresInSeconds: Long,
-    val intervalSeconds: Long,
-)
-
-internal const val GITHUB_WORKFLOW_SCOPE = "workflow"
-
-internal fun parseGithubOauthScopes(value: String): Set<String> = value
-    .split(Regex("[\\s,]+"))
-    .map(String::trim)
-    .filter(String::isNotBlank)
-    .toSet()
-
-internal fun githubScopesContainWorkflow(value: String?): Boolean =
-    value?.let(::parseGithubOauthScopes)?.contains(GITHUB_WORKFLOW_SCOPE) == true
-
 @Singleton
 class GithubAuthManager @Inject constructor(
     private val secureStore: SecureStore,
 ) {
-    /** No build-time GitHub OAuth application configuration is required anymore. */
-    fun isConfigured(): Boolean = true
-
     fun isAuthenticated(): Boolean = !secureStore.get(KEY_ACCESS_TOKEN).isNullOrBlank()
-
-    /**
-     * Kept for existing presentation logic. PAT permissions are enforced by GitHub
-     * itself during the operation; fine-grained PATs do not expose OAuth scopes in
-     * the same way as classic OAuth tokens.
-     */
-    fun hasWorkflowScopeCached(): Boolean = isAuthenticated()
 
     suspend fun connectPersonalAccessToken(rawToken: String): String = withContext(Dispatchers.IO) {
         val token = normalizePersonalAccessToken(rawToken)
@@ -55,28 +22,8 @@ class GithubAuthManager @Inject constructor(
 
         val identity = validateToken(token)
         secureStore.put(KEY_ACCESS_TOKEN, token)
-
-        // Remove legacy Device Flow refresh/expiry state so this token is treated
-        // only as a user-managed personal token.
-        secureStore.remove(KEY_ACCESS_EXPIRES_AT)
-        secureStore.remove(KEY_REFRESH_TOKEN)
-        secureStore.remove(KEY_REFRESH_EXPIRES_AT)
-        secureStore.remove(KEY_OAUTH_SCOPES)
-
+        clearLegacyOauthState()
         identity
-    }
-
-    suspend fun startDeviceFlow(): GithubDeviceSession = withContext(Dispatchers.IO) {
-        throw IOException(
-            "GitHub Device Flow is no longer used. Enter a personal access token in the app's GitHub setup.",
-        )
-    }
-
-    suspend fun pollUntilAuthorized(session: GithubDeviceSession): String = withContext(Dispatchers.IO) {
-        @Suppress("UNUSED_VARIABLE") val ignored = session
-        throw IOException(
-            "GitHub Device Flow is no longer used. Enter a personal access token in the app's GitHub setup.",
-        )
     }
 
     suspend fun requireAccessToken(): String = withContext(Dispatchers.IO) {
@@ -86,16 +33,14 @@ class GithubAuthManager @Inject constructor(
             ?: throw IOException("GitHub is not connected; enter a personal access token")
     }
 
-    /**
-     * Recovery uses the same PAT. The previous OAuth `workflow` scope pre-check is
-     * intentionally gone because fine-grained PATs use repository permissions
-     * rather than OAuth scope strings. GitHub remains the authority on whether a
-     * given write is permitted, and existing recovery safety guards still apply.
-     */
     suspend fun requireRecoveryAccessToken(): String = requireAccessToken()
 
     fun disconnect() {
         secureStore.remove(KEY_ACCESS_TOKEN)
+        clearLegacyOauthState()
+    }
+
+    private fun clearLegacyOauthState() {
         secureStore.remove(KEY_ACCESS_EXPIRES_AT)
         secureStore.remove(KEY_REFRESH_TOKEN)
         secureStore.remove(KEY_REFRESH_EXPIRES_AT)
