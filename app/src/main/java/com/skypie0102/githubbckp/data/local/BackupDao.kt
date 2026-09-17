@@ -141,7 +141,7 @@ interface BackupDao {
         ORDER BY completedAtEpochMs DESC, id DESC
         """,
     )
-    suspend fun getRetainableBackups(
+    suspend fun getCurrentRemoteBackups(
         repositoryId: Long,
         type: BackupType,
     ): List<BackupEntity>
