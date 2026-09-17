@@ -36,13 +36,15 @@ fun GithubTokenOverlay(
     var token by remember { mutableStateOf("") }
 
     LaunchedEffect(homeState.githubConnected) {
-        if (!homeState.githubConnected) showDialog = true
+        showDialog = !homeState.githubConnected
     }
     LaunchedEffect(tokenState.connectionVersion) {
         if (tokenState.connectionVersion > 0L) {
             token = ""
-            showDialog = false
             homeViewModel.refreshRepositories()
+            if (homeState.githubConnected) {
+                showDialog = false
+            }
         }
     }
 
