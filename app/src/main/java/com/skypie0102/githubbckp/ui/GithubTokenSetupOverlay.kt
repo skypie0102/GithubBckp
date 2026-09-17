@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -27,6 +28,8 @@ import kotlinx.coroutines.launch
 @Composable
 fun GithubTokenSetupOverlay(
     authManager: GithubAuthManager,
+    canCancel: Boolean = false,
+    onCancel: () -> Unit = {},
     onConnected: (String) -> Unit,
 ) {
     var token by remember { mutableStateOf("") }
@@ -46,9 +49,12 @@ fun GithubTokenSetupOverlay(
                 modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                Text("Connect GitHub", style = MaterialTheme.typography.headlineSmall)
                 Text(
-                    "Enter a GitHub personal access token. It is validated once, then encrypted locally with Android Keystore. Nothing is baked into the APK.",
+                    if (canCancel) "Replace GitHub token" else "Connect GitHub",
+                    style = MaterialTheme.typography.headlineSmall,
+                )
+                Text(
+                    "Enter a GitHub personal access token. It is validated first, then encrypted locally with Android Keystore. Nothing is baked into the APK.",
                     style = MaterialTheme.typography.bodyMedium,
                 )
                 Text(
@@ -93,7 +99,16 @@ fun GithubTokenSetupOverlay(
                     if (busy) {
                         CircularProgressIndicator()
                     } else {
-                        Text("Save and connect")
+                        Text(if (canCancel) "Validate and replace" else "Save and connect")
+                    }
+                }
+                if (canCancel) {
+                    OutlinedButton(
+                        onClick = onCancel,
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = !busy,
+                    ) {
+                        Text("Cancel")
                     }
                 }
             }
