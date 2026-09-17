@@ -6,9 +6,9 @@ The architecture optimizes for three properties:
 
 1. **Integrity** — a backup is not treated as successful until its bytes/checksums and supported module data are verified.
 2. **Recoverability** — recovery is explicit, target-bound, resumable, and refuses ambiguous or unsafe remote state.
-3. **Operator confidence** — history, audit exports, backup-health presentation, notifications, and fresh stored-artifact re-verification make silent failure increasingly difficult.
+3. **Operator confidence** — history, audit exports, backup-health presentation, notifications, fresh stored-artifact re-verification, and guided recovery drills make silent failure increasingly difficult.
 
-See [`ROADMAP.md`](ROADMAP.md) for active priorities and explicit non-goals.
+See [`ROADMAP.md`](ROADMAP.md) for the completed personal reliability roadmap, feature-freeze rule, and explicit non-goals.
 
 ## High-level boundaries
 
@@ -17,6 +17,18 @@ Compose UI
    |
 HomeViewModel
    +-- backup health presentation
+   +-- normal restore orchestration
+   +-- recovery-drill orchestration
+   |
+DisasterRecoveryDrillOverlay
+   +-- validated-mirror selection
+   +-- republishable vs archival-only module guidance
+   +-- private-target drill setup
+   |
+DisasterRecoveryDrillService
+   +-- GithubMirrorRestorePublisher with isolated target-specific transaction key
+   +-- GitMirrorPushService.verifyPublished()
+   +-- app-private drill result persistence
    |
 BackupReverificationViewModel
    |
@@ -75,7 +87,7 @@ For legacy installations without cached scope metadata, recovery queries GitHub'
 
 `GithubGateway` owns repository discovery, authenticated source-archive transfer, and lightweight feature lookup. Redirects from GitHub's API to archive/object storage are followed without forwarding the bearer token off GitHub's API host.
 
-`GithubRepositoryRestoreGateway` creates a new empty recovery repository or resolves a user-supplied existing target.
+`GithubRepositoryRestoreGateway` creates a new empty recovery repository or resolves a user-supplied existing target. Recovery drills additionally require the resolved target to be private.
 
 ## Repository inventory
 
@@ -117,7 +129,9 @@ See [`WIKI_BACKUP.md`](WIKI_BACKUP.md).
 
 `GithubReleaseBackupService` pages through releases/assets and writes a versioned manifest plus verified binary assets. Every asset must match GitHub's reported size and a locally computed SHA-256. When GitHub exposes a `sha256:` digest, it is independently cross-checked.
 
-`GithubReleaseRestoreService` recreates/reconciles supported release metadata and assets after main Git publication. Exact latest-release selection, historical server timestamps, and immutable-release state are intentionally not reproduced.
+`GithubReleaseRestoreService` recreates/reconciles supported release metadata and assets after main Git publication. Existing or newly uploaded assets are verified against expected size and SHA-256; when GitHub does not expose a usable digest, verification downloads the remote asset and hashes it locally.
+
+Exact latest-release selection, historical server timestamps, and immutable-release state are intentionally not reproduced.
 
 See [`RELEASE_BACKUP.md`](RELEASE_BACKUP.md).
 
@@ -228,7 +242,7 @@ Restore audit export summarizes the validation result without duplicating the re
 
 `GithubMirrorRestorePublisher` obtains a recovery-validated OAuth token **before** target creation/resolution. First-time recovery is restricted to a new or provably empty Git/release target.
 
-`RecoveryTransactionStore` binds a restore to one stable GitHub repository ID/full name and advances monotonically through:
+`RecoveryTransactionStore` persists a caller-supplied transaction key and binds that transaction to one stable GitHub repository ID/full name. Ordinary recovery uses the restored mirror ID as that key and advances monotonically through:
 
 ```text
 TARGET_BOUND -> LFS_PUBLISHED -> GIT_PUBLISHED -> RELEASES_PUBLISHED
@@ -240,9 +254,21 @@ Release retries similarly reconcile only matching releases/assets. Conflicting o
 
 The transaction mechanism deliberately does **not** authorize arbitrary non-empty overwrite, force-push, or destructive ref deletion.
 
+## Guided disaster-recovery drill
+
+`DisasterRecoveryDrillOverlay` exposes a dedicated rehearsal surface without replacing ordinary recovery. It lists validated restored mirrors, shows which modules are automatically republishable versus archival-only, and requires either a newly created private target or an existing private target that is still empty.
+
+`DisasterRecoveryDrillService` deliberately reuses `GithubMirrorRestorePublisher` rather than implementing a second publication engine. The publisher receives a deterministic drill transaction key derived from the restore ID, target kind, and normalized target identity. That key is valid for `RecoveryTransactionStore`, is stable across retries to the same drill target, differs across drill targets, and never equals the normal restore ID. A rehearsal therefore cannot consume the ordinary recovery binding.
+
+After the normal publisher reaches `RELEASES_PUBLISHED`, `GitMirrorPushService.verifyPublished()` performs an additional read-only exact comparison of every writable local ref name/object ID with the remote advertised refs. LFS counts are only returned after local object validation and the LFS upload protocol succeeds; release assets are only counted after remote size/SHA-256 verification succeeds.
+
+A successful `DisasterRecoveryDrillResult` is stored as versioned JSON below app-private files storage and reloaded with the restored-mirror list. It records the target, completion time, verified Git/LFS/release counts, and the automatic/archival module plan. The app never automatically deletes the drill target; cleanup is an explicit operator decision after reviewing the result.
+
 ## Audit reporting
 
 Completed backup rows can export JSON audit/history reports. Exporting a backup audit never initiates a remote read; format v5 reports creation-time integrity/provenance plus the latest separately recorded on-demand re-verification result, if one exists.
+
+Restore audit exports remain separate from recovery-drill results. A drill result is an operational rehearsal record tied to the locally restored mirror and latest successful drill target.
 
 See [`BACKUP_AUDIT.md`](BACKUP_AUDIT.md).
 
@@ -271,6 +297,7 @@ The JVM suite covers, among other things:
 - discussion dataset validation/tamper/duplicate rejection;
 - recovery transaction persistence and target binding;
 - empty-target push behavior and exact post-push reconciliation;
+- recovery-drill module capability classification and isolated deterministic transaction keys;
 - OAuth scope normalization and legacy scope discovery;
 - retention selection;
 - backup-health state classification;
