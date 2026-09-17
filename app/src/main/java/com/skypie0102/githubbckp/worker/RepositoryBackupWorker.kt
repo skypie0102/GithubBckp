@@ -6,7 +6,6 @@ import androidx.work.WorkerParameters
 import com.skypie0102.githubbckp.backup.BackupCoordinator
 import com.skypie0102.githubbckp.backup.BackupOrigin
 import com.skypie0102.githubbckp.backup.BackupRequest
-import com.skypie0102.githubbckp.backup.BackupType
 import com.skypie0102.githubbckp.data.local.BackupDao
 import com.skypie0102.githubbckp.data.local.toRepositoryRef
 import dagger.hilt.EntryPoint
@@ -46,7 +45,6 @@ class RepositoryBackupWorker(
                 val latestAttempt = dependencies.backupDao().getLatestBackup(repositoryId)
                 dependencies.backupProblemNotifier().notifyBackupFailure(
                     repository = currentRepository,
-                    type = BackupType.GIT_MIRROR,
                     errorMessage = latestAttempt?.errorMessage,
                 )
             }
