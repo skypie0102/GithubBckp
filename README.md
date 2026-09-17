@@ -6,7 +6,7 @@ The product goal is narrow: keep **one current, verified Git mirror per selected
 
 ## What it backs up
 
-GithubBckp is mirror-only. A backup performs mirror-style Git preservation and packages the repository into one stable `.mirror.zip` artifact. It preserves Git refs/history, referenced Git LFS objects, initialized wiki history when present, releases/assets, and issue/pull-request discussion metadata supported by the app.
+GithubBckp is mirror-only. A backup performs mirror-style Git preservation and packages the repository into one `.mirror.zip` artifact. It preserves Git refs/history, referenced Git LFS objects, initialized wiki history when present, releases/assets, and issue/pull-request discussion metadata supported by the app.
 
 Every completed artifact is checksummed before storage. Mirror backup fails instead of silently succeeding when required Git/LFS/release data cannot be fetched or verified.
 
@@ -24,11 +24,11 @@ The PAT is never embedded in the APK, Gradle configuration, repository, CI logs,
 
 ### Backup folder
 
-The Android Storage Access Framework can write to a user-selected document tree, including local storage, removable storage, or a compatible cloud DocumentsProvider. Repeated backups update the current repository mirror instead of intentionally creating timestamped generations.
+The Android Storage Access Framework can write to a user-selected document tree, including local storage, removable storage, or a compatible cloud DocumentsProvider. Replacement mirrors are written to a sibling staging document and fully rehashed before the previous verified document is retired. This avoids truncating the last known-good mirror while its replacement is still being written.
 
 ### Google Drive
 
-Google Drive authorization is separate from GitHub authentication. The Drive adapter uses Google Play services `AuthorizationClient` with `drive.file`, resumable upload, and remote verification. Existing Drive mirrors are updated in place when possible.
+Google Drive authorization is separate from GitHub authentication. The Drive adapter uses Google Play services `AuthorizationClient` with `drive.file`, resumable upload, and remote verification. A replacement is uploaded as a new Drive object and verified before the previous verified object is removed, so an interrupted upload does not overwrite the only known-good mirror.
 
 Android Google OAuth clients are bound to both the package name and the APK signing certificate. Register the SHA-1 for:
 
@@ -42,7 +42,7 @@ Get the fingerprint for the keystore that signs your personal APK with:
 ./gradlew :app:signingReport
 ```
 
-If Drive account selection returns to the app without connecting, the app now reports the installed package and signing SHA-1 to help diagnose a mismatched Android OAuth client.
+If Drive account selection returns to the app without connecting, the app reports the installed package and signing SHA-1 to help diagnose a mismatched Android OAuth client.
 
 GitHub-hosted CI does **not** publish an installable APK because its generated debug signing key is not stable across runners and would make the Google OAuth SHA-1 change between builds.
 
@@ -80,15 +80,15 @@ See [`docs/PERSONAL_RELEASE.md`](docs/PERSONAL_RELEASE.md) for the exact persona
 
 Automatic backups support disabled, daily, or weekly execution. WorkManager runs opportunistically under unmetered-network, battery-not-low, and storage-not-low constraints.
 
-Automatic runs always update the repository's one current Git mirror; they do not create intentional historical copies. After a new mirror is verified, legacy duplicate remote artifacts from older app versions are cleaned up on a best-effort basis.
+Automatic runs always update the repository's one current Git mirror; they do not create intentional historical copies. The newly stored mirror is verified and recorded as current before older remote objects are cleaned up on a best-effort basis. If cleanup cannot complete, the verified current mirror remains valid and the activity row records a warning.
 
-Scheduled health is considered overdue after two cadence windows: 48 hours for daily and 14 days for weekly.
+Scheduled health is considered overdue after two cadence windows: 48 hours for daily and 14 days for weekly. Legacy source-snapshot rows do not satisfy current mirror health.
 
 ## Recovery and verification
 
 A validated mirror can be restored locally and published to either a new GitHub repository or an existing repository that is still empty. Recovery never force-pushes arbitrary live repositories.
 
-Eligible completed backups expose **Re-verify stored backup**. The app reads the entire stored object again, recomputes its digests, and for Git mirrors also runs the local mirror/module validator. Re-verification never creates another remote backup object.
+Eligible completed current mirrors expose **Re-verify stored mirror**. The app reads the entire stored object again, recomputes its digests, and runs the local mirror/module validator. Re-verification never creates another remote backup object.
 
 Completed backups and imported mirrors can export JSON audit reports.
 
