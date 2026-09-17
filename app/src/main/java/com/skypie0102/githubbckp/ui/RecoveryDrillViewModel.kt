@@ -3,6 +3,7 @@ package com.skypie0102.githubbckp.ui
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.skypie0102.githubbckp.backup.MirrorRestoreCoordinator
 import com.skypie0102.githubbckp.backup.MirrorRestoreRecord
 import com.skypie0102.githubbckp.backup.RecoveryDrillCoordinator
 import com.skypie0102.githubbckp.backup.RecoveryDrillRecord
@@ -30,6 +31,7 @@ data class RecoveryDrillUiState(
 @HiltViewModel
 class RecoveryDrillViewModel @Inject constructor(
     private val coordinator: RecoveryDrillCoordinator,
+    private val restoreCoordinator: MirrorRestoreCoordinator,
 ) : ViewModel() {
     private val _state = MutableStateFlow(RecoveryDrillUiState())
     val state: StateFlow<RecoveryDrillUiState> = _state.asStateFlow()
@@ -40,14 +42,14 @@ class RecoveryDrillViewModel @Inject constructor(
 
     fun refresh() {
         viewModelScope.launch {
-            val restores = runCatching { coordinator.listDrills() }
-            val mirrorRestores = runCatching { listRestoredMirrors() }
+            val drillResult = runCatching { coordinator.listDrills() }
+            val restoreResult = runCatching { restoreCoordinator.listRestores() }
             _state.update { current ->
                 current.copy(
-                    restores = mirrorRestores.getOrElse { current.restores },
-                    drills = restores.getOrElse { current.drills },
-                    message = mirrorRestores.exceptionOrNull()?.message
-                        ?: restores.exceptionOrNull()?.message
+                    restores = restoreResult.getOrElse { current.restores },
+                    drills = drillResult.getOrElse { current.drills },
+                    message = restoreResult.exceptionOrNull()?.message
+                        ?: drillResult.exceptionOrNull()?.message
                         ?: current.message,
                 )
             }
@@ -154,9 +156,6 @@ class RecoveryDrillViewModel @Inject constructor(
             }
         }
     }
-
-    private suspend fun listRestoredMirrors(): List<MirrorRestoreRecord> =
-        coordinator.listRestoredMirrors()
 
     private suspend fun runBusy(block: suspend () -> Unit) {
         if (_state.value.busy) return
