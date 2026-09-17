@@ -38,7 +38,7 @@ class BackupCoordinator @Inject constructor(
         var replacementCommitted = false
 
         return try {
-            val workingDirectory = File(context.cacheDir, "backups/\${request.repository.id}/$backupId")
+            val workingDirectory = File(context.cacheDir, "backups/${request.repository.id}/$backupId")
             artifact = gitMirrorBackupEngine.createBackup(
                 request = request,
                 workingDirectory = workingDirectory,
@@ -115,7 +115,7 @@ class BackupCoordinator @Inject constructor(
                     .onFailure { throwable ->
                         add(
                             "Verified the current mirror, but could not remove an older duplicate " +
-                                "\${previous.name}: \${throwable.message ?: throwable.javaClass.simpleName}",
+                                "${previous.name}: ${throwable.message ?: throwable.javaClass.simpleName}",
                         )
                     }
             }
@@ -125,7 +125,7 @@ class BackupCoordinator @Inject constructor(
             }.onFailure { throwable ->
                 add(
                     "Verified the current mirror, but could not mark older history " +
-                        "\${previous.name} as superseded: \${throwable.message ?: throwable.javaClass.simpleName}",
+                        "${previous.name} as superseded: ${throwable.message ?: throwable.javaClass.simpleName}",
                 )
             }
         }
