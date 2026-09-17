@@ -2,7 +2,7 @@
 
 This project is intended for personal/internal use rather than public app-store distribution. The release process therefore optimizes for a reproducible signed APK, real-device backup/recovery confidence, and preserving the signing key for future upgrades.
 
-The active reliability roadmap lives in [`ROADMAP.md`](ROADMAP.md). Roadmap items are prioritized product improvements; a feature that is intentionally outside scope is not a release blocker merely because GitHub could theoretically support more state.
+The reliability roadmap lives in [`ROADMAP.md`](ROADMAP.md). The planned personal reliability feature set is complete; future feature work should be driven by concrete recurring personal-use problems rather than theoretical GitHub parity.
 
 ## 1. Freeze and verify the code
 
@@ -91,19 +91,20 @@ Run these checks on the signed release build before tagging it as known-good:
 8. Re-verify the Git mirror. Confirm the result reports successful remote-byte verification plus safe local mirror/module validation; the operation must not publish anything to GitHub.
 9. Export the backup audit JSON after re-verification and confirm `latestReverification` contains the recorded timestamp/result/detail. Exporting the JSON again must not itself perform another remote read.
 10. If retention has pruned an older artifact, confirm that historical row remains auditable but does not offer re-verification.
-11. Import a mirror and complete a recovery to a new or provably empty GitHub repository.
-12. Confirm restored refs and representative content; for applicable test repositories also confirm LFS objects and release assets.
-13. Configure an automatic backup, allow one scheduled run to complete, and confirm live run progress/history.
-14. Exercise a recoverable failure (for example temporary network loss or unavailable destination). Confirm a failure notification is shown after the failure is persisted, tapping it opens the app, then retry and confirm the final state is correct.
-15. Confirm repeated failures for the same repository/format do not create notification storms inside the six-hour rate-limit window.
-16. For the backup-health dashboard, confirm a successful repository reports protected, an intentionally old scheduled backup reports stale, and a failed attempt after the latest success reports failed until a later success clears it.
-17. Exercise or simulate an overdue repository and confirm the grouped overdue notification appears once, remains deduplicated on the next health check, and can notify again after the repository recovers and later becomes overdue again.
-18. Disable automatic backups and confirm overdue notification state is cleared; re-enable and confirm the new schedule receives a fresh two-cadence grace window for repositories without a verified backup.
-19. Reboot the device and confirm persisted authorization/settings/history/re-verification results still behave as expected.
+11. Import a representative mirror, open **Recovery drill**, and confirm the UI distinguishes automatically republished modules from archival-only modules before publication.
+12. Run the drill to a new private repository. Confirm the result reports exact post-publication Git-ref verification plus applicable LFS and release/release-asset verification counts. Confirm the drill target remains present for manual review and the app does not delete it automatically.
+13. Confirm the successful drill result remains visible after reopening the app. If practical, retry the same drill target to exercise resumable drill state; ordinary recovery for the same restored mirror must remain independently available because drill transactions use separate target-specific bindings.
+14. Configure an automatic backup, allow one scheduled run to complete, and confirm live run progress/history.
+15. Exercise a recoverable failure (for example temporary network loss or unavailable destination). Confirm a failure notification is shown after the failure is persisted, tapping it opens the app, then retry and confirm the final state is correct.
+16. Confirm repeated failures for the same repository/format do not create notification storms inside the six-hour rate-limit window.
+17. For the backup-health dashboard, confirm a successful repository reports protected, an intentionally old scheduled backup reports stale, and a failed attempt after the latest success reports failed until a later success clears it.
+18. Exercise or simulate an overdue repository and confirm the grouped overdue notification appears once, remains deduplicated on the next health check, and can notify again after the repository recovers and later becomes overdue again.
+19. Disable automatic backups and confirm overdue notification state is cleared; re-enable and confirm the new schedule receives a fresh two-cadence grace window for repositories without a verified backup.
+20. Reboot the device and confirm persisted authorization/settings/history/re-verification/drill results still behave as expected.
 
 If notification permission is intentionally denied, backup execution must continue normally; record that failure/overdue alerts are unavailable until notifications are enabled in Android settings.
 
-A failure in backup integrity, on-demand re-verification, restore validation, recovery target safety, authentication, signing, notification behavior included in the candidate, or another explicitly included feature is a release blocker. Cosmetic work and features explicitly cut in [`ROADMAP.md`](ROADMAP.md) are not blockers.
+A failure in backup integrity, on-demand re-verification, restore validation, recovery-drill verification, recovery target safety, authentication, signing, notification behavior included in the candidate, or another explicitly included feature is a release blocker. Cosmetic work and features explicitly cut in [`ROADMAP.md`](ROADMAP.md) are not blockers.
 
 ## 6. Personal-use recovery promise
 
@@ -115,4 +116,4 @@ In particular, the personal product intentionally does not promise destructive o
 
 Only after the real-device gate passes, tag the exact commit used to build the APK. Use an RC ref/tag until device validation is complete, then promote the exact known-good commit to the intended personal version tag.
 
-Keep the signed APK, its SHA-256, release notes, and signing-keystore backup together in secure storage.
+Keep the signed APK, its SHA-256, release notes, signing-keystore backup, and latest successful recovery-drill result together in secure storage.
