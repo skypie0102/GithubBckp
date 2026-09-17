@@ -237,11 +237,12 @@ class RecoveryDrillCoordinator @Inject constructor(
         restore = restore,
         targetKind = RecoveryTargetKind.NEW_REPOSITORY,
         targetInput = repositoryName.trim(),
-    ) {
+    ) { transactionId ->
         restorePublisher.publishToNewRepository(
             restoreId = restore.id,
             repositoryName = repositoryName,
             isPrivate = true,
+            transactionId = transactionId,
         )
     }
 
@@ -250,18 +251,19 @@ class RecoveryDrillCoordinator @Inject constructor(
         repositoryFullName: String,
     ): RecoveryDrillRecord {
         val normalized = repositoryFullName.trim()
-        val existing = repositoryGateway.getRepository(normalized)
-        if (!existing.isPrivate) {
-            throw IOException("Recovery drill target must be a private GitHub repository")
-        }
         return runDrill(
             restore = restore,
             targetKind = RecoveryTargetKind.EXISTING_EMPTY_REPOSITORY,
             targetInput = normalized,
-        ) {
+        ) { transactionId ->
+            val existing = repositoryGateway.getRepository(normalized)
+            if (!existing.isPrivate) {
+                throw IOException("Recovery drill target must be a private GitHub repository")
+            }
             restorePublisher.publishToExistingEmptyRepository(
                 restoreId = restore.id,
                 repositoryFullName = normalized,
+                transactionId = transactionId,
             )
         }
     }
@@ -281,17 +283,18 @@ class RecoveryDrillCoordinator @Inject constructor(
         restore: MirrorRestoreRecord,
         targetKind: RecoveryTargetKind,
         targetInput: String,
-        publish: suspend () -> GithubRestorePublishResult,
+        publish: suspend (transactionId: String) -> GithubRestorePublishResult,
     ): RecoveryDrillRecord {
         val startedAt = System.currentTimeMillis()
         val drillId = "$startedAt-${UUID.randomUUID()}"
+        val transactionId = "drill-$drillId"
         val scratchDirectory = File(context.cacheDir, "recovery-drill/$drillId")
         scratchDirectory.mkdirs()
 
         try {
-            val published = publish()
-            val transaction = transactionStore.get(restore.id)
-                ?: throw IOException("Recovery transaction is missing after publication")
+            val published = publish(transactionId)
+            val transaction = transactionStore.get(transactionId)
+                ?: throw IOException("Recovery drill transaction is missing after publication")
             val repository = repositoryGateway.getRepository(published.repositoryFullName)
             if (repository.id != transaction.repositoryId) {
                 throw IOException("Recovery drill target identity changed after publication")
@@ -358,7 +361,7 @@ class RecoveryDrillCoordinator @Inject constructor(
             return record
         } catch (throwable: Exception) {
             if (throwable is CancellationException) throw throwable
-            val transaction = runCatching { transactionStore.get(restore.id) }.getOrNull()
+            val transaction = runCatching { transactionStore.get(transactionId) }.getOrNull()
             val failed = RecoveryDrillRecord(
                 id = drillId,
                 restoreId = restore.id,
