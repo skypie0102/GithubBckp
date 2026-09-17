@@ -11,8 +11,8 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.core.content.ContextCompat
-import com.skypie0102.githubbckp.ui.HomeScreen
 import com.skypie0102.githubbckp.ui.HomeViewModel
+import com.skypie0102.githubbckp.ui.RecoveryDrillHost
 import com.skypie0102.githubbckp.ui.theme.GithubBckpTheme
 import dagger.hilt.android.AndroidEntryPoint
 
@@ -29,7 +29,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             GithubBckpTheme {
-                HomeScreen(viewModel)
+                RecoveryDrillHost(viewModel)
             }
         }
     }
