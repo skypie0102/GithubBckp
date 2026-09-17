@@ -17,7 +17,7 @@ The active product is intentionally small:
 - GitHub authentication uses a user-supplied PAT stored through Android Keystore-backed encrypted storage;
 - backup destinations are Google Drive or a user-selected Android document tree.
 
-Source snapshots, configurable retention/version-history controls, GitHub Device Flow, and the guided recovery-drill UI are no longer part of the active product.
+Source snapshots, configurable retention/version-history controls, GitHub Device Flow, the guided recovery-drill UI, and the extra `personal` Android build variant are no longer part of the active product.
 
 ## Completed reliability work
 
@@ -66,15 +66,18 @@ The active backup path has been simplified around one current mirror per reposit
 - Google Drive uploads a distinct resumable replacement so the previous verified file remains untouched until the new object verifies and is committed;
 - document-tree storage writes and fully rehashes a sibling staging document before the previous verified document is retired;
 - `BackupCoordinator` records the verified replacement as `COMPLETED` before cleanup begins;
-- older duplicates are removed only after the new mirror verifies successfully, and cleanup failure is warning-only rather than invalidating the verified current mirror;
+- failed replacement candidates are removed best-effort;
+- older duplicate rows are retired from the logical current set after replacement commit, while physical cleanup failure is surfaced as a warning;
 - configurable keep-last-N retention has been removed;
 - historical Room rows remain available for activity/audit compatibility.
 
-### Personal build/signing cleanup — complete
+### Release pipeline cleanup — complete
 
-The normal personal install artifact is the locally built `personal` variant. It uses release shrinking/resource shrinking but is signed with the operator's persistent local Android debug keystore.
+The installable artifact is now the signed, minified/resource-shrunk `release` APK. The extra `personal` build type has been removed.
 
-GitHub-hosted CI compiles/tests the variant but does not publish its runner-signed APK because an ephemeral certificate would change the SHA-1 used by Android OAuth clients such as Google Drive.
+The GitHub Actions release flow mirrors Intake Edit's release publishing shape: version validation, signed APK build, signature verification, versioned filename, SHA-256 sidecar, and GitHub Release publication.
+
+GithubBckp intentionally requires a persistent signing key instead of Intake Edit's current disposable fallback key because Google Drive Android OAuth is bound to the APK signing certificate SHA-1.
 
 ## Active roadmap
 
@@ -82,15 +85,19 @@ There are currently **no active product-feature roadmap items**.
 
 The next work should come from concrete problems observed in personal use, especially failures involving mirror integrity, storage replacement, authentication, scheduling, or recovery.
 
-## Later only if personal use creates a real need
+## Architecture cleanup status
 
-These are not active commitments:
+The obsolete backup modes and duplicate-generation machinery are removed from active execution. The remaining larger subsystems are not compatibility trash; they implement currently retained features:
 
-- storage-usage visibility and per-repository current-mirror size summaries;
-- export/import of non-secret app configuration such as repository selection and schedule;
-- a dedicated destructive-free recovery rehearsal flow, only if ordinary validated restore/recovery proves insufficient for personal confidence.
+- Git LFS preservation;
+- wiki preservation;
+- releases/assets preservation and restore;
+- issue/pull-request discussion preservation;
+- stored-mirror re-verification and audit;
+- safe restore/recovery;
+- automatic scheduling and health notifications.
 
-Implement these only when real usage demonstrates recurring value.
+If the product is later narrowed to **Git repository data only**, those optional preservation/recovery surfaces can be removed in a separate scope-reduction pass. Until that product decision is made, deleting them would remove working backup coverage rather than merely clean dead code.
 
 ## Explicitly cut / non-goals
 
@@ -98,6 +105,8 @@ The following are intentionally not planned unless the operating assumptions cha
 
 - source-snapshot backups as a second active format;
 - user-managed historical backup generations or retention policies;
+- GitHub Device Flow;
+- guided disaster-recovery drills as a separate product surface;
 - native recreation of issues, pull requests, comments, reviews, or their original authors/timestamps;
 - crawling timeline-event and referenced discussion-attachment bytes solely for archival completeness;
 - destructive recovery into arbitrary non-empty repositories, including force-push/ref-deletion workflows;
@@ -105,8 +114,6 @@ The following are intentionally not planned unless the operating assumptions cha
 - automatic wiki publication through undocumented or unsafe initialization behavior;
 - exact recreation of GitHub release `latest` selection, historical server timestamps, or immutable-release state;
 - Play Store/public-distribution work.
-
-These cuts are deliberate safety and maintenance decisions, not release blockers.
 
 ## Priority rule
 
