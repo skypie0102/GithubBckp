@@ -159,6 +159,7 @@ interface BackupDao {
             SELECT attempt.id
             FROM backups AS attempt
             WHERE attempt.repositoryId = backup.repositoryId
+              AND attempt.type = 'GIT_MIRROR'
             ORDER BY attempt.startedAtEpochMs DESC, attempt.id DESC
             LIMIT 1
         )
@@ -166,6 +167,7 @@ interface BackupDao {
             SELECT verified.id
             FROM backups AS verified
             WHERE verified.repositoryId = backup.repositoryId
+              AND verified.type = 'GIT_MIRROR'
               AND verified.status = 'COMPLETED'
               AND verified.remoteDeletedAtEpochMs IS NULL
             ORDER BY verified.completedAtEpochMs DESC, verified.id DESC
