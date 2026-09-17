@@ -5,6 +5,17 @@ plugins {
     alias(libs.plugins.hilt)
 }
 
+val releaseKeystorePath = System.getenv("GITHUBBCKP_KEYSTORE_PATH")
+val releaseKeystorePassword = System.getenv("GITHUBBCKP_KEYSTORE_PASSWORD")
+val releaseKeyAlias = System.getenv("GITHUBBCKP_KEY_ALIAS")
+val releaseKeyPassword = System.getenv("GITHUBBCKP_KEY_PASSWORD")
+val hasReleaseSigning = listOf(
+    releaseKeystorePath,
+    releaseKeystorePassword,
+    releaseKeyAlias,
+    releaseKeyPassword,
+).all { !it.isNullOrBlank() }
+
 android {
     namespace = "com.skypie0102.githubbckp"
     compileSdk {
@@ -23,19 +34,26 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        if (hasReleaseSigning) {
+            create("release") {
+                storeFile = file(releaseKeystorePath!!)
+                storePassword = releaseKeystorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
+        }
+    }
+
     buildTypes {
         release {
+            signingConfigs.findByName("release")?.let { signingConfig = it }
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
-        }
-        create("personal") {
-            initWith(getByName("release"))
-            signingConfig = signingConfigs.getByName("debug")
-            matchingFallbacks += listOf("release")
         }
     }
 
