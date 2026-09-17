@@ -118,18 +118,27 @@ class BackupCoordinator @Inject constructor(
     ): List<String> = buildList {
         previousBackups.forEach { backup ->
             val previous = backup.toRemoteBackupOrNull() ?: return@forEach
-            val cleanup = runCatching {
-                if (previous.provider != current.provider || previous.id != current.id) {
-                    storageProvider.delete(previous)
-                }
-                // If a provider ever returns a shared identity, the old history
-                // row still stops owning that current remote object.
-                backupDao.markRemoteDeleted(backup.id, System.currentTimeMillis())
+
+            if (previous.provider != current.provider || previous.id != current.id) {
+                runCatching { storageProvider.delete(previous) }
+                    .onFailure { throwable ->
+                        add(
+                            "Verified the current mirror, but could not remove an older duplicate " +
+                                "${previous.name}: ${throwable.message ?: throwable.javaClass.simpleName}",
+                        )
+                    }
             }
-            cleanup.onFailure { throwable ->
+
+            // The old history row no longer represents the logical current mirror
+            // even if physical duplicate removal was not possible. Keep that cleanup
+            // failure as a warning, but do not let stale rows participate in health,
+            // re-verification, or the next replacement's current-object set.
+            runCatching {
+                backupDao.markRemoteDeleted(backup.id, System.currentTimeMillis())
+            }.onFailure { throwable ->
                 add(
-                    "Verified the current mirror, but could not retire an older duplicate " +
-                        "${previous.name}: ${throwable.message ?: throwable.javaClass.simpleName}",
+                    "Verified the current mirror, but could not mark older history " +
+                        "${previous.name} as superseded: ${throwable.message ?: throwable.javaClass.simpleName}",
                 )
             }
         }
