@@ -13,7 +13,6 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import com.skypie0102.githubbckp.MainActivity
-import com.skypie0102.githubbckp.backup.BackupType
 import com.skypie0102.githubbckp.data.local.RepositoryEntity
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
@@ -28,14 +27,13 @@ class BackupProblemNotifier @Inject constructor(
     @SuppressLint("MissingPermission")
     fun notifyBackupFailure(
         repository: RepositoryEntity,
-        type: BackupType,
         errorMessage: String?,
         nowEpochMs: Long = System.currentTimeMillis(),
     ) {
         if (!repository.isAvailable || !repository.selectedForBackup) return
         if (!notificationsEnabled()) return
 
-        val key = failureTimestampKey(repository.githubId, type)
+        val key = failureTimestampKey(repository.githubId)
         val lastNotifiedAt = preferences.getLong(key, 0L).takeIf { it > 0L }
         if (!shouldNotifyBackupFailure(lastNotifiedAt, nowEpochMs)) return
 
@@ -51,7 +49,7 @@ class BackupProblemNotifier @Inject constructor(
             append('/')
             append(repository.name)
             append(" • ")
-            append(type.displayName())
+            append("Git mirror")
             if (detail != null) {
                 append(" • ")
                 append(detail)
@@ -157,16 +155,11 @@ class BackupProblemNotifier @Inject constructor(
         )
     }
 
-    private fun failureTimestampKey(repositoryId: Long, type: BackupType): String =
-        "failure-$repositoryId-${type.name}"
+    private fun failureTimestampKey(repositoryId: Long): String =
+        "failure-$repositoryId-GIT_MIRROR"
 
     private fun failureNotificationId(repositoryId: Long): Int =
         FAILURE_NOTIFICATION_BASE xor repositoryId.hashCode()
-
-    private fun BackupType.displayName(): String = when (this) {
-        BackupType.SOURCE_ARCHIVE -> "source snapshot"
-        BackupType.GIT_MIRROR -> "Git mirror"
-    }
 
     private companion object {
         const val PREFERENCES_NAME = "backup-problem-notifications"
