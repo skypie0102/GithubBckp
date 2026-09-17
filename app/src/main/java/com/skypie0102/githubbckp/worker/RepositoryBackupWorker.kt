@@ -36,7 +36,6 @@ class RepositoryBackupWorker(
         val success = dependencies.backupCoordinator().run(
             BackupRequest(
                 repository = repository.toRepositoryRef(),
-                type = BackupType.GIT_MIRROR,
                 origin = origin,
                 scheduledRunId = scheduledRunId,
             ),
