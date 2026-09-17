@@ -54,27 +54,37 @@ The engine can bundle:
 - releases and release assets;
 - issue/pull-request discussion metadata supported by the app.
 
-The output filename is stable per repository: `<owner>-<repository>.mirror.zip`. New code does not generate timestamped snapshot or mirror filenames.
+The local output filename is stable per repository: `<owner>-<repository>.mirror.zip`. New code does not generate timestamped snapshot or mirror generations.
 
 `BackupType.SOURCE_ARCHIVE` remains only as a compatibility value for historical Room rows. There is no source-archive backup engine and new work always requests `GIT_MIRROR`.
 
-## One-current-mirror storage
+## Verified-before-retire storage model
 
-`BackupCoordinator` records an attempt in Room, creates the new local mirror artifact, and asks the active `StorageProvider` to store it. When a previously verified remote object is known, that object is supplied as the replacement target.
+`BackupCoordinator` records an attempt in Room, creates the new local mirror artifact, and asks the active `StorageProvider` to store a replacement candidate.
 
-A backup is marked complete only after provider verification succeeds. Once the new/current mirror is verified, the coordinator marks the superseded history row as no longer owning a current remote artifact and removes older distinct duplicates left by previous app versions on a best-effort basis.
+The replacement is independently verified before it becomes authoritative. After remote verification succeeds, the coordinator first persists the new row as `COMPLETED`; only then does it retire superseded remote objects and mark their historical rows as no longer owning a current object. Cleanup is best-effort and cannot downgrade the already verified replacement. Cleanup failures are attached as warnings when possible.
 
-There is no user-facing retention/version-history policy anymore. Historical database rows remain useful for audit/activity, but remote storage is intended to contain one current mirror per repository.
+This ordering is deliberate: a crash during cleanup can temporarily leave more than one remote object, but it must not leave the database claiming there is no verified current mirror. There is no user-facing retention/version-history policy; extra objects are cleanup residue, not intentional generations.
+
+Historical database rows remain useful for audit/activity. A row with `remoteDeletedAtEpochMs` no longer represents a current remote object and is excluded from current mirror health and on-demand re-verification.
 
 ### Google Drive
 
-`GoogleDriveStorageProvider` uses resumable upload. New repositories create a Drive file; subsequent runs use a resumable `PATCH` session against the existing Drive file ID when available. If that persisted file ID is no longer visible to the currently authorized Google account, a 404 falls back to creating the current mirror in the active account instead of failing solely because of stale account-bound history.
+`GoogleDriveStorageProvider` uses resumable upload to create each replacement as a distinct Drive object. It does **not** overwrite the previous verified file in place. The previous object remains intact while the replacement uploads; after the new object verifies and is committed in Room, coordinator cleanup removes the older Drive object.
+
+This means a failed or interrupted Drive upload cannot corrupt the only known-good mirror. If the user has changed Google accounts and an older file ID is no longer visible, cleanup can warn while the newly verified object in the current account remains authoritative.
 
 Provider metadata stores the mirror checksum and repository identity for verification. Drive authorization is handled separately by `GoogleDriveAuthManager` with Google Play services `AuthorizationClient` and the `drive.file` scope. Authorization failures expose the installed package name and certificate SHA-1 so an Android OAuth-client signing mismatch can be diagnosed instead of silently appearing to do nothing.
 
 ### Document-tree storage
 
-`DocumentTreeStorageProvider` uses Android's Storage Access Framework. Reuse is limited to documents discoverable under the **currently selected** repository folder, by the stable filename or the prior recorded name. A persisted URI from an older tree selection is not reused directly, so changing the backup folder actually moves future mirror updates to the new destination. A legacy timestamped file in the selected tree can still be best-effort renamed to the stable mirror name.
+`DocumentTreeStorageProvider` uses Android's Storage Access Framework. It resolves prior mirror documents only inside the **currently selected** repository folder, so changing the backup folder moves future backups to the new tree rather than continuing to write through an old persisted URI.
+
+A replacement is written to a sibling staging document and the complete staged bytes are checked against the artifact size, SHA-256, and MD5 before the provider returns it. The previous verified document remains untouched while this staging write and local verification occur. `BackupCoordinator` then performs its normal provider verification, commits the new row, and only afterward deletes the superseded document.
+
+If the stable mirror filename is free, the staged document is renamed to it. When the previous stable-name object still exists during staging, the provider may temporarily persist the verified replacement under its staging display name; this is a storage implementation detail, not a historical generation. A later successful update can normalize the display name once the old object has been removed.
+
+Document-tree deletion is idempotent so cleanup can safely retry a document that a provider has already removed or that disappeared externally.
 
 ## Background execution
 
@@ -100,7 +110,13 @@ QUEUED
   -> COMPLETED
 ```
 
-Any failed stage persists `FAILED`. Temporary local artifacts are removed in `finally` after the attempt finishes.
+Any failure before the verified replacement is committed persists `FAILED`. Temporary local artifacts are removed in `finally` after the attempt finishes. Duplicate cleanup happens after `COMPLETED` and is therefore warning-only.
+
+## Backup health
+
+Backup health is mirror-only. Legacy `SOURCE_ARCHIVE` rows remain visible as historical data but do not count as current protection, do not suppress overdue alerts, and do not override the status of a newer/current Git mirror.
+
+For each selected available repository, health uses the latest Git-mirror attempt and latest completed Git-mirror row that still owns a current remote object. Automatic-backup freshness uses two cadence windows.
 
 ## Re-verification
 
