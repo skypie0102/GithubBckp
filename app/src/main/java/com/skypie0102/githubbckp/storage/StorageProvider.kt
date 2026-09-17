@@ -18,8 +18,13 @@ data class RemoteBackup(
 )
 
 interface StorageProvider {
+    /**
+     * Stores [artifact]. When [existing] belongs to this provider, implementations
+     * should update that object in place so a repository has one logical mirror.
+     */
     suspend fun upload(
         artifact: BackupArtifact,
+        existing: RemoteBackup? = null,
         onProgress: suspend (uploadedBytes: Long, totalBytes: Long) -> Unit = { _, _ -> },
     ): RemoteBackup
 
