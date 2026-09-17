@@ -51,7 +51,7 @@ class GitMirrorPushServiceTest {
     }
 
     @Test
-    fun resumeAcceptsOnlyExactAlreadyPublishedMirror() = runBlocking {
+    fun resumeAndPostPublishVerificationAcceptOnlyExactMirror() = runBlocking {
         val root = Files.createTempDirectory("mirror-resume-test").toFile()
         try {
             val mirror = createSourceMirror(root)
@@ -61,6 +61,10 @@ class GitMirrorPushServiceTest {
 
             val resumed = service.pushOrReconcilePublished(mirror, target.toURI().toString())
             assertEquals(first.pushedRefCount, resumed.pushedRefCount)
+            assertEquals(
+                first.pushedRefCount,
+                service.verifyPublishedRefs(mirror, target.toURI().toString()),
+            )
 
             FileRepositoryBuilder().setGitDir(target).setBare().build().use { repository ->
                 val head = repository.resolve("refs/heads/master")
@@ -68,11 +72,17 @@ class GitMirrorPushServiceTest {
                 extra.setNewObjectId(head)
                 assertTrue(extra.update().name in setOf("NEW", "FORCED", "FAST_FORWARD", "NO_CHANGE"))
             }
-            val failure = runCatching {
+            val resumeFailure = runCatching {
                 service.pushOrReconcilePublished(mirror, target.toURI().toString())
             }.exceptionOrNull()
-            assertTrue(failure is IOException)
-            assertTrue(failure?.message.orEmpty().contains("not empty"))
+            assertTrue(resumeFailure is IOException)
+            assertTrue(resumeFailure?.message.orEmpty().contains("not empty"))
+
+            val verificationFailure = runCatching {
+                service.verifyPublishedRefs(mirror, target.toURI().toString())
+            }.exceptionOrNull()
+            assertTrue(verificationFailure is IOException)
+            assertTrue(verificationFailure?.message.orEmpty().contains("do not exactly match"))
         } finally {
             root.deleteRecursively()
         }
