@@ -31,3 +31,5 @@ jobs:
             "build-tools;36.0.0"
       - name: Build and test
         run: ./gradlew :app:assembleDebug :app:assembleRelease :app:testDebugUnitTest :app:lintDebug
+      - name: Report release APK size
+        run: ls -lh app/build/outputs/apk/release/*.apk
