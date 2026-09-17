@@ -20,6 +20,10 @@ HomeViewModel
    +-- normal restore orchestration
    +-- recovery-drill orchestration
    |
+GithubTokenOverlay / GithubTokenViewModel
+   +-- masked runtime PAT entry/replacement
+   +-- GithubAuthManager validation + encrypted persistence
+   |
 DisasterRecoveryDrillOverlay
    +-- validated-mirror selection
    +-- republishable vs archival-only module guidance
@@ -79,15 +83,21 @@ GithubMirrorRestorePublisher
 
 ## GitHub authentication and API
 
-`GithubAuthManager` uses GitHub OAuth Device Flow. The Android package carries only an OAuth client ID. Access/refresh material and cached granted-scope metadata are encrypted with an Android Keystore-backed AES-GCM key before being placed in SharedPreferences.
+`GithubAuthManager` uses a personal GitHub token entered at runtime. No GitHub OAuth App, client ID, client secret, or GitHub credential is compiled into the APK.
 
-New Device Flow authorizations request `repo workflow offline_access`. Backup/discovery uses ordinary repository access. Recovery uses `requireRecoveryAccessToken()`, which requires the granted `workflow` scope before any recovery repository can be created or resolved. This avoids creating a partial target that later rejects workflow-bearing refs.
+`GithubTokenOverlay` exposes a masked token field. `GithubTokenViewModel` passes a candidate token to `GithubAuthManager`, which validates it against GitHub's authenticated-user endpoint before replacing the current credential. Only a successfully validated token is persisted.
 
-For legacy installations without cached scope metadata, recovery queries GitHub's authenticated-user response, reads `X-OAuth-Scopes`, and caches the normalized set. Missing `workflow` produces a dedicated recoverable permission error and the UI offers Device Flow again.
+The token and normalized classic-token scope metadata are stored through `SecureStore`, which encrypts values with Android Keystore-backed AES-GCM before placing ciphertext in app-private SharedPreferences.
+
+For the simplest full personal backup/recovery setup, a classic PAT with `repo` and `workflow` scopes is used. Backup/discovery uses whatever repository access the supplied token actually has. Recovery uses `requireRecoveryAccessToken()`, which requires a reported `workflow` scope before any recovery repository can be created or resolved. This avoids creating a partial target that later rejects workflow-bearing refs.
+
+Tokens that do not expose classic `X-OAuth-Scopes` metadata can still be validated and used for backup operations permitted by GitHub, but the app does not assume they have recovery workflow permission. Replacing the token is explicit and the replacement is checked before persistence.
 
 `GithubGateway` owns repository discovery, authenticated source-archive transfer, and lightweight feature lookup. Redirects from GitHub's API to archive/object storage are followed without forwarding the bearer token off GitHub's API host.
 
 `GithubRepositoryRestoreGateway` creates a new empty recovery repository or resolves a user-supplied existing target. Recovery drills additionally require the resolved target to be private.
+
+Google Drive authorization is a separate Android/Google flow and is not coupled to GitHub PAT storage.
 
 ## Repository inventory
 
@@ -240,7 +250,7 @@ Restore audit export summarizes the validation result without duplicating the re
 
 ## Resumable GitHub recovery
 
-`GithubMirrorRestorePublisher` obtains a recovery-validated OAuth token **before** target creation/resolution. First-time recovery is restricted to a new or provably empty Git/release target.
+`GithubMirrorRestorePublisher` obtains a recovery-validated personal access token **before** target creation/resolution. First-time recovery is restricted to a new or provably empty Git/release target.
 
 `RecoveryTransactionStore` persists a caller-supplied transaction key and binds that transaction to one stable GitHub repository ID/full name. Ordinary recovery uses the restored mirror ID as that key and advances monotonically through:
 
@@ -298,7 +308,7 @@ The JVM suite covers, among other things:
 - recovery transaction persistence and target binding;
 - empty-target push behavior and exact post-push reconciliation;
 - recovery-drill module capability classification and isolated deterministic transaction keys;
-- OAuth scope normalization and legacy scope discovery;
+- PAT/classic-scope normalization and conservative workflow-permission detection;
 - retention selection;
 - backup-health state classification;
 - overdue-notification policy and failure rate-limit boundaries;
