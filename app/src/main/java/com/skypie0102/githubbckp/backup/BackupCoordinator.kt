@@ -48,7 +48,7 @@ class BackupCoordinator @Inject constructor(
             // The newest one is reused by providers that support it. Older
             // duplicates from previous app versions are cleaned after the new
             // bytes have been verified.
-            val previousBackups = backupDao.getRetainableBackups(request.repository.id, request.type)
+            val previousBackups = backupDao.getCurrentRemoteBackups(request.repository.id, request.type)
             val previousRemote = previousBackups.firstOrNull()?.toRemoteBackupOrNull()
 
             backupDao.updateBackupStatus(backupId, BackupStatus.UPLOADING)
