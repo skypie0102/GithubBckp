@@ -30,15 +30,12 @@ class GitMirrorBackupEngine @Inject constructor(
     private val wikiBackupService: GithubWikiBackupService,
     private val releaseBackupService: GithubReleaseBackupService,
     private val discussionBackupService: GithubDiscussionBackupService,
-) : BackupEngine {
-    override suspend fun createBackup(
+) {
+    suspend fun createBackup(
         request: BackupRequest,
         workingDirectory: File,
         onProgress: suspend (BackupStatus) -> Unit,
     ): BackupArtifact = withContext(Dispatchers.IO) {
-        require(request.type == BackupType.GIT_MIRROR) {
-            "GitMirrorBackupEngine only handles GIT_MIRROR"
-        }
         workingDirectory.mkdirs()
         val createdAt = System.currentTimeMillis()
         val safeName = "${request.repository.owner}-${request.repository.name}"
@@ -100,7 +97,7 @@ class GitMirrorBackupEngine @Inject constructor(
         val digests = calculateDigests(archive)
         BackupArtifact(
             repository = request.repository,
-            type = request.type,
+            type = BackupType.GIT_MIRROR,
             file = archive,
             checksumSha256 = digests.sha256,
             checksumMd5 = digests.md5,
