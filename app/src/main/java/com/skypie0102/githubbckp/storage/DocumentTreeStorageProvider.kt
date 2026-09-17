@@ -41,12 +41,17 @@ class DocumentTreeStorageProvider @Inject constructor(
             .findOrCreateDirectory(artifact.repository.owner)
             .findOrCreateDirectory(artifact.repository.name)
 
+        // Reuse only a document that is discoverable below the *currently selected*
+        // repository folder. A persisted URI from an older document-tree selection
+        // must not silently keep receiving backups after the user changes folders.
         val existingDocument = existing
             ?.takeIf { it.provider == StorageDestination.DOCUMENT_TREE }
-            ?.let { remote -> DocumentFile.fromSingleUri(context, Uri.parse(remote.id)) }
-            ?.takeIf { it.exists() && it.isFile && it.canWrite() }
-        val document = existingDocument
-            ?: repositoryFolder.findFile(artifact.file.name)?.takeIf { it.isFile && it.canWrite() }
+            ?.name
+            ?.let(repositoryFolder::findFile)
+            ?.takeIf { it.isFile && it.canWrite() }
+        val document = repositoryFolder.findFile(artifact.file.name)
+            ?.takeIf { it.isFile && it.canWrite() }
+            ?: existingDocument
             ?: repositoryFolder.createFile(mimeType(artifact), artifact.file.name)
             ?: throw IOException("Could not create ${artifact.file.name} in the selected folder")
 
@@ -68,7 +73,8 @@ class DocumentTreeStorageProvider @Inject constructor(
         }
 
         if (document.name != artifact.file.name) {
-            // Best effort migration from the old timestamped naming scheme.
+            // Best effort migration from the old timestamped naming scheme when
+            // that old file still lives below the selected destination tree.
             document.renameTo(artifact.file.name)
         }
 
