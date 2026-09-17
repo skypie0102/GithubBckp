@@ -2,7 +2,6 @@ package com.skypie0102.githubbckp.worker
 
 import android.content.Context
 import android.content.SharedPreferences
-import com.skypie0102.githubbckp.backup.BackupType
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -19,7 +18,6 @@ enum class BackupCadence(val repeatHours: Long) {
 data class BackupScheduleSettings(
     val enabled: Boolean = false,
     val cadence: BackupCadence = BackupCadence.DAILY,
-    val backupType: BackupType = BackupType.GIT_MIRROR,
 )
 
 enum class ScheduledBackupRunOutcome {
@@ -48,10 +46,6 @@ class BackupSchedulePreferences @Inject constructor(
             value = preferences.getString(KEY_CADENCE, null),
             default = BackupCadence.DAILY,
         ),
-        backupType = enumValueOrDefault(
-            value = preferences.getString(KEY_BACKUP_TYPE, null),
-            default = BackupType.GIT_MIRROR,
-        ),
     )
 
     fun save(settings: BackupScheduleSettings) {
@@ -60,7 +54,9 @@ class BackupSchedulePreferences @Inject constructor(
         preferences.edit()
             .putBoolean(KEY_ENABLED, settings.enabled)
             .putString(KEY_CADENCE, settings.cadence.name)
-            .putString(KEY_BACKUP_TYPE, settings.backupType.name)
+            // Remove the obsolete format preference. Automatic backups are
+            // mirror-only now.
+            .remove(KEY_BACKUP_TYPE)
             .apply {
                 when {
                     !settings.enabled -> remove(KEY_ENABLED_AT)
