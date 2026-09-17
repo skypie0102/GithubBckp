@@ -17,6 +17,7 @@ data class GithubTokenUiState(
     val login: String? = null,
     val hasWorkflowScope: Boolean = false,
     val connectionVersion: Long = 0L,
+    val entryRequestVersion: Long = 0L,
 )
 
 @HiltViewModel
@@ -27,6 +28,14 @@ class GithubTokenViewModel @Inject constructor(
         GithubTokenUiState(hasWorkflowScope = authManager.hasWorkflowScopeCached()),
     )
     val state: StateFlow<GithubTokenUiState> = _state.asStateFlow()
+
+    init {
+        viewModelScope.launch {
+            authManager.tokenEntryRequestVersion.collect { version ->
+                _state.update { it.copy(entryRequestVersion = version) }
+            }
+        }
+    }
 
     fun connect(token: String) {
         if (_state.value.busy) return
