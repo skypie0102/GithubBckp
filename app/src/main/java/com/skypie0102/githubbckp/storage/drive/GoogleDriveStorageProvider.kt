@@ -24,6 +24,7 @@ class GoogleDriveStorageProvider @Inject constructor(
 ) : StorageProvider {
     override suspend fun upload(
         artifact: BackupArtifact,
+        existing: RemoteBackup?,
         onProgress: suspend (uploadedBytes: Long, totalBytes: Long) -> Unit,
     ): RemoteBackup = withContext(Dispatchers.IO) {
         val token = authManager.requireAccessToken()
@@ -39,11 +40,13 @@ class GoogleDriveStorageProvider @Inject constructor(
                     .put("backupType", artifact.type.name),
             )
 
+        val existingDriveFile = existing?.takeIf { it.provider == StorageDestination.GOOGLE_DRIVE }
         val sessionUrl = createResumableSession(
             token = token,
             metadata = metadata,
             fileLength = artifact.file.length(),
             mimeType = mimeType,
+            existingFileId = existingDriveFile?.id,
         )
         uploadToSession(
             sessionUrl = sessionUrl,
@@ -112,8 +115,15 @@ class GoogleDriveStorageProvider @Inject constructor(
         metadata: JSONObject,
         fileLength: Long,
         mimeType: String,
+        existingFileId: String?,
     ): String {
-        val connection = open(RESUMABLE_CREATE_URL, "POST", token).apply {
+        val url = if (existingFileId == null) {
+            RESUMABLE_CREATE_URL
+        } else {
+            "$RESUMABLE_UPDATE_URL/${path(existingFileId)}?uploadType=resumable&fields=id,name,size,md5Checksum,appProperties"
+        }
+        val method = if (existingFileId == null) "POST" else "PATCH"
+        val connection = open(url, method, token).apply {
             doOutput = true
             setRequestProperty("Content-Type", "application/json; charset=UTF-8")
             setRequestProperty("X-Upload-Content-Type", mimeType)
@@ -210,6 +220,7 @@ class GoogleDriveStorageProvider @Inject constructor(
         const val FILES_URL = "https://www.googleapis.com/drive/v3/files"
         const val RESUMABLE_CREATE_URL =
             "https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id,name,size,md5Checksum,appProperties"
+        const val RESUMABLE_UPDATE_URL = "https://www.googleapis.com/upload/drive/v3/files"
         const val CONNECT_TIMEOUT_MS = 30_000
         const val READ_TIMEOUT_MS = 120_000
         const val BUFFER_SIZE = 256 * 1024
