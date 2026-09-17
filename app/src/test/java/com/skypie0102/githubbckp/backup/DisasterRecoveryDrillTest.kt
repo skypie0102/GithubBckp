@@ -1,6 +1,8 @@
 package com.skypie0102.githubbckp.backup
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class DisasterRecoveryDrillTest {
@@ -49,5 +51,36 @@ class DisasterRecoveryDrillTest {
 
         assertEquals(listOf("Git refs/history"), plan.automaticallyRepublished)
         assertEquals(emptyList<String>(), plan.archivalOnly)
+    }
+
+    @Test
+    fun `drill transaction keys isolate retries and targets from normal recovery`() {
+        val restoreId = "1700000000000-123e4567-e89b-12d3-a456-426614174000"
+        val first = disasterRecoveryDrillTransactionKey(
+            restoreId,
+            DisasterRecoveryDrillTarget.NEW_PRIVATE_REPOSITORY,
+            "Example-Drill",
+        )
+        val retry = disasterRecoveryDrillTransactionKey(
+            restoreId,
+            DisasterRecoveryDrillTarget.NEW_PRIVATE_REPOSITORY,
+            " example-drill ",
+        )
+        val otherTarget = disasterRecoveryDrillTransactionKey(
+            restoreId,
+            DisasterRecoveryDrillTarget.NEW_PRIVATE_REPOSITORY,
+            "Another-Drill",
+        )
+        val existingTarget = disasterRecoveryDrillTransactionKey(
+            restoreId,
+            DisasterRecoveryDrillTarget.EXISTING_EMPTY_PRIVATE_REPOSITORY,
+            "owner/example-drill",
+        )
+
+        assertEquals(first, retry)
+        assertNotEquals(restoreId, first)
+        assertNotEquals(first, otherTarget)
+        assertNotEquals(first, existingTarget)
+        assertTrue(Regex("[A-Za-z0-9._-]+").matches(first))
     }
 }
