@@ -91,9 +91,11 @@ The APK release flow mirrors the Intake Edit repository:
 - the install file is named `githubbckp-v<version>.apk`, not `app-debug.apk`;
 - a matching `.sha256` file is published alongside it.
 
-Unlike Intake Edit's current one-off fallback signing, GithubBckp requires a **persistent release key**. This is intentional because Google Drive Android OAuth is tied to the signing certificate SHA-1. A disposable key would make Drive authorization change on every release.
+Like Intake Edit, the workflow can publish without signing secrets by generating a one-off release key. If the optional Android signing secrets are configured, it uses that persistent key instead.
 
-Configure these GitHub Actions secrets before the first release:
+With the no-secret one-off path, Android will require uninstall/reinstall for a later APK signed by a different key. Google Drive OAuth is also tied to the signing SHA-1, so the Android OAuth client must be updated to the SHA-1 printed in that release before Drive authorization will work for that build.
+
+Optional persistent-signing secrets are:
 
 ```text
 ANDROID_KEYSTORE_BASE64
@@ -101,8 +103,6 @@ ANDROID_KEYSTORE_PASSWORD
 ANDROID_KEY_ALIAS
 ANDROID_KEY_PASSWORD
 ```
-
-When migrating from an older debug-signed/personal-signed APK to the new release key, Android may require one uninstall. After that, APKs signed with the same persistent release key can update in place as long as `versionCode` increases.
 
 See [`docs/RELEASE.md`](docs/RELEASE.md).
 
