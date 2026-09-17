@@ -16,21 +16,15 @@ Before producing the APK, run the normal repository gate:
 
 Do not treat a candidate as known-good if this gate is failing.
 
-## 2. Configure the GitHub OAuth client ID
+## 2. GitHub authentication
 
-The GitHub OAuth client ID is the only GitHub build-time value required by the app:
+GithubBckp does **not** require a GitHub OAuth App, OAuth client ID, Device Flow configuration, client secret, or build-time GitHub credential.
 
-```bash
-export GITHUB_CLIENT_ID='...'
-```
+On first launch, enter a GitHub personal access token in the app. The app validates it against GitHub's `/user` endpoint and then stores it encrypted through the existing Android Keystore-backed `SecureStore`.
 
-or:
+The token must be able to read every private repository you intend to back up. Recovery additionally needs the permissions required to create or update the chosen target repository and its Git/LFS/release surfaces. Classic and fine-grained PATs are both allowed; GithubBckp does not rely on OAuth scope strings to decide whether recovery is possible. GitHub remains the authority on whether a token can perform a requested operation.
 
-```bash
-./gradlew :app:assembleDebug -PGITHUB_CLIENT_ID=your_client_id
-```
-
-Do not commit OAuth client secrets or tokens.
+The PAT is never embedded in the APK, Gradle configuration, repository, CI logs, or release metadata.
 
 ## 3. Build the personal APK
 
@@ -64,7 +58,7 @@ sha256sum app/build/outputs/apk/debug/app-debug.apk
 
 ## 4. Google Drive setup for the debug APK
 
-Google Drive support uses an Android OAuth client bound to both the package name and the certificate SHA-1. For the personal debug APK, register the **debug signing certificate SHA-1** for:
+Google Drive support remains separate from GitHub authentication. It uses an Android OAuth client bound to both the package name and the certificate SHA-1. For the personal debug APK, register the **debug signing certificate SHA-1** for:
 
 ```text
 com.skypie0102.githubbckp
@@ -80,7 +74,7 @@ Find the `debug` variant and copy its `SHA1` value into the Android OAuth client
 
 The SHA-1 belongs to the debug keystore on the machine that built the APK. If the debug keystore changes, the APK will have a different certificate fingerprint and the Google Android OAuth client must be updated with the new SHA-1 before Drive authorization will work for that build.
 
-No Google access token is stored by the app.
+No Google access token is persisted by GithubBckp.
 
 ## 5. Install the APK
 
@@ -102,32 +96,33 @@ If Android reports a signature mismatch, the installed copy was signed with a di
 
 Run these checks on the exact debug APK you intend to keep as the known-good personal build:
 
-1. Fresh install and GitHub Device Flow authorization.
-2. If Google Drive is used, confirm the debug SHA-1 is registered for the Android OAuth client and complete Drive authorization/upload successfully.
-3. On Android 13+, accept the notification permission prompt if you want backup-health alerts and confirm the app's **Backup health** notification channel is enabled.
-4. Repository discovery and selection, including at least one private repository if private backup is used.
-5. Manual source-snapshot backup to the normal destination.
-6. Manual Git-mirror backup containing representative history, branches/tags, and Git LFS if available.
-7. Verify each completed backup appears in history with the correct destination/provenance.
-8. Tap **Re-verify stored backup** for the source snapshot. Confirm the full remote artifact is read, the row records a `VERIFIED` result/timestamp, and no new remote backup object is created.
-9. Re-verify the Git mirror. Confirm the result reports successful remote-byte verification plus safe local mirror/module validation; the operation must not publish anything to GitHub.
-10. Export the backup audit JSON after re-verification and confirm `latestReverification` contains the recorded timestamp/result/detail. Exporting the JSON again must not itself perform another remote read.
-11. If retention has pruned an older artifact, confirm that historical row remains auditable but does not offer re-verification.
-12. Import a representative mirror, open **Recovery drill**, and confirm the UI distinguishes automatically republished modules from archival-only modules before publication.
-13. Run the drill to a new private repository. Confirm exact post-publication Git-ref verification, all applicable LFS objects are advertised for download, the bounded representative LFS sample is re-downloaded/re-hashed, and release/release-asset verification counts are reported.
-14. Confirm the drill target remains present for manual review and is not automatically deleted.
-15. Confirm the successful drill result remains visible after reopening the app. If practical, retry the same drill target to exercise resumable drill state; ordinary recovery for the same restored mirror must remain independently available because drill transactions use separate target-specific bindings.
-16. Configure an automatic backup, allow one scheduled run to complete, and confirm live run progress/history.
-17. Exercise a recoverable failure such as temporary network loss or an unavailable destination. Confirm a failure notification is shown after the failure is persisted, tapping it opens the app, then retry and confirm the final state is correct.
-18. Confirm repeated failures for the same repository/format do not create notification storms inside the six-hour rate-limit window.
-19. For the backup-health dashboard, confirm a successful repository reports protected, an intentionally old scheduled backup reports stale, and a failed attempt after the latest success reports failed until a later success clears it.
-20. Exercise or simulate an overdue repository and confirm the grouped overdue notification appears once, remains deduplicated on the next health check, and can notify again after the repository recovers and later becomes overdue again.
-21. Disable automatic backups and confirm overdue notification state is cleared; re-enable and confirm the new schedule receives a fresh two-cadence grace window for repositories without a verified backup.
-22. Reboot the device and confirm persisted authorization/settings/history/re-verification/drill results still behave as expected.
+1. Fresh install and enter a GitHub personal access token on the first-run setup screen.
+2. Confirm the app accepts the token, repository discovery works, and the PAT itself never appears in logs or exported reports.
+3. If Google Drive is used, confirm the debug SHA-1 is registered for the Android OAuth client and complete Drive authorization/upload successfully.
+4. On Android 13+, accept the notification permission prompt if you want backup-health alerts and confirm the app's **Backup health** notification channel is enabled.
+5. Repository discovery and selection, including at least one private repository if private backup is used.
+6. Manual source-snapshot backup to the normal destination.
+7. Manual Git-mirror backup containing representative history, branches/tags, and Git LFS if available.
+8. Verify each completed backup appears in history with the correct destination/provenance.
+9. Tap **Re-verify stored backup** for the source snapshot. Confirm the full remote artifact is read, the row records a `VERIFIED` result/timestamp, and no new remote backup object is created.
+10. Re-verify the Git mirror. Confirm the result reports successful remote-byte verification plus safe local mirror/module validation; the operation must not publish anything to GitHub.
+11. Export the backup audit JSON after re-verification and confirm `latestReverification` contains the recorded timestamp/result/detail. Exporting the JSON again must not itself perform another remote read.
+12. If retention has pruned an older artifact, confirm that historical row remains auditable but does not offer re-verification.
+13. Import a representative mirror, open **Recovery drill**, and confirm the UI distinguishes automatically republished modules from archival-only modules before publication.
+14. Run the drill to a new private repository. Confirm exact post-publication Git-ref verification, all applicable LFS objects are advertised for download, the bounded representative LFS sample is re-downloaded/re-hashed, and release/release-asset verification counts are reported.
+15. Confirm the drill target remains present for manual review and is not automatically deleted.
+16. Confirm the successful drill result remains visible after reopening the app. If practical, retry the same drill target to exercise resumable drill state; ordinary recovery for the same restored mirror must remain independently available because drill transactions use separate target-specific bindings.
+17. Configure an automatic backup, allow one scheduled run to complete, and confirm live run progress/history.
+18. Exercise a recoverable failure such as temporary network loss or an unavailable destination. Confirm a failure notification is shown after the failure is persisted, tapping it opens the app, then retry and confirm the final state is correct.
+19. Confirm repeated failures for the same repository/format do not create notification storms inside the six-hour rate-limit window.
+20. For the backup-health dashboard, confirm a successful repository reports protected, an intentionally old scheduled backup reports stale, and a failed attempt after the latest success reports failed until a later success clears it.
+21. Exercise or simulate an overdue repository and confirm the grouped overdue notification appears once, remains deduplicated on the next health check, and can notify again after the repository recovers and later becomes overdue again.
+22. Disable automatic backups and confirm overdue notification state is cleared; re-enable and confirm the new schedule receives a fresh two-cadence grace window for repositories without a verified backup.
+23. Reboot the device and confirm the encrypted PAT plus settings/history/re-verification/drill results still behave as expected.
 
 If notification permission is intentionally denied, backup execution must continue normally; only the alert surface is unavailable.
 
-A failure in backup integrity, on-demand re-verification, restore validation, recovery-drill verification, recovery target safety, authentication, Google Drive authorization when Drive is part of your setup, scheduled execution, persistence behavior, or another explicitly included feature is a personal-device blocker. Cosmetic work and features explicitly cut in [`ROADMAP.md`](ROADMAP.md) are not blockers.
+A failure in backup integrity, on-demand re-verification, restore validation, recovery-drill verification, recovery target safety, PAT authentication/permissions, Google Drive authorization when Drive is part of your setup, scheduled execution, persistence behavior, or another explicitly included feature is a personal-device blocker. Cosmetic work and features explicitly cut in [`ROADMAP.md`](ROADMAP.md) are not blockers.
 
 ## 7. Personal-use recovery promise
 

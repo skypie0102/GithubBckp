@@ -5,13 +5,6 @@ plugins {
     alias(libs.plugins.hilt)
 }
 
-val githubClientId = providers.gradleProperty("GITHUB_CLIENT_ID")
-    .orElse(providers.environmentVariable("GITHUB_CLIENT_ID"))
-    .getOrElse("")
-val githubClientIdForBuildConfig = githubClientId
-    .replace("\\", "\\\\")
-    .replace("\"", "\\\"")
-
 android {
     namespace = "com.skypie0102.githubbckp"
     compileSdk {
@@ -28,7 +21,6 @@ android {
         versionName = "0.2.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        buildConfigField("String", "GITHUB_CLIENT_ID", "\"$githubClientIdForBuildConfig\"")
     }
 
     buildTypes {
