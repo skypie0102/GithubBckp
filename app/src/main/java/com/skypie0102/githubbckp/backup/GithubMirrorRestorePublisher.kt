@@ -6,6 +6,7 @@ import com.skypie0102.githubbckp.github.GithubRestoreRepository
 import java.io.IOException
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.eclipse.jgit.transport.UsernamePasswordCredentialsProvider
@@ -35,28 +36,30 @@ class GithubMirrorRestorePublisher @Inject constructor(
         restoreId: String,
         repositoryName: String,
         isPrivate: Boolean,
+        transactionId: String = restoreId,
     ): GithubRestorePublishResult {
         // Verify the recovery-specific OAuth permission before repository
         // creation so an older token cannot leave an unused target behind.
         val recoveryToken = authManager.requireRecoveryAccessToken()
-        val existingTransaction = transactionStore.get(restoreId)
+        val existingTransaction = transactionStore.get(transactionId)
         val repository = if (existingTransaction == null) {
             repositoryGateway.createRepository(repositoryName, isPrivate)
         } else {
             if (existingTransaction.targetKind != RecoveryTargetKind.NEW_REPOSITORY) {
                 throw IOException(
-                    "This restore is already bound to existing target ${existingTransaction.repositoryFullName}",
+                    "This recovery transaction is already bound to existing target ${existingTransaction.repositoryFullName}",
                 )
             }
             resolveBoundRepository(existingTransaction)
         }
         val transaction = transactionStore.bind(
-            restoreId = restoreId,
+            restoreId = transactionId,
             targetKind = RecoveryTargetKind.NEW_REPOSITORY,
             repository = repository,
         )
         return publish(
             restoreId = restoreId,
+            transactionId = transactionId,
             repository = repository,
             initialTransaction = transaction,
             isResume = existingTransaction != null,
@@ -68,31 +71,33 @@ class GithubMirrorRestorePublisher @Inject constructor(
     suspend fun publishToExistingEmptyRepository(
         restoreId: String,
         repositoryFullName: String,
+        transactionId: String = restoreId,
     ): GithubRestorePublishResult {
         val recoveryToken = authManager.requireRecoveryAccessToken()
-        val existingTransaction = transactionStore.get(restoreId)
+        val existingTransaction = transactionStore.get(transactionId)
         val repository = if (existingTransaction == null) {
             repositoryGateway.getRepository(repositoryFullName)
         } else {
             if (existingTransaction.targetKind != RecoveryTargetKind.EXISTING_EMPTY_REPOSITORY) {
                 throw IOException(
-                    "This restore is already bound to new target ${existingTransaction.repositoryFullName}",
+                    "This recovery transaction is already bound to new target ${existingTransaction.repositoryFullName}",
                 )
             }
             if (!existingTransaction.repositoryFullName.equals(repositoryFullName.trim(), ignoreCase = true)) {
                 throw IOException(
-                    "This restore is already bound to ${existingTransaction.repositoryFullName}",
+                    "This recovery transaction is already bound to ${existingTransaction.repositoryFullName}",
                 )
             }
             resolveBoundRepository(existingTransaction)
         }
         val transaction = transactionStore.bind(
-            restoreId = restoreId,
+            restoreId = transactionId,
             targetKind = RecoveryTargetKind.EXISTING_EMPTY_REPOSITORY,
             repository = repository,
         )
         return publish(
             restoreId = restoreId,
+            transactionId = transactionId,
             repository = repository,
             initialTransaction = transaction,
             isResume = existingTransaction != null,
@@ -113,6 +118,7 @@ class GithubMirrorRestorePublisher @Inject constructor(
 
     private suspend fun publish(
         restoreId: String,
+        transactionId: String,
         repository: GithubRestoreRepository,
         initialTransaction: RecoveryTransaction,
         isResume: Boolean,
@@ -144,7 +150,7 @@ class GithubMirrorRestorePublisher @Inject constructor(
                         repositoryDirectory = repositoryDirectory,
                     )
                     transaction = transactionStore.markLfsPublished(
-                        restoreId = restoreId,
+                        restoreId = transactionId,
                         repositoryId = repository.id,
                         lfsObjectCount = lfsObjectCount,
                     )
@@ -165,7 +171,7 @@ class GithubMirrorRestorePublisher @Inject constructor(
                         )
                     }
                     transaction = transactionStore.markGitPublished(
-                        restoreId = restoreId,
+                        restoreId = transactionId,
                         repositoryId = repository.id,
                         result = push,
                     )
@@ -178,7 +184,7 @@ class GithubMirrorRestorePublisher @Inject constructor(
                         repositoryDirectory = repositoryDirectory,
                     )
                     transaction = transactionStore.markReleasesPublished(
-                        restoreId = restoreId,
+                        restoreId = transactionId,
                         repositoryId = repository.id,
                         result = releaseResult,
                     )
@@ -197,7 +203,8 @@ class GithubMirrorRestorePublisher @Inject constructor(
                     skippedReadOnlyRefs = transaction.skippedReadOnlyRefs,
                 )
             }
-        } catch (throwable: Throwable) {
+        } catch (throwable: Exception) {
+            if (throwable is CancellationException) throw throwable
             throw IOException(
                 "$failurePrefix: ${throwable.message ?: throwable.javaClass.simpleName}",
                 throwable,
