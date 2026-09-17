@@ -44,10 +44,9 @@ class BackupCoordinator @Inject constructor(
                 onProgress = { backupDao.updateBackupStatus(backupId, it) },
             )
 
-            // Existing verified objects are candidates for in-place replacement.
-            // The newest one is reused by providers that support it. Older
-            // duplicates from previous app versions are cleaned after the new
-            // bytes have been verified.
+            // Existing verified objects are replacement candidates. Providers may
+            // update one in place or stage a distinct object, but older rows are
+            // not retired until the new remote bytes independently verify.
             val previousBackups = backupDao.getCurrentRemoteBackups(request.repository.id, request.type)
             val previousRemote = previousBackups.firstOrNull()?.toRemoteBackupOrNull()
 
@@ -62,9 +61,10 @@ class BackupCoordinator @Inject constructor(
                 "Remote backup verification failed"
             }
 
-            val cleanupWarnings = cleanupSupersededBackups(previousBackups, remoteBackup)
-            val warnings = artifact.warnings + cleanupWarnings
-
+            // Persist the verified current mirror before best-effort cleanup. A
+            // crash during duplicate cleanup must never leave Room claiming that
+            // no verified current mirror exists when the new remote object is good.
+            val creationWarnings = artifact.warnings.toWarningMessage()
             backupDao.completeBackup(
                 backupId = backupId,
                 status = BackupStatus.COMPLETED,
@@ -75,11 +75,20 @@ class BackupCoordinator @Inject constructor(
                 remoteFileName = remoteBackup.name,
                 remoteSizeBytes = remoteBackup.sizeBytes,
                 remoteChecksumMd5 = remoteBackup.checksumMd5,
-                warningMessage = warnings
-                    .takeIf { it.isNotEmpty() }
-                    ?.joinToString("\n")
-                    ?.take(MAX_WARNING_LENGTH),
+                warningMessage = creationWarnings,
             )
+
+            val cleanupWarnings = cleanupSupersededBackups(previousBackups, remoteBackup)
+            if (cleanupWarnings.isNotEmpty()) {
+                // Warning persistence is post-commit bookkeeping. Failure to write
+                // the warning must not downgrade an already verified mirror.
+                runCatching {
+                    backupDao.updateCompletedBackupWarning(
+                        backupId = backupId,
+                        warningMessage = (artifact.warnings + cleanupWarnings).toWarningMessage(),
+                    )
+                }
+            }
             true
         } catch (throwable: Throwable) {
             backupDao.failBackup(
@@ -101,23 +110,27 @@ class BackupCoordinator @Inject constructor(
     ): List<String> = buildList {
         previousBackups.forEach { backup ->
             val previous = backup.toRemoteBackupOrNull() ?: return@forEach
-            if (previous.provider == current.provider && previous.id == current.id) {
-                // This provider updated the existing object in place. The old
-                // history row no longer owns a distinct remote artifact.
+            val cleanup = runCatching {
+                if (previous.provider != current.provider || previous.id != current.id) {
+                    storageProvider.delete(previous)
+                }
+                // If the provider updated the object in place, this old history
+                // row still stops owning the shared remote identity.
                 backupDao.markRemoteDeleted(backup.id, System.currentTimeMillis())
-                return@forEach
             }
-            runCatching {
-                storageProvider.delete(previous)
-                backupDao.markRemoteDeleted(backup.id, System.currentTimeMillis())
-            }.onFailure { throwable ->
+            cleanup.onFailure { throwable ->
                 add(
-                    "Verified the current mirror, but could not remove an older duplicate " +
+                    "Verified the current mirror, but could not retire an older duplicate " +
                         "${previous.name}: ${throwable.message ?: throwable.javaClass.simpleName}",
                 )
             }
         }
     }
+
+    private fun List<String>.toWarningMessage(): String? =
+        takeIf { it.isNotEmpty() }
+            ?.joinToString("\n")
+            ?.take(MAX_WARNING_LENGTH)
 
     private fun BackupEntity.toRemoteBackupOrNull(): RemoteBackup? {
         val provider = storageProvider ?: return null
