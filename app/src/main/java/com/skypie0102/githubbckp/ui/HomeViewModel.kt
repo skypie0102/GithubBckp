@@ -51,7 +51,8 @@ data class HomeUiState(
     val storageDestination: StorageDestination = StorageDestination.GOOGLE_DRIVE,
     val documentTreeConfigured: Boolean = false,
     val documentTreeName: String? = null,
-    val backupType: BackupType = BackupType.SOURCE_ARCHIVE,
+    // Kept temporarily for UI/database compatibility; new backups are mirror-only.
+    val backupType: BackupType = BackupType.GIT_MIRROR,
     val scheduleEnabled: Boolean = false,
     val scheduleCadence: BackupCadence = BackupCadence.DAILY,
     val scheduledBackupType: BackupType = BackupType.GIT_MIRROR,
@@ -99,9 +100,10 @@ class HomeViewModel @Inject constructor(
             storageDestination = storagePreferences.destination(),
             documentTreeConfigured = storagePreferences.isDocumentTreeConfigured(),
             documentTreeName = storagePreferences.documentTreeDisplayName(),
+            backupType = BackupType.GIT_MIRROR,
             scheduleEnabled = initialSchedule.enabled,
             scheduleCadence = initialSchedule.cadence,
-            scheduledBackupType = initialSchedule.backupType,
+            scheduledBackupType = BackupType.GIT_MIRROR,
             scheduledRunStatus = backupScheduler.scheduledRunStatus(),
             retentionKeepCount = retentionPreferences.keepCount(),
         ),
@@ -221,19 +223,21 @@ class HomeViewModel @Inject constructor(
     }
 
     fun setBackupType(type: BackupType) {
-        _state.update { it.copy(backupType = type) }
+        if (type != BackupType.GIT_MIRROR) {
+            _state.update { it.copy(backupType = BackupType.GIT_MIRROR, message = "Source snapshots were removed; backups use Git mirrors only") }
+            return
+        }
+        _state.update { it.copy(backupType = BackupType.GIT_MIRROR) }
     }
 
     fun setRetentionKeepCount(count: Int) {
-        retentionPreferences.setKeepCount(count)
+        // Legacy control kept until the old UI is removed. A one-mirror model
+        // supersedes retention, so always keep the logical current object only.
+        retentionPreferences.setKeepCount(RetentionPreferences.KEEP_ALL)
         _state.update {
             it.copy(
-                retentionKeepCount = count,
-                message = if (count == RetentionPreferences.KEEP_ALL) {
-                    "Automatic retention disabled; all verified backups will be kept"
-                } else {
-                    "Retention will keep the newest $count verified backups per repository and format"
-                },
+                retentionKeepCount = RetentionPreferences.KEEP_ALL,
+                message = "Retention copies were removed; each repository now keeps one current mirror",
             )
         }
     }
@@ -260,9 +264,8 @@ class HomeViewModel @Inject constructor(
             BackupScheduleSettings(
                 enabled = enabled,
                 cadence = state.scheduleCadence,
-                backupType = state.scheduledBackupType,
             ),
-            message = if (enabled) "Automatic backups enabled" else "Automatic backups disabled",
+            message = if (enabled) "Automatic mirror updates enabled" else "Automatic backups disabled",
         )
     }
 
@@ -272,22 +275,20 @@ class HomeViewModel @Inject constructor(
             BackupScheduleSettings(
                 enabled = state.scheduleEnabled,
                 cadence = cadence,
-                backupType = state.scheduledBackupType,
             ),
-            message = "Automatic backup cadence set to ${cadence.displayName()}",
+            message = "Automatic mirror cadence set to ${cadence.displayName()}",
         )
     }
 
     fun setScheduledBackupType(type: BackupType) {
-        val state = _state.value
-        saveSchedule(
-            BackupScheduleSettings(
-                enabled = state.scheduleEnabled,
-                cadence = state.scheduleCadence,
-                backupType = type,
-            ),
-            message = "Automatic backups will use ${type.displayName()}",
-        )
+        if (type != BackupType.GIT_MIRROR) {
+            _state.update {
+                it.copy(
+                    scheduledBackupType = BackupType.GIT_MIRROR,
+                    message = "Snapshot schedules were removed; automatic backups update the Git mirror",
+                )
+            }
+        }
     }
 
     private fun saveSchedule(settings: BackupScheduleSettings, message: String) {
@@ -296,7 +297,7 @@ class HomeViewModel @Inject constructor(
             current.copy(
                 scheduleEnabled = settings.enabled,
                 scheduleCadence = settings.cadence,
-                scheduledBackupType = settings.backupType,
+                scheduledBackupType = BackupType.GIT_MIRROR,
                 backupHealth = summarizeBackupHealth(
                     repositories = current.repositories,
                     backups = backupHealthHistory,
@@ -335,7 +336,9 @@ class HomeViewModel @Inject constructor(
     fun completeDriveAuthorization(data: Intent?) {
         viewModelScope.launch {
             runBusy {
-                val resultData = data ?: error("Google Drive authorization returned no data")
+                val resultData = data ?: error(
+                    "Google Drive authorization returned no data. Check ${driveAuthManager.oauthConfigurationHint()} in the Google Android OAuth client.",
+                )
                 driveAuthManager.completeAuthorization(resultData)
                 storagePreferences.setDestination(StorageDestination.GOOGLE_DRIVE)
                 _state.update {
@@ -350,7 +353,11 @@ class HomeViewModel @Inject constructor(
     }
 
     fun driveAuthorizationCancelled() {
-        _state.update { it.copy(message = "Google Drive authorization was cancelled") }
+        _state.update {
+            it.copy(
+                message = "Google Drive authorization was cancelled. If account selection closes unexpectedly, verify ${driveAuthManager.oauthConfigurationHint()}.",
+            )
+        }
     }
 
     fun chooseBackupFolder(uri: Uri) {
@@ -402,12 +409,9 @@ class HomeViewModel @Inject constructor(
                 _state.update { it.copy(message = "Choose a backup folder first") }
             selected.isEmpty() -> _state.update { it.copy(message = "Select at least one repository") }
             else -> {
-                backupScheduler.enqueue(
-                    repositoryIds = selected.map { it.githubId },
-                    type = state.backupType,
-                )
+                backupScheduler.enqueue(repositoryIds = selected.map { it.githubId })
                 _state.update {
-                    it.copy(message = "Queued ${selected.size} ${state.backupType.displayName()} backup${if (selected.size == 1) "" else "s"}")
+                    it.copy(message = "Queued ${selected.size} Git mirror update${if (selected.size == 1) "" else "s"}")
                 }
             }
         }
@@ -655,11 +659,6 @@ class HomeViewModel @Inject constructor(
         val parts = value.trim().split('/')
         return parts.size == 2 && parts.all { it.isNotBlank() }
     }
-}
-
-private fun BackupType.displayName(): String = when (this) {
-    BackupType.SOURCE_ARCHIVE -> "source snapshot"
-    BackupType.GIT_MIRROR -> "Git mirror"
 }
 
 private fun BackupCadence.displayName(): String = when (this) {
