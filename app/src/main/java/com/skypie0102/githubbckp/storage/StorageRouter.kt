@@ -2,6 +2,7 @@ package com.skypie0102.githubbckp.storage
 
 import com.skypie0102.githubbckp.backup.BackupArtifact
 import com.skypie0102.githubbckp.storage.drive.GoogleDriveStorageProvider
+import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -18,6 +19,10 @@ class StorageRouter @Inject constructor(
 
     override suspend fun verify(remoteBackup: RemoteBackup): Boolean =
         provider(remoteBackup.provider).verify(remoteBackup)
+
+    override suspend fun download(remoteBackup: RemoteBackup, destination: File) {
+        provider(remoteBackup.provider).download(remoteBackup, destination)
+    }
 
     override suspend fun delete(remoteBackup: RemoteBackup) {
         provider(remoteBackup.provider).delete(remoteBackup)

@@ -34,20 +34,22 @@ Implemented behavior:
 - disabling automatic backups clears overdue-notification state;
 - tapping an alert opens the app's Home/backup-health surface.
 
+### P1 — On-demand backup re-verification — #35 — complete
+
+Completed, non-pruned backups with persisted provider/checksum metadata can be freshly re-verified from Recent backups.
+
+Implemented behavior:
+
+- the app reads the artifact through the provider that originally stored it rather than the currently selected destination;
+- document-tree and Google Drive artifacts are fully streamed into temporary app-cache storage;
+- byte size, SHA-256, and MD5 are recomputed locally and compared with the persisted verified backup metadata;
+- Git mirrors additionally run through the existing safe local mirror/module validator without publishing anything to GitHub;
+- the temporary downloaded artifact is deleted after the check;
+- the latest `VERIFIED` or `FAILED` result, timestamp, and detail are persisted in schema v9 and shown in Recent backups;
+- exported backup-audit JSON includes the latest recorded re-verification result;
+- re-verification never changes the historical `COMPLETED` backup result and never mutates the remote artifact.
+
 ## Active roadmap
-
-### P1 — On-demand backup re-verification — #35
-
-Goal: prove that an older stored artifact is still present and readable, instead of relying only on verification performed when it was created.
-
-Acceptance criteria:
-
-- select a completed, non-pruned backup from history;
-- re-open or re-download the stored artifact through its original provider;
-- verify persisted size/checksum data;
-- for Git mirrors, optionally run the same safe local mirror/module validation used by restore without publishing anything;
-- persist/display the latest re-verification result and timestamp;
-- never mutate the remote backup while verifying it.
 
 ### P1 — Guided disaster-recovery drill — #36
 
@@ -87,4 +89,4 @@ These cuts are deliberate safety/maintenance decisions, not release blockers.
 
 ## Priority rule
 
-After the two remaining active roadmap items are complete, feature development should stop by default. New features require a concrete problem observed during personal use. Reliability fixes, compatibility fixes, security fixes, and recovery-safety improvements remain in scope at any time.
+After the remaining active roadmap item is complete, feature development should stop by default. New features require a concrete problem observed during personal use. Reliability fixes, compatibility fixes, security fixes, and recovery-safety improvements remain in scope at any time.

@@ -6,7 +6,9 @@ import androidx.documentfile.provider.DocumentFile
 import com.skypie0102.githubbckp.backup.BackupArtifact
 import com.skypie0102.githubbckp.backup.calculateDigests
 import dagger.hilt.android.qualifiers.ApplicationContext
+import java.io.File
 import java.io.FileInputStream
+import java.io.FileOutputStream
 import java.io.IOException
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -74,6 +76,18 @@ class DocumentTreeStorageProvider @Inject constructor(
         digests.sizeBytes == remoteBackup.sizeBytes &&
             digests.sha256.equals(remoteBackup.checksumSha256, ignoreCase = true) &&
             digests.md5.equals(remoteBackup.checksumMd5, ignoreCase = true)
+    }
+
+    override suspend fun download(remoteBackup: RemoteBackup, destination: File): Unit = withContext(Dispatchers.IO) {
+        destination.parentFile?.mkdirs()
+        val input = context.contentResolver.openInputStream(Uri.parse(remoteBackup.id))
+            ?: throw IOException("Backup file is no longer available")
+        input.buffered().use { source ->
+            FileOutputStream(destination).buffered().use { output ->
+                source.copyTo(output, bufferSize = BUFFER_SIZE)
+            }
+        }
+        Unit
     }
 
     override suspend fun delete(remoteBackup: RemoteBackup) = withContext(Dispatchers.IO) {

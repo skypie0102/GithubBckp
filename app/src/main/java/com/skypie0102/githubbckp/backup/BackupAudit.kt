@@ -27,6 +27,9 @@ data class BackupAuditSnapshot(
     val remoteDeletedAtEpochMs: Long?,
     val warningMessage: String?,
     val errorMessage: String?,
+    val lastReverifiedAtEpochMs: Long?,
+    val lastReverificationStatus: String?,
+    val lastReverificationMessage: String?,
 )
 
 fun BackupEntity.toBackupAuditSnapshot(repository: RepositoryEntity?): BackupAuditSnapshot {
@@ -76,6 +79,9 @@ fun BackupEntity.toBackupAuditSnapshot(repository: RepositoryEntity?): BackupAud
         remoteDeletedAtEpochMs = remoteDeletedAtEpochMs,
         warningMessage = warningMessage,
         errorMessage = errorMessage,
+        lastReverifiedAtEpochMs = lastReverifiedAtEpochMs,
+        lastReverificationStatus = lastReverificationStatus?.name,
+        lastReverificationMessage = lastReverificationMessage,
     )
 }
 
@@ -108,7 +114,7 @@ fun BackupAuditSnapshot.toBackupAuditJson(
             },
         )
 
-    val verification = JSONObject()
+    val creationVerification = JSONObject()
         .putNullable("artifactSha256", checksumSha256)
         .putNullable("providerMd5", remoteChecksumMd5)
         .put(
@@ -117,6 +123,19 @@ fun BackupAuditSnapshot.toBackupAuditJson(
                 "PERSISTED_VERIFIED_HISTORY"
             } else {
                 "NOT_COMPLETED_OR_NOT_VERIFIED"
+            },
+        )
+
+    val reverification = JSONObject()
+        .putNullable("checkedAtEpochMs", lastReverifiedAtEpochMs)
+        .putNullable("status", lastReverificationStatus)
+        .putNullable("detail", lastReverificationMessage)
+        .put(
+            "state",
+            if (lastReverifiedAtEpochMs == null || lastReverificationStatus == null) {
+                "NOT_RUN"
+            } else {
+                "RECORDED"
             },
         )
 
@@ -133,7 +152,7 @@ fun BackupAuditSnapshot.toBackupAuditJson(
 
     val limitations = JSONArray()
         .put(
-            "This report is generated from persisted app history; exporting it does not re-download or re-verify the remote backup artifact.",
+            "Exporting this report does not itself access the remote artifact; it reports the original verification plus the latest separately recorded on-demand re-verification result, if one exists.",
         )
     when (repositoryMetadataSource) {
         "current-local-repository-cache" -> limitations.put(
@@ -159,13 +178,14 @@ fun BackupAuditSnapshot.toBackupAuditJson(
     }
 
     return JSONObject()
-        .put("formatVersion", 4)
+        .put("formatVersion", 5)
         .put("reportType", "github-backup-artifact-audit")
         .put("generatedAtEpochMs", generatedAtEpochMs)
         .put("repository", repository)
         .put("backup", backup)
         .put("storage", storage)
-        .put("integrityVerification", verification)
+        .put("integrityVerification", creationVerification)
+        .put("latestReverification", reverification)
         .put("limitations", limitations)
 }
 

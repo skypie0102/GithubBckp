@@ -1,6 +1,7 @@
 package com.skypie0102.githubbckp.storage
 
 import com.skypie0102.githubbckp.backup.BackupArtifact
+import java.io.File
 
 enum class StorageDestination {
     GOOGLE_DRIVE,
@@ -23,6 +24,8 @@ interface StorageProvider {
     ): RemoteBackup
 
     suspend fun verify(remoteBackup: RemoteBackup): Boolean
+
+    suspend fun download(remoteBackup: RemoteBackup, destination: File)
 
     suspend fun delete(remoteBackup: RemoteBackup)
 }

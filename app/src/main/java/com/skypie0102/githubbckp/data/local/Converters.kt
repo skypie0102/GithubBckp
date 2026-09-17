@@ -2,6 +2,7 @@ package com.skypie0102.githubbckp.data.local
 
 import androidx.room.TypeConverter
 import com.skypie0102.githubbckp.backup.BackupOrigin
+import com.skypie0102.githubbckp.backup.BackupReverificationStatus
 import com.skypie0102.githubbckp.backup.BackupStatus
 import com.skypie0102.githubbckp.backup.BackupType
 import com.skypie0102.githubbckp.storage.StorageDestination
@@ -16,4 +17,7 @@ class Converters {
     @TypeConverter fun storageDestinationToString(value: StorageDestination?): String? = value?.name
     @TypeConverter fun stringToStorageDestination(value: String?): StorageDestination? =
         value?.let(StorageDestination::valueOf)
+    @TypeConverter fun backupReverificationStatusToString(value: BackupReverificationStatus?): String? = value?.name
+    @TypeConverter fun stringToBackupReverificationStatus(value: String?): BackupReverificationStatus? =
+        value?.let(BackupReverificationStatus::valueOf)
 }

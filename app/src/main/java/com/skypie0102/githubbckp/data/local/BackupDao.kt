@@ -6,6 +6,7 @@ import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Transaction
 import androidx.room.Upsert
+import com.skypie0102.githubbckp.backup.BackupReverificationStatus
 import com.skypie0102.githubbckp.backup.BackupStatus
 import com.skypie0102.githubbckp.backup.BackupType
 import kotlinx.coroutines.flow.Flow
@@ -47,6 +48,9 @@ interface BackupDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertBackup(backup: BackupEntity): Long
+
+    @Query("SELECT * FROM backups WHERE id = :backupId LIMIT 1")
+    suspend fun getBackup(backupId: Long): BackupEntity?
 
     @Query("UPDATE backups SET status = :status WHERE id = :backupId")
     suspend fun updateBackupStatus(backupId: Long, status: BackupStatus)
@@ -94,6 +98,22 @@ interface BackupDao {
         status: BackupStatus,
         completedAtEpochMs: Long,
         errorMessage: String,
+    )
+
+    @Query(
+        """
+        UPDATE backups
+        SET lastReverifiedAtEpochMs = :reverifiedAtEpochMs,
+            lastReverificationStatus = :status,
+            lastReverificationMessage = :message
+        WHERE id = :backupId
+        """,
+    )
+    suspend fun recordReverification(
+        backupId: Long,
+        reverifiedAtEpochMs: Long,
+        status: BackupReverificationStatus,
+        message: String,
     )
 
     @Query(

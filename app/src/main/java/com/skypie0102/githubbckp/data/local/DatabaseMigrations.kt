@@ -52,4 +52,12 @@ object DatabaseMigrations {
             db.execSQL("CREATE INDEX IF NOT EXISTS index_backups_scheduledRunId ON backups(scheduledRunId)")
         }
     }
+
+    val MIGRATION_8_9 = object : Migration(8, 9) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE backups ADD COLUMN lastReverifiedAtEpochMs INTEGER")
+            db.execSQL("ALTER TABLE backups ADD COLUMN lastReverificationStatus TEXT")
+            db.execSQL("ALTER TABLE backups ADD COLUMN lastReverificationMessage TEXT")
+        }
+    }
 }
