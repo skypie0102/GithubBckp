@@ -105,7 +105,11 @@ class GoogleDriveStorageProvider @Inject constructor(
         val connection = open("$FILES_URL/${path(remoteBackup.id)}", "DELETE", token)
         try {
             val code = connection.responseCode
-            if (code !in 200..299) {
+            // Cleanup may be retried after the file was already removed (for
+            // example, if deletion succeeded but marking the old Room row did not).
+            // Treat an already-absent file as successful deletion so cleanup can
+            // converge and retire the historical row on a later pass.
+            if (code != HttpURLConnection.HTTP_NOT_FOUND && code !in 200..299) {
                 val error = connection.errorStream?.bufferedReader()?.use { it.readText() }.orEmpty()
                 throw IOException("Drive delete HTTP $code: ${error.take(300)}")
             }
