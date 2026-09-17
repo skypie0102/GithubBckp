@@ -44,7 +44,9 @@ class GitMirrorBackupEngine @Inject constructor(
         val safeName = "${request.repository.owner}-${request.repository.name}"
             .replace(Regex("[^A-Za-z0-9._-]"), "_")
         val mirrorDirectory = File(workingDirectory, "$safeName.git")
-        val archive = File(workingDirectory, "$safeName-$createdAt.mirror.zip")
+        // The remote object has a stable name. Repeated backups update this
+        // one logical mirror instead of creating timestamped copies.
+        val archive = File(workingDirectory, "$safeName.mirror.zip")
         val token = githubAuthManager.requireAccessToken()
 
         onProgress(BackupStatus.DOWNLOADING)
