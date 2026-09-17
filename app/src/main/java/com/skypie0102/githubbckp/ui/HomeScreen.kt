@@ -83,8 +83,11 @@ fun HomeScreen(
     val driveLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartIntentSenderForResult(),
     ) { result ->
-        if (result.resultCode == Activity.RESULT_OK) viewModel.completeDriveAuthorization(result.data)
-        else viewModel.driveAuthorizationCancelled()
+        if (result.resultCode == Activity.RESULT_OK) {
+            viewModel.completeDriveAuthorization(result.data)
+        } else {
+            viewModel.driveAuthorizationCancelled()
+        }
     }
     val folderLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocumentTree(),
@@ -108,7 +111,7 @@ fun HomeScreen(
                 val report = restore.toAuditSnapshot().toAuditJson().toString(2)
                 context.contentResolver.openOutputStream(uri, "wt")
                     ?.bufferedWriter()
-                    ?.use { it.write(report) }
+                    ?.use { writer -> writer.write(report) }
                     ?: error("Unable to create audit report")
             }.onSuccess {
                 Toast.makeText(context, "Restore audit report exported", Toast.LENGTH_SHORT).show()
@@ -134,7 +137,7 @@ fun HomeScreen(
                     .toString(2)
                 context.contentResolver.openOutputStream(uri, "wt")
                     ?.bufferedWriter()
-                    ?.use { it.write(report) }
+                    ?.use { writer -> writer.write(report) }
                     ?: error("Unable to create backup audit report")
             }.onSuccess {
                 Toast.makeText(context, "Backup audit report exported", Toast.LENGTH_SHORT).show()
@@ -156,7 +159,7 @@ fun HomeScreen(
         ) {
             item {
                 Text(
-                    "One recoverable Git mirror per repository. Manual and automatic backups update that same copy.",
+                    text = "Keep one recoverable Git mirror of each selected repository outside GitHub.",
                     style = MaterialTheme.typography.headlineSmall,
                 )
             }
@@ -185,20 +188,38 @@ fun HomeScreen(
 
             item { Text("GitHub", style = MaterialTheme.typography.titleLarge) }
             item {
-                ConnectionCard(
-                    title = "Repository access",
-                    detail = if (state.githubConnected) {
-                        "Connected with a personal access token"
-                    } else {
-                        "Not connected"
-                    },
-                    action = if (state.githubConnected) "Refresh repositories" else "Set up GitHub token",
-                    enabled = !state.busy,
-                    onClick = {
-                        if (state.githubConnected) viewModel.refreshRepositories()
-                        else onManageGithubToken()
-                    },
-                )
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        Text(
+                            if (state.githubConnected) "Connected" else "Not connected",
+                            style = MaterialTheme.typography.titleMedium,
+                        )
+                        Text(
+                            if (state.githubConnected) {
+                                "Repository access uses your encrypted personal access token."
+                            } else {
+                                "Add a GitHub personal access token before backing up repositories."
+                            },
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            if (state.githubConnected) {
+                                OutlinedButton(
+                                    onClick = viewModel::refreshRepositories,
+                                    enabled = !state.busy,
+                                ) {
+                                    Text("Refresh repositories")
+                                }
+                            }
+                            OutlinedButton(onClick = onManageGithubToken, enabled = !state.busy) {
+                                Text(if (state.githubConnected) "Manage GitHub token" else "Set GitHub token")
+                            }
+                        }
+                    }
+                }
             }
 
             item { Text("Backup destination", style = MaterialTheme.typography.titleLarge) }
@@ -219,9 +240,7 @@ fun HomeScreen(
                     onClick = {
                         when {
                             !state.driveConnected || driveSelected -> viewModel.connectDrive { pendingIntent ->
-                                driveLauncher.launch(
-                                    IntentSenderRequest.Builder(pendingIntent.intentSender).build(),
-                                )
+                                driveLauncher.launch(IntentSenderRequest.Builder(pendingIntent.intentSender).build())
                             }
                             else -> viewModel.useGoogleDrive()
                         }
@@ -233,10 +252,7 @@ fun HomeScreen(
                 ConnectionCard(
                     title = "Backup folder",
                     detail = buildString {
-                        append(
-                            state.documentTreeName
-                                ?: if (state.documentTreeConfigured) "Configured" else "Not selected",
-                        )
+                        append(state.documentTreeName ?: if (state.documentTreeConfigured) "Configured" else "Not selected")
                         if (folderSelected) append(" • selected")
                     },
                     action = when {
@@ -252,21 +268,30 @@ fun HomeScreen(
                 )
             }
 
+            item {
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Text("Mirror-only backups", style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            "Each repository has one current .mirror.zip object. Manual and automatic backups update that same logical object instead of creating timestamped copies.",
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        Text(
+                            "The mirror preserves Git refs and history, referenced Git LFS objects, and supported wiki, release, and discussion metadata.",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                }
+            }
+
             if (state.busy) {
                 item {
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
                         CircularProgressIndicator()
                     }
-                }
-            }
-
-            item {
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("Git mirror", style = MaterialTheme.typography.titleLarge)
-                    Text(
-                        "The mirror preserves Git refs/history and bundles verified Git LFS objects plus supported wiki, release, and discussion metadata. Source snapshots and multi-copy retention are no longer created.",
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
                 }
             }
 
@@ -282,7 +307,7 @@ fun HomeScreen(
             }
 
             if (state.repositories.isEmpty()) {
-                item { Text("Refresh GitHub to discover repositories.") }
+                item { Text("Connect GitHub and refresh to discover repositories.") }
             } else {
                 item {
                     OutlinedTextField(
@@ -329,7 +354,7 @@ fun HomeScreen(
                 }
             }
 
-            item { Text("Automatic mirror updates", style = MaterialTheme.typography.titleLarge) }
+            item { Text("Automatic backups", style = MaterialTheme.typography.titleLarge) }
             item {
                 Card(modifier = Modifier.fillMaxWidth()) {
                     Row(
@@ -338,9 +363,9 @@ fun HomeScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
-                            Text("Scheduled updates", style = MaterialTheme.typography.titleMedium)
+                            Text("Automatic mirror updates", style = MaterialTheme.typography.titleMedium)
                             Text(
-                                "Updates the same mirror for each selected repository.",
+                                "Updates the same mirror for every selected repository.",
                                 style = MaterialTheme.typography.bodySmall,
                             )
                             state.scheduledRunStatus?.let { status ->
@@ -376,15 +401,15 @@ fun HomeScreen(
             }
             item {
                 Text(
-                    "Android schedules periodic work opportunistically. Automatic updates require unmetered connectivity and adequate battery/storage.",
+                    "Android runs periodic work opportunistically. Automatic mirror updates require unmetered connectivity and adequate battery/storage.",
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
 
-            item { Text("Recovery", style = MaterialTheme.typography.titleLarge) }
+            item { Text("Restore Git mirror", style = MaterialTheme.typography.titleLarge) }
             item {
                 Text(
-                    "Import a mirror created by this app to validate it locally before restoring it to GitHub.",
+                    "Choose a .mirror.zip created by this app. The archive is copied into private app storage and verified before it is kept for recovery.",
                     style = MaterialTheme.typography.bodyMedium,
                 )
             }
@@ -392,11 +417,7 @@ fun HomeScreen(
                 OutlinedButton(
                     onClick = {
                         restoreLauncher.launch(
-                            arrayOf(
-                                "application/zip",
-                                "application/x-zip-compressed",
-                                "application/octet-stream",
-                            ),
+                            arrayOf("application/zip", "application/x-zip-compressed", "application/octet-stream"),
                         )
                     },
                     enabled = !state.busy,
@@ -406,7 +427,7 @@ fun HomeScreen(
                 }
             }
             if (state.restoredMirrors.isNotEmpty()) {
-                item { Text("Validated mirrors", style = MaterialTheme.typography.titleMedium) }
+                item { Text("Restored mirrors", style = MaterialTheme.typography.titleMedium) }
                 items(state.restoredMirrors, key = { it.id }) { restore ->
                     RestoredMirrorRow(
                         restore = restore,
@@ -440,7 +461,7 @@ fun HomeScreen(
             }
 
             if (state.recentBackups.isNotEmpty()) {
-                item { Text("Recent activity", style = MaterialTheme.typography.titleLarge) }
+                item { Text("Recent backup activity", style = MaterialTheme.typography.titleLarge) }
                 items(state.recentBackups.take(10), key = { it.id }) { backup ->
                     val repository = state.repositories.firstOrNull { it.githubId == backup.repositoryId }
                     BackupRow(
@@ -462,17 +483,6 @@ fun HomeScreen(
                             null
                         },
                     )
-                }
-            }
-
-            item { Text("Account", style = MaterialTheme.typography.titleLarge) }
-            item {
-                OutlinedButton(
-                    onClick = onManageGithubToken,
-                    enabled = !state.busy,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text("Manage GitHub token")
                 }
             }
         }
@@ -501,7 +511,7 @@ private fun GithubPublishCard(
         ) {
             Text("Restore mirror to GitHub", style = MaterialTheme.typography.titleMedium)
             Text(
-                "Recovery only starts with a new or provably empty target. It restores supported LFS, Git refs, and release data without force-pushing an existing repository.",
+                "Recovery only writes to a newly created repository or an existing empty repository.",
                 style = MaterialTheme.typography.bodySmall,
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -531,10 +541,7 @@ private fun GithubPublishCard(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("Private repository")
-                        Text("Recommended for recovery tests.", style = MaterialTheme.typography.bodySmall)
-                    }
+                    Text("Private repository")
                     Switch(checked = isPrivate, onCheckedChange = onPrivateChange, enabled = !busy)
                 }
             } else {
@@ -542,7 +549,7 @@ private fun GithubPublishCard(
                     value = existingRepository,
                     onValueChange = onExistingRepositoryChange,
                     label = { Text("Existing owner/repository") },
-                    supportingText = { Text("The target must be empty when recovery starts.") },
+                    supportingText = { Text("The target must be empty before recovery starts.") },
                     singleLine = true,
                     enabled = !busy,
                     modifier = Modifier.fillMaxWidth(),
@@ -593,13 +600,15 @@ private fun RestoredMirrorRow(
         Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(restore.archiveName, style = MaterialTheme.typography.titleSmall)
             Text("${restore.refCount} refs • ${restore.lfsObjectCount} LFS objects")
+            if (restore.wikiRefCount > 0) {
+                Text("Wiki: ${restore.wikiRefCount} refs", style = MaterialTheme.typography.bodySmall)
+            }
             if (restore.releaseCount > 0) {
                 Text(
-                    "${restore.releaseCount} releases • ${restore.releaseAssetCount} assets",
+                    "Releases: ${restore.releaseCount} • assets: ${restore.releaseAssetCount}",
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
-            Text("Validated and stored privately on this device.", style = MaterialTheme.typography.bodySmall)
             Button(onClick = onPublish, enabled = !busy) { Text("Restore to GitHub") }
             OutlinedButton(onClick = onExportAudit, enabled = !busy) { Text("Export audit JSON") }
             OutlinedButton(onClick = onDelete, enabled = !busy) { Text("Delete restored copy") }
@@ -623,9 +632,9 @@ private fun BackupRow(
             backup.storageProvider?.let { provider ->
                 Text(
                     if (backup.remoteDeletedAtEpochMs == null) {
-                        "Current object via ${provider.displayName()}"
+                        "Current object stored via ${provider.displayName()}"
                     } else {
-                        "Superseded history entry"
+                        "Superseded by a newer mirror update"
                     },
                     style = MaterialTheme.typography.bodySmall,
                 )
@@ -649,7 +658,7 @@ private fun BackupRow(
                 )
             }
             backup.warningMessage?.let { warning ->
-                Text(warning, style = MaterialTheme.typography.bodySmall)
+                Text("Completeness: $warning", style = MaterialTheme.typography.bodySmall)
             }
             backup.errorMessage?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             onReverify?.let {
@@ -671,7 +680,7 @@ private fun ScheduledBackupRunStatus.displayText(): String {
         ScheduledBackupRunOutcome.QUEUED ->
             "queued $repositoryCount repositor${if (repositoryCount == 1) "y" else "ies"}"
         ScheduledBackupRunOutcome.SKIPPED_NO_REPOSITORIES ->
-            "skipped because no selected repositories were found"
+            "skipped because no selected, available repositories were found"
         ScheduledBackupRunOutcome.SKIPPED_NOT_READY -> when (blockReason) {
             ScheduledBackupBlockReason.GITHUB_DISCONNECTED -> "skipped because GitHub is disconnected"
             ScheduledBackupBlockReason.DRIVE_DISCONNECTED -> "skipped because Google Drive needs authorization"
@@ -679,7 +688,9 @@ private fun ScheduledBackupRunStatus.displayText(): String {
             null -> "skipped because backup prerequisites were unavailable"
         }
     }
-    val runSuffix = shortScheduledRunId(scheduledRunId)?.let { " • run $it" }.orEmpty()
+    val runSuffix = shortScheduledRunId(scheduledRunId)
+        ?.let { " • run $it" }
+        .orEmpty()
     return "Last automatic check $timestamp: $detail$runSuffix."
 }
 
@@ -698,10 +709,8 @@ private fun ConnectionCard(
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Column {
-                Text(title, style = MaterialTheme.typography.titleMedium)
-                Text(detail, style = MaterialTheme.typography.bodyMedium)
-            }
+            Text(title, style = MaterialTheme.typography.titleMedium)
+            Text(detail, style = MaterialTheme.typography.bodyMedium)
             OutlinedButton(onClick = onClick, enabled = enabled) { Text(action) }
         }
     }
