@@ -24,6 +24,20 @@ class BackupProblemNotificationPolicyTest {
     }
 
     @Test
+    fun `legacy source snapshot does not suppress mirror overdue alert`() {
+        val legacySnapshot = completed(1L, NOW - hours(1)).copy(type = BackupType.SOURCE_ARCHIVE)
+        val overdue = findOverdueBackupRepositories(
+            repositories = listOf(repository(1L)),
+            backups = listOf(legacySnapshot),
+            settings = enabledSettings(BackupCadence.DAILY),
+            scheduleEnabledAtEpochMs = NOW - hours(100),
+            nowEpochMs = NOW,
+        )
+
+        assertEquals(listOf(1L), overdue.map { it.repositoryId })
+    }
+
+    @Test
     fun `weekly schedule does not mark recent backup overdue`() {
         val overdue = findOverdueBackupRepositories(
             repositories = listOf(repository(1L)),
