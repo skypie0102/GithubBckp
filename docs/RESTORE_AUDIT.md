@@ -16,7 +16,7 @@ Metadata version 2 records:
 - pull-request review-comment count;
 - pull-request review count.
 
-This metadata is written only after `GitMirrorRestoreService` has completed the corresponding module validation. A corrupt/missing referenced LFS object fails local import instead of waiting until GitHub publication to expose the problem.
+This metadata is written only after `GitMirrorRestoreService` has completed the corresponding module validation. A corrupt or missing referenced LFS object fails local import instead of waiting until GitHub publication to expose the problem.
 
 ## Backward compatibility
 
@@ -36,20 +36,22 @@ Top-level fields include:
 - `moduleDetailsAvailable`;
 - module sections for `mainGit`, `gitLfs`, `wiki`, `releases`, and `discussions`.
 
-Each section records the verified counts and whether GitHub publication is currently supported. The report also states known semantic limitations, including:
+Each section records verified counts and whether GitHub publication is currently supported. The report also states known semantic limitations, including:
 
 - wiki publication is intentionally archival/manual;
 - release recovery does not recreate source latest-release selection, source publication timestamps, or immutable-release state;
 - discussion publication is intentionally archival-only and the backup does not include timeline-event or referenced-attachment bytes.
 
-The report is intended as an operator/audit summary, not as a second backup artifact. The `.mirror.zip` remains the recovery artifact and retains its own SHA-256/MD5 plus module-level integrity checks.
+The report is an operator/audit summary, not a second backup artifact. The `.mirror.zip` remains the recovery artifact and retains its own SHA-256/MD5 plus module-level integrity checks.
 
 ## Privacy
 
 The audit JSON contains counts, restore identifiers, the local archive display name, and capability/limitation statements. It does not copy issue bodies, comments, tokens, Git objects, release binaries, or LFS object bytes. Discussion content remains inside the mirror artifact's validated JSONL datasets.
 
-## Relation to the personal reliability roadmap
+## Recovery relationship
 
-Roadmap issue #36 adds a guided disaster-recovery drill. The existing restore audit remains the local-import evidence used before any GitHub publication. The drill will add a concise result for the end-to-end exercise — import, safe publication to a new/provably empty private target, and representative post-publication verification — without weakening the current recovery safety checks.
+A successful local restore audit is the evidence used before the user starts GitHub publication. `GithubMirrorRestorePublisher` then applies the separate target-safety rules for a new or provably empty repository and uses resumable target-bound recovery phases.
 
-See [`ROADMAP.md`](ROADMAP.md).
+The current product does not expose a separate guided recovery-drill workflow. Local validation plus the normal safe recovery path are the supported recovery surfaces.
+
+See [`ROADMAP.md`](ROADMAP.md) and [`ARCHITECTURE.md`](ARCHITECTURE.md).
