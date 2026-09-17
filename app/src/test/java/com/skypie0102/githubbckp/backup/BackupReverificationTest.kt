@@ -8,12 +8,12 @@ import org.junit.Test
 
 class BackupReverificationTest {
     @Test
-    fun `completed non-pruned backup with provider metadata is eligible`() {
+    fun `completed current backup with provider metadata is eligible`() {
         assertTrue(backup().canReverifyBackup())
     }
 
     @Test
-    fun `retention-pruned backup is not eligible`() {
+    fun `history row without a current remote object is not eligible`() {
         assertFalse(backup().copy(remoteDeletedAtEpochMs = 123L).canReverifyBackup())
     }
 

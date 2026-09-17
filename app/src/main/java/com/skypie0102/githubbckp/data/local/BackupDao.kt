@@ -84,6 +84,9 @@ interface BackupDao {
         warningMessage: String?,
     )
 
+    @Query("UPDATE backups SET warningMessage = :warningMessage WHERE id = :backupId AND status = 'COMPLETED'")
+    suspend fun updateCompletedBackupWarning(backupId: Long, warningMessage: String?)
+
     @Query(
         """
         UPDATE backups
@@ -141,7 +144,7 @@ interface BackupDao {
         ORDER BY completedAtEpochMs DESC, id DESC
         """,
     )
-    suspend fun getRetainableBackups(
+    suspend fun getCurrentRemoteBackups(
         repositoryId: Long,
         type: BackupType,
     ): List<BackupEntity>
@@ -159,6 +162,7 @@ interface BackupDao {
             SELECT attempt.id
             FROM backups AS attempt
             WHERE attempt.repositoryId = backup.repositoryId
+              AND attempt.type = 'GIT_MIRROR'
             ORDER BY attempt.startedAtEpochMs DESC, attempt.id DESC
             LIMIT 1
         )
@@ -166,6 +170,7 @@ interface BackupDao {
             SELECT verified.id
             FROM backups AS verified
             WHERE verified.repositoryId = backup.repositoryId
+              AND verified.type = 'GIT_MIRROR'
               AND verified.status = 'COMPLETED'
               AND verified.remoteDeletedAtEpochMs IS NULL
             ORDER BY verified.completedAtEpochMs DESC, verified.id DESC

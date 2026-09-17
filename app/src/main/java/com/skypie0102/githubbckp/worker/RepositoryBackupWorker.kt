@@ -6,7 +6,6 @@ import androidx.work.WorkerParameters
 import com.skypie0102.githubbckp.backup.BackupCoordinator
 import com.skypie0102.githubbckp.backup.BackupOrigin
 import com.skypie0102.githubbckp.backup.BackupRequest
-import com.skypie0102.githubbckp.backup.BackupType
 import com.skypie0102.githubbckp.data.local.BackupDao
 import com.skypie0102.githubbckp.data.local.toRepositoryRef
 import dagger.hilt.EntryPoint
@@ -21,9 +20,6 @@ class RepositoryBackupWorker(
     override suspend fun doWork(): Result {
         val repositoryId = inputData.getLong(KEY_REPOSITORY_ID, -1L)
         if (repositoryId < 0) return Result.failure()
-        val type = runCatching {
-            BackupType.valueOf(inputData.getString(KEY_BACKUP_TYPE) ?: BackupType.SOURCE_ARCHIVE.name)
-        }.getOrElse { return Result.failure() }
         val origin = inputData.getString(KEY_BACKUP_ORIGIN)
             ?.let { value -> runCatching { BackupOrigin.valueOf(value) }.getOrNull() }
         val scheduledRunId = inputData.getString(KEY_SCHEDULED_RUN_ID)
@@ -39,7 +35,6 @@ class RepositoryBackupWorker(
         val success = dependencies.backupCoordinator().run(
             BackupRequest(
                 repository = repository.toRepositoryRef(),
-                type = type,
                 origin = origin,
                 scheduledRunId = scheduledRunId,
             ),
@@ -50,7 +45,6 @@ class RepositoryBackupWorker(
                 val latestAttempt = dependencies.backupDao().getLatestBackup(repositoryId)
                 dependencies.backupProblemNotifier().notifyBackupFailure(
                     repository = currentRepository,
-                    type = type,
                     errorMessage = latestAttempt?.errorMessage,
                 )
             }
@@ -60,7 +54,6 @@ class RepositoryBackupWorker(
 
     companion object {
         const val KEY_REPOSITORY_ID = "repository_id"
-        const val KEY_BACKUP_TYPE = "backup_type"
         const val KEY_BACKUP_ORIGIN = "backup_origin"
         const val KEY_SCHEDULED_RUN_ID = "scheduled_run_id"
     }

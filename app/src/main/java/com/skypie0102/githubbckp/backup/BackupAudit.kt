@@ -108,7 +108,7 @@ fun BackupAuditSnapshot.toBackupAuditJson(
         .put(
             "remoteState",
             when {
-                remoteDeletedAtEpochMs != null -> "DELETED_BY_RETENTION"
+                remoteDeletedAtEpochMs != null -> "REMOTE_OBJECT_REMOVED"
                 remoteFileId != null -> "PRESENT_AT_LAST_VERIFICATION"
                 else -> "UNKNOWN"
             },
@@ -162,6 +162,11 @@ fun BackupAuditSnapshot.toBackupAuditJson(
             "This pre-v4 backup has no immutable repository metadata snapshot and current repository display metadata is unavailable.",
         )
     }
+    if (backupType != BackupType.GIT_MIRROR.name) {
+        limitations.put(
+            "This row describes a legacy backup type. Current GithubBckp versions create Git mirrors only.",
+        )
+    }
     if (origin == null) {
         limitations.put(
             "This backup predates origin tracking or was queued before origin metadata was available; manual versus scheduled origin is unknown.",
@@ -178,7 +183,7 @@ fun BackupAuditSnapshot.toBackupAuditJson(
     }
 
     return JSONObject()
-        .put("formatVersion", 5)
+        .put("formatVersion", 6)
         .put("reportType", "github-backup-artifact-audit")
         .put("generatedAtEpochMs", generatedAtEpochMs)
         .put("repository", repository)

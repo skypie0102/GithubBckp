@@ -16,18 +16,12 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Cloud
-import androidx.compose.material.icons.outlined.Code
-import androidx.compose.material.icons.outlined.Folder
-import androidx.compose.material.icons.outlined.Security
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -49,9 +43,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.skypie0102.githubbckp.backup.BackupReverificationStatus
 import com.skypie0102.githubbckp.backup.BackupStatus
-import com.skypie0102.githubbckp.backup.BackupType
 import com.skypie0102.githubbckp.backup.MirrorRestoreRecord
-import com.skypie0102.githubbckp.backup.RetentionPreferences
 import com.skypie0102.githubbckp.backup.auditReportFileName
 import com.skypie0102.githubbckp.backup.backupAuditReportFileName
 import com.skypie0102.githubbckp.backup.canReverifyBackup
@@ -72,7 +64,10 @@ import java.util.Date
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun HomeScreen(viewModel: HomeViewModel) {
+fun HomeScreen(
+    viewModel: HomeViewModel,
+    onManageGithubToken: () -> Unit,
+) {
     val state by viewModel.state.collectAsState()
     val reverificationViewModel: BackupReverificationViewModel = hiltViewModel()
     val reverificationState by reverificationViewModel.state.collectAsState()
@@ -84,11 +79,15 @@ fun HomeScreen(viewModel: HomeViewModel) {
     val visibleRepositories = remember(state.repositories, repositorySearchQuery) {
         filterRepositories(state.repositories, repositorySearchQuery)
     }
+
     val driveLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartIntentSenderForResult(),
     ) { result ->
-        if (result.resultCode == Activity.RESULT_OK) viewModel.completeDriveAuthorization(result.data)
-        else viewModel.driveAuthorizationCancelled()
+        if (result.resultCode == Activity.RESULT_OK) {
+            viewModel.completeDriveAuthorization(result.data)
+        } else {
+            viewModel.driveAuthorizationCancelled()
+        }
     }
     val folderLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocumentTree(),
@@ -160,7 +159,7 @@ fun HomeScreen(viewModel: HomeViewModel) {
         ) {
             item {
                 Text(
-                    text = "Keep a recoverable copy of your repositories outside GitHub.",
+                    text = "Keep one recoverable Git mirror of each selected repository outside GitHub.",
                     style = MaterialTheme.typography.headlineSmall,
                 )
             }
@@ -187,43 +186,36 @@ fun HomeScreen(viewModel: HomeViewModel) {
                 item { BackupHealthCard(summary = state.backupHealth) }
             }
 
+            item { Text("GitHub", style = MaterialTheme.typography.titleLarge) }
             item {
-                ConnectionCard(
-                    title = "GitHub",
-                    detail = when {
-                        !state.githubConfigured -> "OAuth client ID not configured"
-                        state.githubConnected && state.githubWorkflowPermission -> "Connected • full recovery permission"
-                        state.githubConnected -> "Connected • update permissions for workflow recovery"
-                        else -> "Not connected"
-                    },
-                    icon = { Icon(Icons.Outlined.Code, contentDescription = null) },
-                    action = when {
-                        !state.githubConnected -> "Connect GitHub"
-                        !state.githubWorkflowPermission -> "Update GitHub permissions"
-                        else -> "Refresh repositories"
-                    },
-                    enabled = state.githubConfigured && !state.busy,
-                    onClick = {
-                        when {
-                            !state.githubConnected || !state.githubWorkflowPermission -> viewModel.connectGithub()
-                            else -> viewModel.refreshRepositories()
-                        }
-                    },
-                )
-            }
-
-            state.githubDeviceSession?.let { session ->
-                item {
-                    Card(modifier = Modifier.fillMaxWidth()) {
-                        Column(
-                            modifier = Modifier.padding(16.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            Text("Authorize GitHub", style = MaterialTheme.typography.titleMedium)
-                            Text("Enter this one-time code on GitHub:")
-                            Text(session.userCode, style = MaterialTheme.typography.headlineMedium)
-                            Button(onClick = { uriHandler.openUri(session.verificationUri) }) {
-                                Text("Open GitHub authorization")
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        Text(
+                            if (state.githubConnected) "Connected" else "Not connected",
+                            style = MaterialTheme.typography.titleMedium,
+                        )
+                        Text(
+                            if (state.githubConnected) {
+                                "Repository access uses your encrypted personal access token."
+                            } else {
+                                "Add a GitHub personal access token before backing up repositories."
+                            },
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            if (state.githubConnected) {
+                                OutlinedButton(
+                                    onClick = viewModel::refreshRepositories,
+                                    enabled = !state.busy,
+                                ) {
+                                    Text("Refresh repositories")
+                                }
+                            }
+                            OutlinedButton(onClick = onManageGithubToken, enabled = !state.busy) {
+                                Text(if (state.githubConnected) "Manage GitHub token" else "Set GitHub token")
                             }
                         }
                     }
@@ -231,7 +223,6 @@ fun HomeScreen(viewModel: HomeViewModel) {
             }
 
             item { Text("Backup destination", style = MaterialTheme.typography.titleLarge) }
-
             item {
                 val driveSelected = state.storageDestination == StorageDestination.GOOGLE_DRIVE
                 ConnectionCard(
@@ -240,7 +231,6 @@ fun HomeScreen(viewModel: HomeViewModel) {
                         append(if (state.driveConnected) "Connected" else "Not connected")
                         if (driveSelected) append(" • selected")
                     },
-                    icon = { Icon(Icons.Outlined.Cloud, contentDescription = null) },
                     action = when {
                         !state.driveConnected -> "Connect Drive"
                         !driveSelected -> "Use Google Drive"
@@ -257,7 +247,6 @@ fun HomeScreen(viewModel: HomeViewModel) {
                     },
                 )
             }
-
             item {
                 val folderSelected = state.storageDestination == StorageDestination.DOCUMENT_TREE
                 ConnectionCard(
@@ -266,7 +255,6 @@ fun HomeScreen(viewModel: HomeViewModel) {
                         append(state.documentTreeName ?: if (state.documentTreeConfigured) "Configured" else "Not selected")
                         if (folderSelected) append(" • selected")
                     },
-                    icon = { Icon(Icons.Outlined.Folder, contentDescription = null) },
                     action = when {
                         state.documentTreeConfigured && !folderSelected -> "Use backup folder"
                         state.documentTreeConfigured -> "Change backup folder"
@@ -282,16 +270,19 @@ fun HomeScreen(viewModel: HomeViewModel) {
 
             item {
                 Card(modifier = Modifier.fillMaxWidth()) {
-                    Row(
+                    Column(
                         modifier = Modifier.padding(16.dp),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
-                        Icon(Icons.Outlined.Security, contentDescription = null)
-                        Column {
-                            Text("Credential safety", style = MaterialTheme.typography.titleMedium)
-                            Spacer(Modifier.height(4.dp))
-                            Text("GitHub tokens are encrypted with Android Keystore. Folder access is granted by Android's system picker and can persist across restarts.")
-                        }
+                        Text("Mirror-only backups", style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            "Each repository has one current .mirror.zip object. Manual and automatic backups update that same logical object instead of creating timestamped copies.",
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        Text(
+                            "The mirror preserves Git refs and history, referenced Git LFS objects, and supported wiki, release, and discussion metadata.",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
                     }
                 }
             }
@@ -302,32 +293,6 @@ fun HomeScreen(viewModel: HomeViewModel) {
                         CircularProgressIndicator()
                     }
                 }
-            }
-
-            item { Text("Backup format", style = MaterialTheme.typography.titleLarge) }
-            item {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(
-                        selected = state.backupType == BackupType.SOURCE_ARCHIVE,
-                        onClick = { viewModel.setBackupType(BackupType.SOURCE_ARCHIVE) },
-                        label = { Text("Source snapshot") },
-                    )
-                    FilterChip(
-                        selected = state.backupType == BackupType.GIT_MIRROR,
-                        onClick = { viewModel.setBackupType(BackupType.GIT_MIRROR) },
-                        label = { Text("Git mirror") },
-                    )
-                }
-            }
-            item {
-                Text(
-                    text = if (state.backupType == BackupType.GIT_MIRROR) {
-                        "Git mirror preserves Git refs/history and bundles every detected Git LFS object after size + SHA-256 verification. It also preserves supported wiki, release, and discussion metadata modules."
-                    } else {
-                        "Source snapshot is smaller, but contains only the selected branch snapshot and is not a full Git backup."
-                    },
-                    style = MaterialTheme.typography.bodyMedium,
-                )
             }
 
             item {
@@ -359,22 +324,12 @@ fun HomeScreen(viewModel: HomeViewModel) {
                         OutlinedButton(
                             onClick = { viewModel.setAllRepositoriesSelected(true) },
                             enabled = !state.busy,
-                        ) {
-                            Text("Select all")
-                        }
+                        ) { Text("Select all") }
                         OutlinedButton(
                             onClick = { viewModel.setAllRepositoriesSelected(false) },
                             enabled = !state.busy,
-                        ) {
-                            Text("Select none")
-                        }
+                        ) { Text("Select none") }
                     }
-                }
-                item {
-                    Text(
-                        "Search filters the visible list only. Select all / Select none applies to every available repository.",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
                 }
                 if (visibleRepositories.isEmpty()) {
                     item { Text("No repositories match the current search.") }
@@ -382,7 +337,9 @@ fun HomeScreen(viewModel: HomeViewModel) {
                     items(visibleRepositories, key = { it.githubId }) { repository ->
                         RepositoryRow(
                             repository = repository,
-                            onSelectedChange = { selected -> viewModel.setRepositorySelected(repository.githubId, selected) },
+                            onSelectedChange = { selected ->
+                                viewModel.setRepositorySelected(repository.githubId, selected)
+                            },
                         )
                     }
                 }
@@ -392,7 +349,7 @@ fun HomeScreen(viewModel: HomeViewModel) {
                         enabled = !state.busy,
                         modifier = Modifier.fillMaxWidth(),
                     ) {
-                        Text("Back up selected repositories")
+                        Text("Update selected mirrors")
                     }
                 }
             }
@@ -406,8 +363,11 @@ fun HomeScreen(viewModel: HomeViewModel) {
                         horizontalArrangement = Arrangement.SpaceBetween,
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
-                            Text("Scheduled backups", style = MaterialTheme.typography.titleMedium)
-                            Text("Uses the repositories selected when the schedule runs.", style = MaterialTheme.typography.bodySmall)
+                            Text("Automatic mirror updates", style = MaterialTheme.typography.titleMedium)
+                            Text(
+                                "Updates the same mirror for every selected repository.",
+                                style = MaterialTheme.typography.bodySmall,
+                            )
                             state.scheduledRunStatus?.let { status ->
                                 Spacer(Modifier.height(4.dp))
                                 Text(status.displayText(), style = MaterialTheme.typography.bodySmall)
@@ -440,38 +400,8 @@ fun HomeScreen(viewModel: HomeViewModel) {
                 }
             }
             item {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(
-                        selected = state.scheduledBackupType == BackupType.SOURCE_ARCHIVE,
-                        onClick = { viewModel.setScheduledBackupType(BackupType.SOURCE_ARCHIVE) },
-                        label = { Text("Snapshot schedule") },
-                    )
-                    FilterChip(
-                        selected = state.scheduledBackupType == BackupType.GIT_MIRROR,
-                        onClick = { viewModel.setScheduledBackupType(BackupType.GIT_MIRROR) },
-                        label = { Text("Mirror schedule") },
-                    )
-                }
-            }
-            item {
                 Text(
-                    "Android runs periodic work opportunistically rather than at an exact clock time. Scheduled backups require unmetered connectivity and adequate battery/storage.",
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            }
-
-            item { Text("Retention", style = MaterialTheme.typography.titleLarge) }
-            item {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    RetentionChip("Keep all", RetentionPreferences.KEEP_ALL, state.retentionKeepCount, viewModel::setRetentionKeepCount)
-                    RetentionChip("Keep 3", 3, state.retentionKeepCount, viewModel::setRetentionKeepCount)
-                    RetentionChip("Keep 5", 5, state.retentionKeepCount, viewModel::setRetentionKeepCount)
-                    RetentionChip("Keep 10", 10, state.retentionKeepCount, viewModel::setRetentionKeepCount)
-                }
-            }
-            item {
-                Text(
-                    "Retention is applied per repository and backup format after a newly verified backup completes. Deletion is routed through the storage provider that created each artifact. Backups created before provider metadata existed are never deleted automatically.",
+                    "Android runs periodic work opportunistically. Automatic mirror updates require unmetered connectivity and adequate battery/storage.",
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
@@ -479,14 +409,16 @@ fun HomeScreen(viewModel: HomeViewModel) {
             item { Text("Restore Git mirror", style = MaterialTheme.typography.titleLarge) }
             item {
                 Text(
-                    "Choose a Git mirror ZIP created by this app. It is copied into private app storage, extracted with path-traversal protection, and Git refs, referenced LFS objects, plus bundled metadata modules are verified before the restored copy is kept.",
+                    "Choose a .mirror.zip created by this app. The archive is copied into private app storage and verified before it is kept for recovery.",
                     style = MaterialTheme.typography.bodyMedium,
                 )
             }
             item {
                 OutlinedButton(
                     onClick = {
-                        restoreLauncher.launch(arrayOf("application/zip", "application/x-zip-compressed", "application/octet-stream"))
+                        restoreLauncher.launch(
+                            arrayOf("application/zip", "application/x-zip-compressed", "application/octet-stream"),
+                        )
                     },
                     enabled = !state.busy,
                     modifier = Modifier.fillMaxWidth(),
@@ -529,7 +461,7 @@ fun HomeScreen(viewModel: HomeViewModel) {
             }
 
             if (state.recentBackups.isNotEmpty()) {
-                item { Text("Recent backups", style = MaterialTheme.typography.titleLarge) }
+                item { Text("Recent backup activity", style = MaterialTheme.typography.titleLarge) }
                 items(state.recentBackups.take(10), key = { it.id }) { backup ->
                     val repository = state.repositories.firstOrNull { it.githubId == backup.repositoryId }
                     BackupRow(
@@ -579,7 +511,7 @@ private fun GithubPublishCard(
         ) {
             Text("Restore mirror to GitHub", style = MaterialTheme.typography.titleMedium)
             Text(
-                "Recovery requires GitHub workflow permission and only starts with an empty Git/release target. It restores LFS objects, Git refs, then releases/assets; main refs are never force-pushed and GitHub read-only refs/pull/* are skipped.",
+                "Recovery only writes to a newly created repository or an existing empty repository.",
                 style = MaterialTheme.typography.bodySmall,
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -609,10 +541,7 @@ private fun GithubPublishCard(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("Private repository")
-                        Text("Recommended for disaster recovery.", style = MaterialTheme.typography.bodySmall)
-                    }
+                    Text("Private repository")
                     Switch(checked = isPrivate, onCheckedChange = onPrivateChange, enabled = !busy)
                 }
             } else {
@@ -620,9 +549,7 @@ private fun GithubPublishCard(
                     value = existingRepository,
                     onValueChange = onExistingRepositoryChange,
                     label = { Text("Existing owner/repository") },
-                    supportingText = {
-                        Text("The target must exist, advertise no Git refs, and contain no GitHub releases when recovery starts.")
-                    },
+                    supportingText = { Text("The target must be empty before recovery starts.") },
                     singleLine = true,
                     enabled = !busy,
                     modifier = Modifier.fillMaxWidth(),
@@ -636,20 +563,6 @@ private fun GithubPublishCard(
             OutlinedButton(onClick = onCancel, enabled = !busy) { Text("Cancel") }
         }
     }
-}
-
-@Composable
-private fun RetentionChip(
-    label: String,
-    count: Int,
-    selectedCount: Int,
-    onSelected: (Int) -> Unit,
-) {
-    FilterChip(
-        selected = count == selectedCount,
-        onClick = { onSelected(count) },
-        label = { Text(label) },
-    )
 }
 
 @Composable
@@ -686,37 +599,16 @@ private fun RestoredMirrorRow(
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(restore.archiveName, style = MaterialTheme.typography.titleSmall)
-            Text("${restore.refCount} refs • ${restore.referencedObjectsVerified} ref-tip objects • ${restore.lfsObjectCount} LFS objects")
-            if (restore.detailsAvailable) {
-                if (restore.wikiRefCount > 0) {
-                    Text(
-                        "Wiki: ${restore.wikiRefCount} refs • ${restore.wikiReferencedObjectsVerified} ref-tip objects",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
-                if (restore.releaseCount > 0) {
-                    Text(
-                        "Releases: ${restore.releaseCount} releases • ${restore.releaseAssetCount} assets",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
-                val discussionCount = restore.issueCount + restore.pullRequestCount + restore.issueCommentCount +
-                    restore.reviewCommentCount + restore.reviewCount
-                if (discussionCount > 0) {
-                    Text(
-                        "Discussions: ${restore.issueCount} issues • ${restore.pullRequestCount} PRs • " +
-                            "${restore.issueCommentCount} comments • ${restore.reviewCommentCount} review comments • " +
-                            "${restore.reviewCount} reviews",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
-            } else {
+            Text("${restore.refCount} refs • ${restore.lfsObjectCount} LFS objects")
+            if (restore.wikiRefCount > 0) {
+                Text("Wiki: ${restore.wikiRefCount} refs", style = MaterialTheme.typography.bodySmall)
+            }
+            if (restore.releaseCount > 0) {
                 Text(
-                    "Imported by an older app version; optional module counts were not recorded.",
+                    "Releases: ${restore.releaseCount} • assets: ${restore.releaseAssetCount}",
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
-            Text("Stored privately on this device.", style = MaterialTheme.typography.bodySmall)
             Button(onClick = onPublish, enabled = !busy) { Text("Restore to GitHub") }
             OutlinedButton(onClick = onExportAudit, enabled = !busy) { Text("Export audit JSON") }
             OutlinedButton(onClick = onDelete, enabled = !busy) { Text("Delete restored copy") }
@@ -735,14 +627,14 @@ private fun BackupRow(
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(backup.repositoryDisplayName(repository), style = MaterialTheme.typography.titleSmall)
-            Text("${backup.type.name.replace('_', ' ')} • ${backup.status.name}")
+            Text("Git mirror • ${backup.status.name}")
             Text(backup.originDisplayText(), style = MaterialTheme.typography.bodySmall)
             backup.storageProvider?.let { provider ->
                 Text(
                     if (backup.remoteDeletedAtEpochMs == null) {
-                        "Stored via ${provider.displayName()}"
+                        "Current object stored via ${provider.displayName()}"
                     } else {
-                        "Remote artifact pruned from ${provider.displayName()}"
+                        "Superseded by a newer mirror update"
                     },
                     style = MaterialTheme.typography.bodySmall,
                 )
@@ -764,17 +656,6 @@ private fun BackupRow(
                         MaterialTheme.colorScheme.onSurface
                     },
                 )
-                backup.lastReverificationMessage?.let { detail ->
-                    Text(
-                        detail,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = if (backup.lastReverificationStatus == BackupReverificationStatus.FAILED) {
-                            MaterialTheme.colorScheme.error
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        },
-                    )
-                }
             }
             backup.warningMessage?.let { warning ->
                 Text("Completeness: $warning", style = MaterialTheme.typography.bodySmall)
@@ -782,7 +663,7 @@ private fun BackupRow(
             backup.errorMessage?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             onReverify?.let {
                 OutlinedButton(onClick = it, enabled = !reverifyBusy) {
-                    Text(if (reverifyBusy) "Re-verifying…" else "Re-verify stored backup")
+                    Text(if (reverifyBusy) "Re-verifying…" else "Re-verify stored mirror")
                 }
             }
             onExportAudit?.let {
@@ -822,20 +703,14 @@ private fun StorageDestination.displayName(): String = when (this) {
 private fun ConnectionCard(
     title: String,
     detail: String,
-    icon: @Composable () -> Unit,
     action: String,
     enabled: Boolean,
     onClick: () -> Unit,
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                icon()
-                Column {
-                    Text(title, style = MaterialTheme.typography.titleMedium)
-                    Text(detail, style = MaterialTheme.typography.bodyMedium)
-                }
-            }
+            Text(title, style = MaterialTheme.typography.titleMedium)
+            Text(detail, style = MaterialTheme.typography.bodyMedium)
             OutlinedButton(onClick = onClick, enabled = enabled) { Text(action) }
         }
     }

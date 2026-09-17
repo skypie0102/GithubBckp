@@ -1,6 +1,7 @@
 package com.skypie0102.githubbckp.worker
 
 import com.skypie0102.githubbckp.backup.BackupStatus
+import com.skypie0102.githubbckp.backup.BackupType
 import com.skypie0102.githubbckp.data.local.BackupEntity
 import com.skypie0102.githubbckp.data.local.RepositoryEntity
 
@@ -32,7 +33,9 @@ fun findOverdueBackupRepositories(
                 .orEmpty()
                 .asSequence()
                 .filter { backup ->
-                    backup.status == BackupStatus.COMPLETED && backup.remoteDeletedAtEpochMs == null
+                    backup.type == BackupType.GIT_MIRROR &&
+                        backup.status == BackupStatus.COMPLETED &&
+                        backup.remoteDeletedAtEpochMs == null
                 }
                 .map { backup -> backup.completedAtEpochMs ?: backup.startedAtEpochMs }
                 .maxOrNull()

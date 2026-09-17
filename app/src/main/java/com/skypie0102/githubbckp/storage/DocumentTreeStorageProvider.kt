@@ -39,34 +39,41 @@ class DocumentTreeStorageProvider @Inject constructor(
             .findOrCreateDirectory("GitHub Backups")
             .findOrCreateDirectory(artifact.repository.owner)
             .findOrCreateDirectory(artifact.repository.name)
-        val document = repositoryFolder.createFile(mimeType(artifact), artifact.file.name)
-            ?: throw IOException("Could not create ${artifact.file.name} in the selected folder")
 
-        val totalBytes = artifact.file.length()
-        var uploadedBytes = 0L
-        val output = context.contentResolver.openOutputStream(document.uri, "w")
-            ?: throw IOException("Could not open the destination file for writing")
-        output.buffered().use { destination ->
-            FileInputStream(artifact.file).use { source ->
-                val buffer = ByteArray(BUFFER_SIZE)
-                while (true) {
-                    val count = source.read(buffer)
-                    if (count < 0) break
-                    destination.write(buffer, 0, count)
-                    uploadedBytes += count
-                    onProgress(uploadedBytes, totalBytes)
-                }
+        // Never truncate the last known-good document while producing its
+        // replacement. Write a sibling first and verify its full bytes locally.
+        // BackupCoordinator independently verifies and persists this staged object
+        // before it asks the provider to retire any superseded document.
+        val stagedName = stagedMirrorName(artifact.file.name)
+        val stagedDocument = repositoryFolder.createFile(mimeType(artifact), stagedName)
+            ?: throw IOException("Could not create a staged mirror in the selected folder")
+
+        try {
+            writeArtifact(artifact, stagedDocument, onProgress)
+            requireArtifactDigests(artifact, stagedDocument)
+
+            // If the stable mirror name is free, normalize immediately. If an old
+            // verified object still owns it, keep the staging name until coordinator
+            // cleanup retires that older object. Staged names still end in
+            // `.mirror.zip`, so a crash-safe current mirror remains recognizable.
+            val stableStillExists = repositoryFolder.findFile(artifact.file.name)
+                ?.takeIf { it.exists() && it.uri != stagedDocument.uri }
+            if (stableStillExists == null && stagedDocument.name != artifact.file.name) {
+                stagedDocument.renameTo(artifact.file.name)
             }
-        }
 
-        RemoteBackup(
-            id = document.uri.toString(),
-            name = document.name ?: artifact.file.name,
-            sizeBytes = totalBytes,
-            checksumSha256 = artifact.checksumSha256,
-            checksumMd5 = artifact.checksumMd5,
-            provider = StorageDestination.DOCUMENT_TREE,
-        )
+            RemoteBackup(
+                id = stagedDocument.uri.toString(),
+                name = stagedDocument.name ?: artifact.file.name,
+                sizeBytes = artifact.file.length(),
+                checksumSha256 = artifact.checksumSha256,
+                checksumMd5 = artifact.checksumMd5,
+                provider = StorageDestination.DOCUMENT_TREE,
+            )
+        } catch (throwable: Throwable) {
+            runCatching { stagedDocument.delete() }
+            throw throwable
+        }
     }
 
     override suspend fun verify(remoteBackup: RemoteBackup): Boolean = withContext(Dispatchers.IO) {
@@ -92,8 +99,57 @@ class DocumentTreeStorageProvider @Inject constructor(
 
     override suspend fun delete(remoteBackup: RemoteBackup) = withContext(Dispatchers.IO) {
         val document = DocumentFile.fromSingleUri(context, Uri.parse(remoteBackup.id))
-            ?: throw IOException("Backup file is no longer available")
+            ?: return@withContext
+        if (!document.exists()) return@withContext
         check(document.delete()) { "Could not delete ${remoteBackup.name}" }
+    }
+
+    private suspend fun writeArtifact(
+        artifact: BackupArtifact,
+        document: DocumentFile,
+        onProgress: suspend (uploadedBytes: Long, totalBytes: Long) -> Unit,
+    ) {
+        val totalBytes = artifact.file.length()
+        var uploadedBytes = 0L
+        val output = context.contentResolver.openOutputStream(document.uri, "wt")
+            ?: throw IOException("Could not open the staged mirror for writing")
+        output.buffered().use { destination ->
+            FileInputStream(artifact.file).use { source ->
+                val buffer = ByteArray(BUFFER_SIZE)
+                while (true) {
+                    val count = source.read(buffer)
+                    if (count < 0) break
+                    destination.write(buffer, 0, count)
+                    uploadedBytes += count
+                    onProgress(uploadedBytes, totalBytes)
+                }
+            }
+        }
+    }
+
+    private fun requireArtifactDigests(artifact: BackupArtifact, document: DocumentFile) {
+        val input = context.contentResolver.openInputStream(document.uri)
+            ?: throw IOException("Could not reopen the staged mirror for verification")
+        val digests = input.use(::calculateDigests)
+        check(digests.sizeBytes == artifact.file.length()) {
+            "Staged mirror size verification failed"
+        }
+        check(digests.sha256.equals(artifact.checksumSha256, ignoreCase = true)) {
+            "Staged mirror SHA-256 verification failed"
+        }
+        check(digests.md5.equals(artifact.checksumMd5, ignoreCase = true)) {
+            "Staged mirror MD5 verification failed"
+        }
+    }
+
+    private fun stagedMirrorName(stableName: String): String {
+        val marker = ".pending-${System.nanoTime()}"
+        val mirrorSuffix = ".mirror.zip"
+        return if (stableName.endsWith(mirrorSuffix, ignoreCase = true)) {
+            stableName.dropLast(mirrorSuffix.length) + marker + mirrorSuffix
+        } else {
+            stableName + marker
+        }
     }
 
     private fun DocumentFile.findOrCreateDirectory(name: String): DocumentFile =

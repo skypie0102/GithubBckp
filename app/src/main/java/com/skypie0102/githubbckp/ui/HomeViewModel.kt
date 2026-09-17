@@ -5,19 +5,14 @@ import android.content.Intent
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.skypie0102.githubbckp.backup.BackupType
-import com.skypie0102.githubbckp.backup.DisasterRecoveryDrillResult
-import com.skypie0102.githubbckp.backup.DisasterRecoveryDrillService
 import com.skypie0102.githubbckp.backup.GithubMirrorRestorePublisher
 import com.skypie0102.githubbckp.backup.MirrorRestoreCoordinator
 import com.skypie0102.githubbckp.backup.MirrorRestoreRecord
-import com.skypie0102.githubbckp.backup.RetentionPreferences
 import com.skypie0102.githubbckp.data.local.BackupDao
 import com.skypie0102.githubbckp.data.local.BackupEntity
 import com.skypie0102.githubbckp.data.local.RepositoryEntity
 import com.skypie0102.githubbckp.data.local.toEntity
 import com.skypie0102.githubbckp.github.GithubAuthManager
-import com.skypie0102.githubbckp.github.GithubDeviceSession
 import com.skypie0102.githubbckp.github.GithubGateway
 import com.skypie0102.githubbckp.storage.StorageDestination
 import com.skypie0102.githubbckp.storage.StoragePreferences
@@ -44,28 +39,20 @@ enum class GithubRestoreTargetMode {
 }
 
 data class HomeUiState(
-    val githubConfigured: Boolean = false,
     val githubConnected: Boolean = false,
-    val githubWorkflowPermission: Boolean = false,
     val driveConnected: Boolean = false,
     val storageDestination: StorageDestination = StorageDestination.GOOGLE_DRIVE,
     val documentTreeConfigured: Boolean = false,
     val documentTreeName: String? = null,
-    val backupType: BackupType = BackupType.SOURCE_ARCHIVE,
     val scheduleEnabled: Boolean = false,
     val scheduleCadence: BackupCadence = BackupCadence.DAILY,
-    val scheduledBackupType: BackupType = BackupType.GIT_MIRROR,
     val scheduledRunStatus: ScheduledBackupRunStatus? = null,
     val scheduledRunProgress: ScheduledBackupRunProgress? = null,
-    val retentionKeepCount: Int = RetentionPreferences.KEEP_ALL,
-    val githubDeviceSession: GithubDeviceSession? = null,
     val repositories: List<RepositoryEntity> = emptyList(),
     val backupHealth: BackupHealthSummary = BackupHealthSummary(),
     val recentBackups: List<BackupEntity> = emptyList(),
     val restoredMirrors: List<MirrorRestoreRecord> = emptyList(),
-    val disasterRecoveryDrillResults: Map<String, DisasterRecoveryDrillResult> = emptyMap(),
     val githubPublishRestoreId: String? = null,
-    val githubPublishIsDrill: Boolean = false,
     val githubRestoreTargetMode: GithubRestoreTargetMode = GithubRestoreTargetMode.NEW_REPOSITORY,
     val githubPublishRepositoryName: String = "",
     val githubPublishExistingRepository: String = "",
@@ -84,26 +71,20 @@ class HomeViewModel @Inject constructor(
     private val storagePreferences: StoragePreferences,
     private val backupScheduler: BackupScheduler,
     private val mirrorRestoreCoordinator: MirrorRestoreCoordinator,
-    private val retentionPreferences: RetentionPreferences,
     private val githubRestorePublisher: GithubMirrorRestorePublisher,
-    private val disasterRecoveryDrillService: DisasterRecoveryDrillService,
 ) : ViewModel() {
     private val initialSchedule = backupScheduler.scheduleSettings()
     private var backupHealthHistory: List<BackupEntity> = emptyList()
     private val _state = MutableStateFlow(
         HomeUiState(
-            githubConfigured = githubAuthManager.isConfigured(),
             githubConnected = githubAuthManager.isAuthenticated(),
-            githubWorkflowPermission = githubAuthManager.hasWorkflowScopeCached(),
             driveConnected = driveAuthManager.isAuthenticated(),
             storageDestination = storagePreferences.destination(),
             documentTreeConfigured = storagePreferences.isDocumentTreeConfigured(),
             documentTreeName = storagePreferences.documentTreeDisplayName(),
             scheduleEnabled = initialSchedule.enabled,
             scheduleCadence = initialSchedule.cadence,
-            scheduledBackupType = initialSchedule.backupType,
             scheduledRunStatus = backupScheduler.scheduledRunStatus(),
-            retentionKeepCount = retentionPreferences.keepCount(),
         ),
     )
     val state: StateFlow<HomeUiState> = _state.asStateFlow()
@@ -177,26 +158,6 @@ class HomeViewModel @Inject constructor(
         viewModelScope.launch { refreshRestores() }
     }
 
-    fun connectGithub() {
-        if (_state.value.busy) return
-        viewModelScope.launch {
-            runBusy {
-                val session = githubAuthManager.startDeviceFlow()
-                _state.update { it.copy(githubDeviceSession = session, message = null) }
-                githubAuthManager.pollUntilAuthorized(session)
-                _state.update {
-                    it.copy(
-                        githubConnected = true,
-                        githubWorkflowPermission = githubAuthManager.hasWorkflowScopeCached(),
-                        githubDeviceSession = null,
-                        message = "GitHub connected",
-                    )
-                }
-                refreshRepositoriesInternal()
-            }
-        }
-    }
-
     fun refreshRepositories() {
         viewModelScope.launch { runBusy { refreshRepositoriesInternal() } }
     }
@@ -217,24 +178,6 @@ class HomeViewModel @Inject constructor(
                     },
                 )
             }
-        }
-    }
-
-    fun setBackupType(type: BackupType) {
-        _state.update { it.copy(backupType = type) }
-    }
-
-    fun setRetentionKeepCount(count: Int) {
-        retentionPreferences.setKeepCount(count)
-        _state.update {
-            it.copy(
-                retentionKeepCount = count,
-                message = if (count == RetentionPreferences.KEEP_ALL) {
-                    "Automatic retention disabled; all verified backups will be kept"
-                } else {
-                    "Retention will keep the newest $count verified backups per repository and format"
-                },
-            )
         }
     }
 
@@ -260,9 +203,8 @@ class HomeViewModel @Inject constructor(
             BackupScheduleSettings(
                 enabled = enabled,
                 cadence = state.scheduleCadence,
-                backupType = state.scheduledBackupType,
             ),
-            message = if (enabled) "Automatic backups enabled" else "Automatic backups disabled",
+            message = if (enabled) "Automatic mirror updates enabled" else "Automatic backups disabled",
         )
     }
 
@@ -272,21 +214,8 @@ class HomeViewModel @Inject constructor(
             BackupScheduleSettings(
                 enabled = state.scheduleEnabled,
                 cadence = cadence,
-                backupType = state.scheduledBackupType,
             ),
-            message = "Automatic backup cadence set to ${cadence.displayName()}",
-        )
-    }
-
-    fun setScheduledBackupType(type: BackupType) {
-        val state = _state.value
-        saveSchedule(
-            BackupScheduleSettings(
-                enabled = state.scheduleEnabled,
-                cadence = state.scheduleCadence,
-                backupType = type,
-            ),
-            message = "Automatic backups will use ${type.displayName()}",
+            message = "Automatic mirror cadence set to ${cadence.displayName()}",
         )
     }
 
@@ -296,7 +225,6 @@ class HomeViewModel @Inject constructor(
             current.copy(
                 scheduleEnabled = settings.enabled,
                 scheduleCadence = settings.cadence,
-                scheduledBackupType = settings.backupType,
                 backupHealth = summarizeBackupHealth(
                     repositories = current.repositories,
                     backups = backupHealthHistory,
@@ -335,7 +263,9 @@ class HomeViewModel @Inject constructor(
     fun completeDriveAuthorization(data: Intent?) {
         viewModelScope.launch {
             runBusy {
-                val resultData = data ?: error("Google Drive authorization returned no data")
+                val resultData = data ?: error(
+                    "Google Drive authorization returned no data. Check ${driveAuthManager.oauthConfigurationHint()} in the Google Android OAuth client.",
+                )
                 driveAuthManager.completeAuthorization(resultData)
                 storagePreferences.setDestination(StorageDestination.GOOGLE_DRIVE)
                 _state.update {
@@ -350,7 +280,11 @@ class HomeViewModel @Inject constructor(
     }
 
     fun driveAuthorizationCancelled() {
-        _state.update { it.copy(message = "Google Drive authorization was cancelled") }
+        _state.update {
+            it.copy(
+                message = "Google Drive authorization was cancelled. If account selection closes unexpectedly, verify ${driveAuthManager.oauthConfigurationHint()}.",
+            )
+        }
     }
 
     fun chooseBackupFolder(uri: Uri) {
@@ -402,12 +336,9 @@ class HomeViewModel @Inject constructor(
                 _state.update { it.copy(message = "Choose a backup folder first") }
             selected.isEmpty() -> _state.update { it.copy(message = "Select at least one repository") }
             else -> {
-                backupScheduler.enqueue(
-                    repositoryIds = selected.map { it.githubId },
-                    type = state.backupType,
-                )
+                backupScheduler.enqueue(repositoryIds = selected.map { it.githubId })
                 _state.update {
-                    it.copy(message = "Queued ${selected.size} ${state.backupType.displayName()} backup${if (selected.size == 1) "" else "s"}")
+                    it.copy(message = "Queued ${selected.size} Git mirror update${if (selected.size == 1) "" else "s"}")
                 }
             }
         }
@@ -432,7 +363,6 @@ class HomeViewModel @Inject constructor(
         if (_state.value.busy) return
         viewModelScope.launch {
             runBusy {
-                disasterRecoveryDrillService.deleteResult(id)
                 mirrorRestoreCoordinator.deleteRestore(id)
                 refreshRestores()
                 _state.update { it.copy(message = "Restored mirror deleted") }
@@ -441,27 +371,17 @@ class HomeViewModel @Inject constructor(
     }
 
     fun beginGithubPublish(restore: MirrorRestoreRecord) {
-        beginGithubPublishInternal(restore, isDrill = false)
-    }
-
-    fun beginDisasterRecoveryDrill(restore: MirrorRestoreRecord) {
-        beginGithubPublishInternal(restore, isDrill = true)
-    }
-
-    private fun beginGithubPublishInternal(restore: MirrorRestoreRecord, isDrill: Boolean) {
         val baseName = restore.archiveName
             .removeSuffix(".mirror.zip")
             .removeSuffix(".zip")
             .replace(Regex("[^A-Za-z0-9._-]"), "-")
             .trim('-')
             .ifBlank { "restored-repository" }
-        val suggested = if (isDrill) "$baseName-drill" else baseName
         _state.update {
             it.copy(
                 githubPublishRestoreId = restore.id,
-                githubPublishIsDrill = isDrill,
                 githubRestoreTargetMode = GithubRestoreTargetMode.NEW_REPOSITORY,
-                githubPublishRepositoryName = suggested.take(100),
+                githubPublishRepositoryName = baseName.take(100),
                 githubPublishExistingRepository = "",
                 githubPublishPrivate = true,
                 lastPublishedRepositoryUrl = null,
@@ -483,16 +403,13 @@ class HomeViewModel @Inject constructor(
     }
 
     fun setGithubPublishPrivate(value: Boolean) {
-        _state.update { current ->
-            current.copy(githubPublishPrivate = if (current.githubPublishIsDrill) true else value)
-        }
+        _state.update { it.copy(githubPublishPrivate = value) }
     }
 
     fun cancelGithubPublish() {
         _state.update {
             it.copy(
                 githubPublishRestoreId = null,
-                githubPublishIsDrill = false,
                 githubRestoreTargetMode = GithubRestoreTargetMode.NEW_REPOSITORY,
                 githubPublishRepositoryName = "",
                 githubPublishExistingRepository = "",
@@ -506,14 +423,6 @@ class HomeViewModel @Inject constructor(
         val restoreId = state.githubPublishRestoreId ?: return
         if (!state.githubConnected) {
             _state.update { it.copy(message = "Connect GitHub before publishing a restored mirror") }
-            return
-        }
-        if (!state.githubWorkflowPermission) {
-            _state.update {
-                it.copy(
-                    message = "Update GitHub permissions and approve workflow access before publishing a restored mirror",
-                )
-            }
             return
         }
         when (state.githubRestoreTargetMode) {
@@ -533,46 +442,6 @@ class HomeViewModel @Inject constructor(
 
         viewModelScope.launch {
             runBusy {
-                if (state.githubPublishIsDrill) {
-                    val drillResult = when (state.githubRestoreTargetMode) {
-                        GithubRestoreTargetMode.NEW_REPOSITORY ->
-                            disasterRecoveryDrillService.runToNewPrivateRepository(
-                                restoreId = restoreId,
-                                repositoryName = state.githubPublishRepositoryName,
-                            )
-                        GithubRestoreTargetMode.EXISTING_EMPTY_REPOSITORY ->
-                            disasterRecoveryDrillService.runToExistingEmptyPrivateRepository(
-                                restoreId = restoreId,
-                                repositoryFullName = state.githubPublishExistingRepository,
-                            )
-                    }
-                    refreshRepositoriesInternal()
-                    refreshRestores()
-                    _state.update {
-                        it.copy(
-                            githubPublishRestoreId = null,
-                            githubPublishIsDrill = false,
-                            githubRestoreTargetMode = GithubRestoreTargetMode.NEW_REPOSITORY,
-                            githubPublishRepositoryName = "",
-                            githubPublishExistingRepository = "",
-                            githubPublishPrivate = true,
-                            lastPublishedRepositoryUrl = drillResult.repositoryUrl,
-                            message = buildString {
-                                append("Recovery drill passed for ${drillResult.repositoryFullName}: ")
-                                append("${drillResult.verifiedGitRefCount} Git refs verified")
-                                if (drillResult.verifiedLfsObjectCount > 0) {
-                                    append("; ${drillResult.verifiedLfsObjectCount} LFS objects verified")
-                                }
-                                if (drillResult.verifiedReleaseCount > 0) {
-                                    append("; ${drillResult.verifiedReleaseCount} releases / ")
-                                    append("${drillResult.verifiedReleaseAssetCount} assets verified")
-                                }
-                            },
-                        )
-                    }
-                    return@runBusy
-                }
-
                 val result = when (state.githubRestoreTargetMode) {
                     GithubRestoreTargetMode.NEW_REPOSITORY -> githubRestorePublisher.publishToNewRepository(
                         restoreId = restoreId,
@@ -589,7 +458,6 @@ class HomeViewModel @Inject constructor(
                 _state.update {
                     it.copy(
                         githubPublishRestoreId = null,
-                        githubPublishIsDrill = false,
                         githubRestoreTargetMode = GithubRestoreTargetMode.NEW_REPOSITORY,
                         githubPublishRepositoryName = "",
                         githubPublishExistingRepository = "",
@@ -617,16 +485,7 @@ class HomeViewModel @Inject constructor(
     }
 
     private suspend fun refreshRestores() {
-        val restores = mirrorRestoreCoordinator.listRestores()
-        val drillResults = restores.mapNotNull { restore ->
-            disasterRecoveryDrillService.latestResult(restore.id)?.let { restore.id to it }
-        }.toMap()
-        _state.update {
-            it.copy(
-                restoredMirrors = restores,
-                disasterRecoveryDrillResults = drillResults,
-            )
-        }
+        _state.update { it.copy(restoredMirrors = mirrorRestoreCoordinator.listRestores()) }
     }
 
     private suspend fun refreshRepositoriesInternal() {
@@ -637,7 +496,12 @@ class HomeViewModel @Inject constructor(
                 repository.toEntity(selectedForBackup = existing[repository.id]?.selectedForBackup ?: true)
             },
         )
-        _state.update { it.copy(githubConnected = true, message = "Found ${remote.size} repositories") }
+        _state.update {
+            it.copy(
+                githubConnected = true,
+                message = "Found ${remote.size} repositories",
+            )
+        }
     }
 
     private suspend fun runBusy(block: suspend () -> Unit) {
@@ -655,11 +519,6 @@ class HomeViewModel @Inject constructor(
         val parts = value.trim().split('/')
         return parts.size == 2 && parts.all { it.isNotBlank() }
     }
-}
-
-private fun BackupType.displayName(): String = when (this) {
-    BackupType.SOURCE_ARCHIVE -> "source snapshot"
-    BackupType.GIT_MIRROR -> "Git mirror"
 }
 
 private fun BackupCadence.displayName(): String = when (this) {

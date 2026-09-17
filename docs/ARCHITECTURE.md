@@ -1,308 +1,151 @@
 # Architecture
 
-GithubBckp is an Android backup/recovery orchestrator for personal/internal use. Repository data moves directly between GitHub, temporary app storage, and the user-selected destination. The app does not require an application server to handle repository contents.
+GithubBckp is a personal Android GitHub backup/recovery app. Repository data moves directly between GitHub, temporary app-private storage, and the user-selected destination; there is no application server handling repository contents.
 
-The architecture optimizes for three properties:
+The active backup product model is deliberately small: **one current, verified Git mirror per selected repository**. Manual and scheduled runs both update that logical mirror.
 
-1. **Integrity** — a backup is not treated as successful until its bytes/checksums and supported module data are verified.
-2. **Recoverability** — recovery is explicit, target-bound, resumable, and refuses ambiguous or unsafe remote state.
-3. **Operator confidence** — history, audit exports, backup-health presentation, notifications, fresh stored-artifact re-verification, and guided recovery drills make silent failure increasingly difficult.
-
-See [`ROADMAP.md`](ROADMAP.md) for the completed personal reliability roadmap, feature-freeze rule, and explicit non-goals.
-
-## High-level boundaries
+## Active flow
 
 ```text
-Compose UI
+Compose UI / HomeViewModel
    |
-HomeViewModel
-   +-- backup health presentation
-   +-- normal restore orchestration
-   +-- recovery-drill orchestration
+   +-- GitHub PAT setup + repository selection
+   +-- Google Drive or document-tree destination
+   +-- manual mirror updates
+   +-- automatic mirror schedule
+   +-- stored-mirror re-verification
+   +-- mirror import / safe GitHub restore
    |
-DisasterRecoveryDrillOverlay
-   +-- validated-mirror selection
-   +-- republishable vs archival-only module guidance
-   +-- private-target drill setup
-   |
-DisasterRecoveryDrillService
-   +-- GithubMirrorRestorePublisher with isolated target-specific transaction key
-   +-- GitMirrorPushService.verifyPublished()
-   +-- app-private drill result persistence
-   |
-BackupReverificationViewModel
-   |
-BackupReverificationService
-   +-- StorageRouter -> original provider read-only download
-   +-- local size / SHA-256 / MD5 recomputation
-   +-- GitMirrorRestoreService.validate() for mirror backups
-   +-- Room re-verification result persistence
-   |
-BackupScheduler
-   +-- ScheduledBackupWorker
-   +-- BackupHealthCheckWorker
+BackupScheduler / WorkManager
    |
 RepositoryBackupWorker
-   +-- BackupProblemNotifier
    |
 BackupCoordinator
-   +-- BackupEngineFactory
-   |     +-- SourceArchiveBackupEngine
-   |     +-- GitMirrorBackupEngine
-   |            +-- GitLfsPointerScanner / GitLfsDownloadService
-   |            +-- GithubWikiBackupService
-   |            +-- GithubReleaseBackupService
-   |            +-- GithubDiscussionBackupService
-   +-- StorageRouter
-   |     +-- DocumentTreeStorageProvider
-   |     +-- GoogleDriveStorageProvider
-   +-- BackupRetentionManager
-   +-- Room history + completeness warnings
-
-MirrorRestoreCoordinator
    |
-GitMirrorRestoreService
-   +-- main Git verification
-   +-- LFS verification
-   +-- wiki verification
-   +-- release manifest/assets verification
-   +-- discussion JSONL/hash validation
+GitMirrorBackupEngine
+   +-- JGit mirror clone
+   +-- Git LFS object preservation
+   +-- optional wiki history
+   +-- releases/assets
+   +-- issue/PR discussion metadata
    |
-GithubMirrorRestorePublisher
-   +-- GithubAuthManager
-   +-- RecoveryTransactionStore
-   +-- GitLfsObjectStore / GitLfsUploadService
-   +-- GithubReleaseRestoreService
-   +-- GithubRepositoryRestoreGateway
-   +-- GitMirrorPushService
+StorageRouter
+   +-- GoogleDriveStorageProvider
+   +-- DocumentTreeStorageProvider
 ```
 
-## GitHub authentication and API
+## GitHub authentication
 
-`GithubAuthManager` uses GitHub OAuth Device Flow. The Android package carries only an OAuth client ID. Access/refresh material and cached granted-scope metadata are encrypted with an Android Keystore-backed AES-GCM key before being placed in SharedPreferences.
+GitHub authentication is user-managed personal access token (PAT) authentication. `GithubAuthManager` validates the token against GitHub's authenticated-user endpoint, then stores it through the Android Keystore-backed encrypted `SecureStore`.
 
-New Device Flow authorizations request `repo workflow offline_access`. Backup/discovery uses ordinary repository access. Recovery uses `requireRecoveryAccessToken()`, which requires the granted `workflow` scope before any recovery repository can be created or resolved. This avoids creating a partial target that later rejects workflow-bearing refs.
+The app does not require a GitHub OAuth App, Device Flow, client ID, client secret, or build-time GitHub credential. Old OAuth state keys are cleared when a PAT is saved or disconnected.
 
-For legacy installations without cached scope metadata, recovery queries GitHub's authenticated-user response, reads `X-OAuth-Scopes`, and caches the normalized set. Missing `workflow` produces a dedicated recoverable permission error and the UI offers Device Flow again.
+`GithubGateway` is intentionally narrow: repository discovery and feature lookup used by mirror creation. Source-archive transfer is no longer part of the active product.
 
-`GithubGateway` owns repository discovery, authenticated source-archive transfer, and lightweight feature lookup. Redirects from GitHub's API to archive/object storage are followed without forwarding the bearer token off GitHub's API host.
+## Mirror creation
 
-`GithubRepositoryRestoreGateway` creates a new empty recovery repository or resolves a user-supplied existing target. Recovery drills additionally require the resolved target to be private.
+`GitMirrorBackupEngine` uses JGit mirror-clone semantics to create a bare Git repository. Credentials are passed through JGit's transport layer rather than written into the repository URL.
 
-## Repository inventory
+The engine can bundle:
 
-Room retains repository rows so selection/history survive temporary disappearance from GitHub discovery. `RepositoryEntity.isAvailable` is reconciled only after a successful complete discovery response.
+- all fetched Git refs/history;
+- referenced Git LFS objects, verified by size and SHA-256;
+- initialized wiki history when available;
+- releases and release assets;
+- issue/pull-request discussion metadata supported by the app.
 
-Unavailable repositories are hidden from active selection and excluded from scheduled work, health alerts, and overdue notification evaluation, but historical backup rows are retained. If a repository later reappears, its prior selection preference can be reused.
+The local output filename is stable per repository: `<owner>-<repository>.mirror.zip`. New code does not generate timestamped snapshot or mirror generations.
 
-See [`REPOSITORY_RECONCILIATION.md`](REPOSITORY_RECONCILIATION.md).
+`BackupType.SOURCE_ARCHIVE` remains only as a compatibility value for historical Room rows. There is no source-archive backup engine and new work always requests `GIT_MIRROR`.
 
-## Backup engines
+## Verified-before-retire storage model
 
-### Source snapshots
+`BackupCoordinator` records an attempt in Room, creates the new local mirror artifact, and asks the active `StorageProvider` to store a replacement candidate.
 
-`SourceArchiveBackupEngine` downloads GitHub's default-branch archive. It is compact but does not represent full Git history.
+The replacement is independently verified before it becomes authoritative. After remote verification succeeds, the coordinator first persists the new row as `COMPLETED`; only then does it retire superseded remote objects and mark their historical rows as no longer owning a current object. Cleanup is best-effort and cannot downgrade the already verified replacement. Cleanup failures are attached as warnings when possible.
 
-### Git mirrors
+This ordering is deliberate: a crash during cleanup can temporarily leave more than one remote object, but it must not leave the database claiming there is no verified current mirror. There is no user-facing retention/version-history policy; extra objects are cleanup residue, not intentional generations.
 
-`GitMirrorBackupEngine` uses JGit mirror-clone semantics to fetch main-repository refs into a bare repository. Credentials are supplied through JGit transport and never written into repository URLs.
+Historical database rows remain useful for audit/activity. A row with `remoteDeletedAtEpochMs` no longer represents a current remote object and is excluded from current mirror health and on-demand re-verification.
 
-A mirror can additionally contain the following validated modules.
+### Google Drive
 
-#### Git LFS
+`GoogleDriveStorageProvider` uses resumable upload to create each replacement as a distinct Drive object. It does **not** overwrite the previous verified file in place. The previous object remains intact while the replacement uploads; after the new object verifies and is committed in Room, coordinator cleanup removes the older Drive object.
 
-`GitLfsPointerScanner` walks reachable Git objects and finds unique standard LFS pointer OIDs/sizes. `GitLfsDownloadService` uses the Git LFS Batch API, verifies size plus SHA-256, and stores objects in the standard local layout under `lfs/objects/`.
+This means a failed or interrupted Drive upload cannot corrupt the only known-good mirror. If the user has changed Google accounts and an older file ID is no longer visible, cleanup can warn while the newly verified object in the current account remains authoritative.
 
-During recovery, bundled objects are revalidated and missing target objects are uploaded through the target LFS Batch API. Target emptiness is checked before publication and immediately before main Git refs are pushed.
+Provider metadata stores the mirror checksum and repository identity for verification. Drive authorization is handled separately by `GoogleDriveAuthManager` with Google Play services `AuthorizationClient` and the `drive.file` scope. Authorization failures expose the installed package name and certificate SHA-1 so an Android OAuth-client signing mismatch can be diagnosed instead of silently appearing to do nothing.
 
-See [`LFS_BACKUP.md`](LFS_BACKUP.md).
+### Document-tree storage
 
-#### Wiki history
+`DocumentTreeStorageProvider` uses Android's Storage Access Framework. It resolves prior mirror documents only inside the **currently selected** repository folder, so changing the backup folder moves future backups to the new tree rather than continuing to write through an old persisted URI.
 
-If the repository reports the wiki feature enabled, `GithubWikiBackupService` attempts a mirror clone of `<owner>/<repo>.wiki.git`. An enabled but never-initialized wiki is treated as no wiki content. An initialized wiki is verified independently and stored at `github-backup/wiki.git/`.
+A replacement is written to a sibling staging document and the complete staged bytes are checked against the artifact size, SHA-256, and MD5 before the provider returns it. The previous verified document remains untouched while this staging write and local verification occur. `BackupCoordinator` then performs its normal provider verification, commits the new row, and only afterward deletes the superseded document.
 
-Wiki publication is intentionally archival/manual for the personal-use product; undocumented initialization behavior is not used.
+If the stable mirror filename is free, the staged document is renamed to it. When the previous stable-name object still exists during staging, the provider may temporarily persist the verified replacement under its staging display name; this is a storage implementation detail, not a historical generation. A later successful update can normalize the display name once the old object has been removed.
 
-See [`WIKI_BACKUP.md`](WIKI_BACKUP.md).
-
-#### Releases and release assets
-
-`GithubReleaseBackupService` pages through releases/assets and writes a versioned manifest plus verified binary assets. Every asset must match GitHub's reported size and a locally computed SHA-256. When GitHub exposes a `sha256:` digest, it is independently cross-checked.
-
-`GithubReleaseRestoreService` recreates/reconciles supported release metadata and assets after main Git publication. Existing or newly uploaded assets are verified against expected size and SHA-256; when GitHub does not expose a usable digest, verification downloads the remote asset and hashes it locally.
-
-Exact latest-release selection, historical server timestamps, and immutable-release state are intentionally not reproduced.
-
-See [`RELEASE_BACKUP.md`](RELEASE_BACKUP.md).
-
-#### Issues, pull requests, comments, and reviews
-
-`GithubDiscussionBackupService` stores raw REST response objects as versioned JSON Lines datasets under `github-backup/discussions/`. Dataset record counts and SHA-256 hashes are recorded in a manifest and revalidated during import.
-
-Native recreation of discussions is intentionally outside the personal-use roadmap because original author/timestamp semantics cannot be reproduced safely and writes can trigger notifications/automation.
-
-See [`DISCUSSIONS_BACKUP.md`](DISCUSSIONS_BACKUP.md).
-
-## Storage routing and retention
-
-`StorageRouter` routes upload, lightweight verification, read-only download, and deletion through the provider associated with the operation. Persisted provider identity lets later retention or re-verification address the same remote object even if the user changes the active destination.
-
-`DocumentTreeStorageProvider` reopens saved files and can stream the persisted document URI back into app-private cache. `GoogleDriveStorageProvider` uses resumable upload, remote checksum metadata, and authenticated file-byte download through the Drive API.
-
-`BackupRetentionManager` supports keep-all or keep-last-N pruning per repository and backup format. Pruning marks the historical backup row with `remoteDeletedAtEpochMs` rather than erasing history.
-
-The backup-health model therefore ignores retention-pruned completions when deciding whether a repository still has a current verified artifact. Pruned rows also cannot be on-demand re-verified because their remote object is intentionally gone.
+Document-tree deletion is idempotent so cleanup can safely retry a document that a provider has already removed or that disappeared externally.
 
 ## Background execution
 
-Manual backups enqueue one repository worker per selected repository. Periodic backup work uses a WorkManager controller that reads the currently selected, available repositories at execution time and fans out repository work.
+`BackupScheduler` supports manual fan-out plus daily/weekly periodic scheduling. Repository jobs do not receive a backup-format choice; `RepositoryBackupWorker` always constructs a `GIT_MIRROR` request.
 
-Scheduled backup jobs require unmetered networking, battery-not-low, and storage-not-low constraints. WorkManager execution is opportunistic rather than exact.
+Scheduled work requires unmetered networking, battery-not-low, and storage-not-low constraints. WorkManager timing is opportunistic rather than an exact alarm.
 
-Each scheduled controller run persists an outcome and, when work is queued, a correlation ID. Child backup rows persist that same ID so the UI can summarize live completion/failure/cancellation/progress for the run.
-
-While automatic backups are enabled, `BackupScheduler` also maintains `BackupHealthCheckWorker`, a separate local periodic worker that runs every 24 hours after an initial one-hour delay. It needs no network because it evaluates persisted Room history and schedule metadata. Disabling the schedule cancels both periodic workers and clears overdue-notification state.
+The old scheduled backup-format preference is removed when schedule settings are saved.
 
 See [`SCHEDULED_BACKUPS.md`](SCHEDULED_BACKUPS.md).
 
-## Backup state machine
+## Backup state
 
-Source snapshot:
-
-```text
-QUEUED -> DOWNLOADING -> CHECKSUM -> UPLOADING -> VERIFYING -> COMPLETED
-                 \-------------------------------------------> FAILED
-```
-
-Git mirror:
+The active mirror state machine is:
 
 ```text
-QUEUED -> DOWNLOADING (Git + LFS + wiki + releases + discussions)
-       -> PACKAGING -> CHECKSUM -> UPLOADING -> VERIFYING -> COMPLETED
-                 \--------------------------------------------> FAILED
+QUEUED
+  -> DOWNLOADING (Git + LFS + optional modules)
+  -> PACKAGING
+  -> CHECKSUM
+  -> UPLOADING
+  -> VERIFYING
+  -> COMPLETED
 ```
 
-After `COMPLETED`, retention may prune an older verified remote artifact without changing its historical completion state.
+Any failure before the verified replacement is committed persists `FAILED`. Temporary local artifacts are removed in `finally` after the attempt finishes. Duplicate cleanup happens after `COMPLETED` and is therefore warning-only.
 
-## Backup-health presentation
+## Backup health
 
-`BackupDao.observeBackupHealthHistory()` returns at most the rows needed to classify each repository: the latest attempt and the latest non-pruned verified completion. `BackupHealthPresentation` combines those rows with the currently selected repository inventory.
+Backup health is mirror-only. Legacy `SOURCE_ARCHIVE` rows remain visible as historical data but do not count as current protection, do not suppress overdue alerts, and do not override the status of a newer/current Git mirror.
 
-Health states are:
+For each selected available repository, health uses the latest Git-mirror attempt and latest completed Git-mirror row that still owns a current remote object. Automatic-backup freshness uses two cadence windows.
 
-- `PROTECTED` — a verified artifact exists and no higher-priority problem applies;
-- `WARNING` — the latest verified artifact has a completeness warning, or a newer attempt was cancelled;
-- `FAILED` — a failed attempt occurred after the latest verified backup;
-- `STALE` — automatic backups are enabled and the latest verified backup is older than two cadence windows;
-- `NEVER_BACKED_UP` — no current non-pruned verified artifact exists.
+## Re-verification
 
-The calculation is intentionally pure/testable and does not depend on the fixed-size Recent backups UI list. A later successful backup clears an earlier failure.
+`BackupReverificationService` reopens a completed current remote object through its recorded storage provider, downloads the full object to app-private temporary storage, recomputes size/SHA-256/MD5, and for mirrors reuses the safe mirror validation path.
 
-## Backup problem notifications
+Re-verification does not create another remote object and does not publish anything to GitHub.
 
-`RepositoryBackupWorker` receives the boolean result from `BackupCoordinator`. When the coordinator has already persisted a `FAILED` row, the worker resolves the repository again and only notifies if the repository is still available and selected. `BackupProblemNotifier` rate-limits repeated failure notifications for the same repository/backup format to one every six hours. Notification taps open `MainActivity`, where the Home health card and backup history show the actionable state.
+## Local restore and GitHub recovery
 
-Overdue alerts are evaluated separately by `BackupHealthCheckWorker`. Its pure notification policy uses the same two-cadence freshness window as the Home health model. For repositories with no successful backup, `BackupSchedulePreferences` persists the schedule-enable timestamp and uses it as the start of the same grace window.
+`MirrorRestoreCoordinator` and `GitMirrorRestoreService` import a `.mirror.zip` into private app storage with path-traversal protection and validate Git refs plus bundled modules before the restore is retained.
 
-The notifier stores the current overdue repository-ID set in app-private SharedPreferences. It emits one grouped alert only when at least one repository newly enters that set. Repositories that recover are removed on the next health check, allowing a later independent overdue episode to notify again. Turning automatic backups off explicitly clears this state.
+`GithubMirrorRestorePublisher` can publish a validated restore to a newly created GitHub repository or to an existing repository that is proven empty. Recovery does not provide arbitrary destructive overwrite or force-push of a live non-empty repository.
 
-Android 13+ notification delivery is gated by `POST_NOTIFICATIONS`. `MainActivity` asks once; the notification layer also checks runtime permission and OS notification enablement before posting. Lack of permission never changes backup execution or persisted health state.
+`RecoveryTransactionStore` binds a recovery transaction to a stable target identity and persists phases so retries cannot silently switch targets.
 
-## On-demand stored-artifact re-verification
+## UI structure
 
-Database schema v9 adds three nullable fields to each backup row: latest re-verification timestamp, status, and detail. Existing rows migrate with all fields unset.
+The main screen is a normal scrolling Compose layout. Account/tools actions live in that content; there are no competing bottom-end floating buttons. GitHub token management is opened from the GitHub card, and mirror backup/scheduling controls are presented inline.
 
-`BackupReverificationService` accepts only completed, non-pruned rows that still contain the provider identity, remote object identity, byte size, SHA-256, and MD5 persisted at creation time. The current destination is irrelevant; `StorageRouter` routes the read to the provider recorded on that backup row.
+The source-snapshot format selector, snapshot schedule selector, and retention controls have been removed.
 
-The provider downloads the complete object to a temporary file below app cache. `BackupReverificationService` recomputes size, SHA-256, and MD5 locally and requires all three to match the persisted verified values. Google Drive metadata alone is therefore insufficient for a successful on-demand check.
+## Build and release
 
-For `GIT_MIRROR` rows, the service then calls `GitMirrorRestoreService.validate()` against the temporary archive. This deliberately reuses the same safe extraction and module-validation path as restore instead of creating a second Git/LFS/wiki/release/discussion validator. No GitHub publication path is reachable from re-verification.
+There are only two normal Android build types: `debug` for development and `release` for the installable APK.
 
-The temporary download and validation scratch directory are deleted in `finally`. The remote artifact is never updated or replaced. Success and failure both persist as separate re-verification state; the historical backup status remains `COMPLETED` because it describes creation-time success, not present-day readability.
+The release build uses R8 minification and resource shrinking. The large Material extended-icons dependency and Compose debug tooling dependency were removed from the installed dependency graph.
 
-`BackupReverificationViewModel` provides a narrow UI action state so only one re-verification is launched at a time. The normal Recent backups Room flow refreshes the row after the result is persisted.
+The GitHub release workflow follows the Intake Edit release shape: it validates the app version, builds a signed release APK, verifies the signature, renames the artifact to `githubbckp-v<version>.apk`, creates a SHA-256 sidecar, and publishes both files to a GitHub Release.
 
-See [`BACKUP_AUDIT.md`](BACKUP_AUDIT.md).
+Release signing mirrors Intake Edit: the workflow uses configured persistent signing secrets when available and otherwise generates a one-off fallback key. Google Drive Android OAuth is bound to the signing certificate SHA-1, so one-off releases require the corresponding release SHA-1 to be registered before Drive authorization will work.
 
-## Local mirror restore
-
-`GitMirrorRestoreService` rejects ZIP entries escaping the restore root and validates every bundled module before the restored copy is retained:
-
-- main bare Git repository and advertised ref tips;
-- referenced Git LFS objects;
-- optional wiki mirror;
-- optional release manifest/assets;
-- optional discussion datasets and counts.
-
-`MirrorRestoreCoordinator` stores validated restores in private app storage and reloads valid records across restarts.
-
-Restore audit export summarizes the validation result without duplicating the recovery artifact. See [`RESTORE_AUDIT.md`](RESTORE_AUDIT.md).
-
-## Resumable GitHub recovery
-
-`GithubMirrorRestorePublisher` obtains a recovery-validated OAuth token **before** target creation/resolution. First-time recovery is restricted to a new or provably empty Git/release target.
-
-`RecoveryTransactionStore` persists a caller-supplied transaction key and binds that transaction to one stable GitHub repository ID/full name. Ordinary recovery uses the restored mirror ID as that key and advances monotonically through:
-
-```text
-TARGET_BOUND -> LFS_PUBLISHED -> GIT_PUBLISHED -> RELEASES_PUBLISHED
-```
-
-Retries cannot silently switch targets. A crash after Git publication but before the phase is persisted is reconciled by comparing every writable target ref name/object ID with the local mirror; only an exact match is accepted as already published.
-
-Release retries similarly reconcile only matching releases/assets. Conflicting or ambiguous remote state fails safely.
-
-The transaction mechanism deliberately does **not** authorize arbitrary non-empty overwrite, force-push, or destructive ref deletion.
-
-## Guided disaster-recovery drill
-
-`DisasterRecoveryDrillOverlay` exposes a dedicated rehearsal surface without replacing ordinary recovery. It lists validated restored mirrors, shows which modules are automatically republishable versus archival-only, and requires either a newly created private target or an existing private target that is still empty.
-
-`DisasterRecoveryDrillService` deliberately reuses `GithubMirrorRestorePublisher` rather than implementing a second publication engine. The publisher receives a deterministic drill transaction key derived from the restore ID, target kind, and normalized target identity. That key is valid for `RecoveryTransactionStore`, is stable across retries to the same drill target, differs across drill targets, and never equals the normal restore ID. A rehearsal therefore cannot consume the ordinary recovery binding.
-
-After the normal publisher reaches `RELEASES_PUBLISHED`, `GitMirrorPushService.verifyPublished()` performs an additional read-only exact comparison of every writable local ref name/object ID with the remote advertised refs. LFS counts are only returned after local object validation and the LFS upload protocol succeeds; release assets are only counted after remote size/SHA-256 verification succeeds.
-
-A successful `DisasterRecoveryDrillResult` is stored as versioned JSON below app-private files storage and reloaded with the restored-mirror list. It records the target, completion time, verified Git/LFS/release counts, and the automatic/archival module plan. The app never automatically deletes the drill target; cleanup is an explicit operator decision after reviewing the result.
-
-## Audit reporting
-
-Completed backup rows can export JSON audit/history reports. Exporting a backup audit never initiates a remote read; format v5 reports creation-time integrity/provenance plus the latest separately recorded on-demand re-verification result, if one exists.
-
-Restore audit exports remain separate from recovery-drill results. A drill result is an operational rehearsal record tied to the locally restored mirror and latest successful drill target.
-
-See [`BACKUP_AUDIT.md`](BACKUP_AUDIT.md).
-
-## Personal-use scope boundary
-
-The following are architectural non-goals unless the product assumptions change:
-
-- native discussion reconstruction;
-- discussion timeline/attachment crawling solely for archival completeness;
-- destructive recovery into arbitrary non-empty repositories;
-- organization/team identity or permission reconstruction;
-- automatic wiki publication through undocumented behavior;
-- perfect recreation of GitHub's server-managed release semantics;
-- Play Store/public-distribution infrastructure.
-
-The guiding rule is to prefer a smaller, auditable recovery system over a broader system that can silently mutate live GitHub state.
-
-## Test coverage
-
-The JVM suite covers, among other things:
-
-- mirror restore with real Git repositories and optional modules;
-- ZIP path traversal rejection;
-- LFS pointer scanning, Batch API parsing, upload/download integrity, and already-present objects;
-- release backup/restore validation and reconciliation;
-- discussion dataset validation/tamper/duplicate rejection;
-- recovery transaction persistence and target binding;
-- empty-target push behavior and exact post-push reconciliation;
-- recovery-drill module capability classification and isolated deterministic transaction keys;
-- OAuth scope normalization and legacy scope discovery;
-- retention selection;
-- backup-health state classification;
-- overdue-notification policy and failure rate-limit boundaries;
-- re-verification eligibility and size/SHA-256/MD5 mismatch detection;
-- scheduled-run readiness/progress presentation.
-
-Room/KSP compilation validates database schema/query consistency in CI. The repository CI gate builds debug and release variants, runs JVM tests, and runs Android lint.
+See [`RELEASE.md`](RELEASE.md).

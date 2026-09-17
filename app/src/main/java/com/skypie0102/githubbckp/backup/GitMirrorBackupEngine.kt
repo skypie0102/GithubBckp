@@ -30,21 +30,20 @@ class GitMirrorBackupEngine @Inject constructor(
     private val wikiBackupService: GithubWikiBackupService,
     private val releaseBackupService: GithubReleaseBackupService,
     private val discussionBackupService: GithubDiscussionBackupService,
-) : BackupEngine {
-    override suspend fun createBackup(
+) {
+    suspend fun createBackup(
         request: BackupRequest,
         workingDirectory: File,
         onProgress: suspend (BackupStatus) -> Unit,
     ): BackupArtifact = withContext(Dispatchers.IO) {
-        require(request.type == BackupType.GIT_MIRROR) {
-            "GitMirrorBackupEngine only handles GIT_MIRROR"
-        }
         workingDirectory.mkdirs()
         val createdAt = System.currentTimeMillis()
         val safeName = "${request.repository.owner}-${request.repository.name}"
             .replace(Regex("[^A-Za-z0-9._-]"), "_")
         val mirrorDirectory = File(workingDirectory, "$safeName.git")
-        val archive = File(workingDirectory, "$safeName-$createdAt.mirror.zip")
+        // The remote object has a stable name. Repeated backups update this
+        // one logical mirror instead of creating timestamped copies.
+        val archive = File(workingDirectory, "$safeName.mirror.zip")
         val token = githubAuthManager.requireAccessToken()
 
         onProgress(BackupStatus.DOWNLOADING)
@@ -98,7 +97,6 @@ class GitMirrorBackupEngine @Inject constructor(
         val digests = calculateDigests(archive)
         BackupArtifact(
             repository = request.repository,
-            type = request.type,
             file = archive,
             checksumSha256 = digests.sha256,
             checksumMd5 = digests.md5,

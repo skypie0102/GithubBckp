@@ -1,6 +1,7 @@
 package com.skypie0102.githubbckp.ui
 
 import com.skypie0102.githubbckp.backup.BackupStatus
+import com.skypie0102.githubbckp.backup.BackupType
 import com.skypie0102.githubbckp.data.local.BackupEntity
 import com.skypie0102.githubbckp.data.local.RepositoryEntity
 import com.skypie0102.githubbckp.worker.BackupCadence
@@ -59,7 +60,9 @@ fun summarizeBackupHealth(
     val freshnessWindowMs = cadence.repeatHours * 2L * MILLIS_PER_HOUR
 
     val health = selectedRepositories.map { repository ->
-        val repositoryBackups = backupsByRepository[repository.githubId].orEmpty()
+        val repositoryBackups = backupsByRepository[repository.githubId]
+            .orEmpty()
+            .filter { it.type == BackupType.GIT_MIRROR }
         val latestAttempt = repositoryBackups.maxWithOrNull(
             compareBy<BackupEntity> { it.startedAtEpochMs }.thenBy { it.id },
         )

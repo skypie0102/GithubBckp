@@ -18,6 +18,12 @@ data class RemoteBackup(
 )
 
 interface StorageProvider {
+    /**
+     * Stores [artifact] as a replacement candidate and returns its remote identity.
+     * Providers must not destroy the caller's previous verified object as part of
+     * this operation; BackupCoordinator retires superseded objects only after this
+     * returned object has independently verified and been committed as current.
+     */
     suspend fun upload(
         artifact: BackupArtifact,
         onProgress: suspend (uploadedBytes: Long, totalBytes: Long) -> Unit = { _, _ -> },

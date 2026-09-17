@@ -1,66 +1,69 @@
 # GithubBckp
 
-GithubBckp is a personal/internal Android app for keeping recoverable copies of GitHub repositories in storage controlled by the user. Public distribution and Play Store work are intentionally outside scope.
+GithubBckp is a personal/internal Android app for keeping recoverable copies of GitHub repositories in storage controlled by the user. Public Play Store distribution is outside scope.
 
-The product goal is narrow: make personal GitHub backups boring, verifiable, and recoverable.
+The product goal is narrow: keep **one current, verified Git mirror per selected repository** and update that same logical backup on manual or automatic runs.
 
 ## What it backs up
 
-Two backup formats are supported:
+GithubBckp is mirror-only. A backup performs mirror-style Git preservation and packages the repository into one `.mirror.zip` artifact. It preserves Git refs/history, referenced Git LFS objects, initialized wiki history when present, releases/assets, and issue/pull-request discussion metadata supported by the app.
 
-- **Source snapshot** — downloads GitHub's TAR.GZ archive for the default branch. It is compact but does not preserve full Git history.
-- **Git mirror** — performs mirror-style Git preservation, bundles referenced Git LFS objects, initialized wiki history when present, releases/assets, and issue/pull-request discussion metadata into one verified `.mirror.zip` artifact.
+Every completed replacement is checksummed and remotely verified before it becomes current. The previous verified mirror is not retired until the replacement is committed successfully.
 
-Every completed artifact is checksummed before storage. Mirror backup fails instead of silently succeeding when a referenced LFS object, release asset, or requested metadata page cannot be fetched or verified.
+Source snapshots and retention/version-copy controls have been removed. Older database rows can still describe historical backup types, but new manual and scheduled backups always use Git mirrors.
 
-Supported recovery surfaces are main Git refs/history, Git LFS, release metadata, and release assets. Wiki history and discussion datasets are preserved and locally validated but intentionally remain archival-only.
+## Authentication
 
-## Personal GitHub authentication
+### GitHub
 
-GithubBckp does **not** require a GitHub OAuth App, Device Flow, OAuth client ID, client secret, or build-time GitHub credential.
+Enter a GitHub personal access token (PAT) in the app. GithubBckp validates it against GitHub and stores it encrypted through the Android Keystore-backed secure store.
 
-On first launch, enter a GitHub personal access token (PAT). The app validates it against GitHub, then stores it encrypted through the existing Android Keystore-backed secure store.
-
-The token must be able to read every private repository you want to back up. Recovery additionally requires the permissions needed to create or update the chosen target repository and its Git/LFS/release surfaces. Classic and fine-grained PATs are both supported; GithubBckp does not rely on OAuth scope strings to decide whether recovery is possible.
+The PAT must be able to read every private repository you want to back up. Recovery additionally needs the permissions required by the chosen recovery target.
 
 The PAT is never embedded in the APK, Gradle configuration, repository, CI logs, or release metadata.
+
+### Google Drive
+
+Google Drive authorization is separate from GitHub authentication. The Drive adapter uses Google Play services `AuthorizationClient` with `drive.file`.
+
+Android Google OAuth clients are bound to both the package name and APK signing certificate. Register:
+
+```text
+Package: com.skypie0102.githubbckp
+SHA-1:   <persistent release signing certificate SHA-1>
+```
+
+The release workflow prints the signing SHA-1 into each GitHub release body. If Drive account selection returns without connecting, the app also reports the installed package and signing SHA-1 so the OAuth client can be checked directly.
 
 ## Backup destinations
 
 ### Backup folder
 
-The Android Storage Access Framework can write to a user-selected document tree, including local storage, removable storage, or a compatible cloud DocumentsProvider. Completed documents are reopened and verified by byte count, SHA-256, and MD5 before the backup is marked complete.
+The Android Storage Access Framework can write to a user-selected document tree, including local storage, removable storage, or a compatible cloud DocumentsProvider.
+
+Replacement mirrors are written to a sibling staging document and fully rehashed before the previous verified document is retired. An interrupted write therefore does not truncate the last known-good mirror.
 
 ### Google Drive
 
-Google Drive authorization is separate from GitHub authentication. The Drive adapter uses Google Play services `AuthorizationClient` with `drive.file`, resumable upload, and remote verification.
+A replacement is uploaded as a new resumable Drive object and verified before the previous verified Drive object is retired. An interrupted upload therefore does not overwrite the only known-good mirror.
 
-For the normal personal debug APK, register the debug signing certificate SHA-1 for package:
+## Automatic backups
 
-```text
-com.skypie0102.githubbckp
-```
+Automatic backups support disabled, daily, or weekly execution. WorkManager runs opportunistically under unmetered-network, battery-not-low, and storage-not-low constraints.
 
-Get that fingerprint with:
+Automatic runs use the same replacement flow as manual runs. They do not intentionally create historical generations.
 
-```bash
-./gradlew :app:signingReport
-```
+Scheduled health is considered overdue after two cadence windows: 48 hours for daily and 14 days for weekly. Legacy source-snapshot rows do not satisfy current mirror health.
 
-The app does not persist Google access tokens.
+## Recovery and verification
 
-## Reliability features
+A validated mirror can be restored locally and published to either a new GitHub repository or an existing repository that is still empty. Recovery never force-pushes arbitrary live repositories.
 
-The personal reliability roadmap is complete:
+Eligible completed current mirrors expose **Re-verify stored mirror**. The app reads the entire stored object again, recomputes its digests, and runs the local mirror/module validator. Re-verification never creates another remote backup object.
 
-1. **Backup health dashboard (#33)** — selected repositories are classified as protected, warning, failed, stale, or never backed up.
-2. **Failure and overdue notifications (#34)** — failures are rate-limited and overdue repositories are grouped into deduplicated alerts.
-3. **On-demand re-verification (#35)** — completed, non-pruned artifacts can be reopened through their original storage provider and rehashed from the stored bytes.
-4. **Guided disaster-recovery drill (#36)** — validated mirrors can be rehearsed against a private new/provably empty target with independent post-publication Git/LFS/release verification.
+Completed backups and imported mirrors can export JSON audit reports.
 
-There are no active product-feature roadmap items. Future feature work is frozen by default unless personal use exposes a concrete recurring problem. Reliability, compatibility, security, and recovery-safety fixes remain in scope.
-
-## Build
+## Build and CI
 
 Requirements:
 
@@ -74,68 +77,43 @@ Repository gate:
 ./gradlew :app:assembleDebug :app:assembleRelease :app:testDebugUnitTest :app:lintDebug
 ```
 
-Personal install artifact:
+Debug builds are for development only.
 
-```bash
-./gradlew :app:assembleDebug
-```
+## Release APK
+
+The APK release flow mirrors the Intake Edit repository:
+
+- merge/push a new app version to `main`;
+- the release workflow validates `versionName` / `versionCode`;
+- it builds the minified/shrunk **release** APK;
+- it verifies the APK signature;
+- it publishes a GitHub release and workflow artifact;
+- the install file is named `githubbckp-v<version>.apk`, not `app-debug.apk`;
+- a matching `.sha256` file is published alongside it.
+
+Like Intake Edit, the workflow can publish without signing secrets by generating a one-off release key. If the optional Android signing secrets are configured, it uses that persistent key instead.
+
+With the no-secret one-off path, Android will require uninstall/reinstall for a later APK signed by a different key. Google Drive OAuth is also tied to the signing SHA-1, so the Android OAuth client must be updated to the SHA-1 printed in that release before Drive authorization will work for that build.
+
+Optional persistent-signing secrets are:
 
 ```text
-app/build/outputs/apk/debug/app-debug.apk
+ANDROID_KEYSTORE_BASE64
+ANDROID_KEYSTORE_PASSWORD
+ANDROID_KEY_ALIAS
+ANDROID_KEY_PASSWORD
 ```
 
-Gradle/Android tooling automatically signs the debug APK with the local Android debug keystore. GithubBckp has no custom release-keystore workflow. The release variant remains in CI only as a compile check.
-
-See [`docs/PERSONAL_RELEASE.md`](docs/PERSONAL_RELEASE.md) for the exact personal build, Google Drive certificate setup, installation, and device-validation process.
-
-## Automatic backups and retention
-
-Automatic backup settings support disabled, daily, or weekly execution and either source-snapshot or Git-mirror format. WorkManager runs opportunistically under unmetered-network, battery-not-low, and storage-not-low constraints.
-
-Scheduled health is considered overdue after two cadence windows: 48 hours for daily and 14 days for weekly. Retention defaults to **Keep all**, with optional newest 3/5/10 pruning per repository and backup format.
-
-See [`docs/SCHEDULED_BACKUPS.md`](docs/SCHEDULED_BACKUPS.md).
-
-## Recovery safety
-
-A validated mirror can be published to either a **new** GitHub repository or an **existing repository that is still empty**. Recovery never force-pushes or performs arbitrary destructive overwrite.
-
-Recovery transactions bind to an exact target repository identity and persist phases so retries cannot silently switch targets. Recovery drills use separate target-specific transaction keys, so a rehearsal does not consume or change the ordinary recovery binding.
-
-The guided drill independently verifies published Git refs, checks every referenced LFS object is advertised for download and re-downloads/re-hashes a deterministic sample, and re-reads releases/assets after publication.
-
-See:
-
-- [`docs/RECOVERY_DRILL.md`](docs/RECOVERY_DRILL.md)
-- [`docs/LFS_BACKUP.md`](docs/LFS_BACKUP.md)
-- [`docs/RELEASE_BACKUP.md`](docs/RELEASE_BACKUP.md)
-- [`docs/WIKI_BACKUP.md`](docs/WIKI_BACKUP.md)
-- [`docs/DISCUSSIONS_BACKUP.md`](docs/DISCUSSIONS_BACKUP.md)
-
-## Re-verification and audit
-
-Eligible completed backups expose **Re-verify stored backup**. The app reads the entire remote object again, recomputes size/SHA-256/MD5 locally, and for Git mirrors also runs the safe local mirror/module validator. The remote artifact is never mutated.
-
-Completed backups and imported mirrors expose JSON audit reports. The latest on-demand re-verification result is stored separately from the original backup completion state.
-
-See [`docs/BACKUP_AUDIT.md`](docs/BACKUP_AUDIT.md) and [`docs/RESTORE_AUDIT.md`](docs/RESTORE_AUDIT.md).
+See [`docs/RELEASE.md`](docs/RELEASE.md).
 
 ## Security
 
 Do not commit personal access tokens, Google credentials/tokens, keystores, or generated `local.properties`.
 
-Git credentials are passed to JGit's transport layer rather than embedded in repository URLs. GitHub PAT storage uses the app's Android Keystore-backed encrypted store. Temporary backup, re-verification, restore, and drill-verification files live in app-private/cache storage and are cleaned up after use.
+Git credentials are passed to JGit's transport layer rather than embedded in repository URLs. Temporary backup, verification, and restore files live in app-private/cache storage and are cleaned up after use.
 
 ## Personal-use non-goals
 
-The app intentionally does not provide:
+The app intentionally does not provide destructive overwrite of arbitrary non-empty repositories, force-push recovery workflows, native recreation of GitHub identities/timestamps for discussions, organization/team reconstruction, automatic wiki publication, or Play Store/public-distribution work.
 
-- destructive recovery into arbitrary non-empty repositories;
-- force-push/ref-deletion recovery workflows;
-- native recreation of issues, pull requests, comments, reviews, or original identities/timestamps;
-- organization/team membership or permission reconstruction;
-- automatic wiki publication through undocumented initialization behavior;
-- exact recreation of GitHub release `latest` selection, historical publication timestamps, or immutable-release state;
-- Play Store/public-distribution work.
-
-See [`docs/ROADMAP.md`](docs/ROADMAP.md) and [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the detailed product boundary and implementation structure.
+See [`docs/ROADMAP.md`](docs/ROADMAP.md) and [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the product boundary and implementation structure.
