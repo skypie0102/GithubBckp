@@ -36,7 +36,7 @@ class GoogleDriveStorageProvider @Inject constructor(
                 JSONObject()
                     .put("sha256", artifact.checksumSha256)
                     .put("repository", artifact.repository.fullName)
-                    .put("backupType", artifact.type.name),
+                    .put("backupType", "GIT_MIRROR"),
             )
 
         // Always create the replacement as a distinct Drive object. The previous
