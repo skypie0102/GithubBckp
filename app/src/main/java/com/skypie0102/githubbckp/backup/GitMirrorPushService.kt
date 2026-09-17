@@ -55,6 +55,35 @@ class GitMirrorPushService @Inject constructor() {
         allowExactAlreadyPublished = true,
     )
 
+    /**
+     * Read-only post-publication check used by the disaster-recovery drill.
+     * Every writable local ref must be advertised remotely with the exact same
+     * object ID, and no unexpected writable refs may be present.
+     */
+    suspend fun verifyPublished(
+        repositoryDirectory: File,
+        remoteUri: String,
+        credentialsProvider: CredentialsProvider? = null,
+    ): Int = withContext(Dispatchers.IO) {
+        require(repositoryDirectory.isDirectory) { "Restored mirror directory is missing" }
+        FileRepositoryBuilder()
+            .setGitDir(repositoryDirectory)
+            .setBare()
+            .build()
+            .use { repository ->
+                check(repository.isBare) { "Restore source is not a bare Git repository" }
+                val expectedRefs = repository.refDatabase
+                    .getRefsByPrefix("refs/")
+                    .filterNot { isGithubReadOnlyRef(it.name) }
+                    .associate { it.name to it.objectId.name }
+                val advertised = listRemoteRefs(remoteUri, credentialsProvider)
+                if (!remoteExactlyMatches(advertised, expectedRefs)) {
+                    throw IOException("Published Git refs do not exactly match the restored mirror")
+                }
+                expectedRefs.size
+            }
+    }
+
     private suspend fun pushInternal(
         repositoryDirectory: File,
         remoteUri: String,

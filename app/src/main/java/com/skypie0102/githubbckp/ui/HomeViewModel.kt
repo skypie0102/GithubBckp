@@ -6,6 +6,8 @@ import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.skypie0102.githubbckp.backup.BackupType
+import com.skypie0102.githubbckp.backup.DisasterRecoveryDrillResult
+import com.skypie0102.githubbckp.backup.DisasterRecoveryDrillService
 import com.skypie0102.githubbckp.backup.GithubMirrorRestorePublisher
 import com.skypie0102.githubbckp.backup.MirrorRestoreCoordinator
 import com.skypie0102.githubbckp.backup.MirrorRestoreRecord
@@ -61,7 +63,9 @@ data class HomeUiState(
     val backupHealth: BackupHealthSummary = BackupHealthSummary(),
     val recentBackups: List<BackupEntity> = emptyList(),
     val restoredMirrors: List<MirrorRestoreRecord> = emptyList(),
+    val disasterRecoveryDrillResults: Map<String, DisasterRecoveryDrillResult> = emptyMap(),
     val githubPublishRestoreId: String? = null,
+    val githubPublishIsDrill: Boolean = false,
     val githubRestoreTargetMode: GithubRestoreTargetMode = GithubRestoreTargetMode.NEW_REPOSITORY,
     val githubPublishRepositoryName: String = "",
     val githubPublishExistingRepository: String = "",
@@ -82,6 +86,7 @@ class HomeViewModel @Inject constructor(
     private val mirrorRestoreCoordinator: MirrorRestoreCoordinator,
     private val retentionPreferences: RetentionPreferences,
     private val githubRestorePublisher: GithubMirrorRestorePublisher,
+    private val disasterRecoveryDrillService: DisasterRecoveryDrillService,
 ) : ViewModel() {
     private val initialSchedule = backupScheduler.scheduleSettings()
     private var backupHealthHistory: List<BackupEntity> = emptyList()
@@ -427,6 +432,7 @@ class HomeViewModel @Inject constructor(
         if (_state.value.busy) return
         viewModelScope.launch {
             runBusy {
+                disasterRecoveryDrillService.deleteResult(id)
                 mirrorRestoreCoordinator.deleteRestore(id)
                 refreshRestores()
                 _state.update { it.copy(message = "Restored mirror deleted") }
@@ -435,18 +441,27 @@ class HomeViewModel @Inject constructor(
     }
 
     fun beginGithubPublish(restore: MirrorRestoreRecord) {
-        val suggested = restore.archiveName
+        beginGithubPublishInternal(restore, isDrill = false)
+    }
+
+    fun beginDisasterRecoveryDrill(restore: MirrorRestoreRecord) {
+        beginGithubPublishInternal(restore, isDrill = true)
+    }
+
+    private fun beginGithubPublishInternal(restore: MirrorRestoreRecord, isDrill: Boolean) {
+        val baseName = restore.archiveName
             .removeSuffix(".mirror.zip")
             .removeSuffix(".zip")
             .replace(Regex("[^A-Za-z0-9._-]"), "-")
             .trim('-')
-            .take(100)
             .ifBlank { "restored-repository" }
+        val suggested = if (isDrill) "$baseName-drill" else baseName
         _state.update {
             it.copy(
                 githubPublishRestoreId = restore.id,
+                githubPublishIsDrill = isDrill,
                 githubRestoreTargetMode = GithubRestoreTargetMode.NEW_REPOSITORY,
-                githubPublishRepositoryName = suggested,
+                githubPublishRepositoryName = suggested.take(100),
                 githubPublishExistingRepository = "",
                 githubPublishPrivate = true,
                 lastPublishedRepositoryUrl = null,
@@ -468,13 +483,16 @@ class HomeViewModel @Inject constructor(
     }
 
     fun setGithubPublishPrivate(value: Boolean) {
-        _state.update { it.copy(githubPublishPrivate = value) }
+        _state.update { current ->
+            current.copy(githubPublishPrivate = if (current.githubPublishIsDrill) true else value)
+        }
     }
 
     fun cancelGithubPublish() {
         _state.update {
             it.copy(
                 githubPublishRestoreId = null,
+                githubPublishIsDrill = false,
                 githubRestoreTargetMode = GithubRestoreTargetMode.NEW_REPOSITORY,
                 githubPublishRepositoryName = "",
                 githubPublishExistingRepository = "",
@@ -515,6 +533,46 @@ class HomeViewModel @Inject constructor(
 
         viewModelScope.launch {
             runBusy {
+                if (state.githubPublishIsDrill) {
+                    val drillResult = when (state.githubRestoreTargetMode) {
+                        GithubRestoreTargetMode.NEW_REPOSITORY ->
+                            disasterRecoveryDrillService.runToNewPrivateRepository(
+                                restoreId = restoreId,
+                                repositoryName = state.githubPublishRepositoryName,
+                            )
+                        GithubRestoreTargetMode.EXISTING_EMPTY_REPOSITORY ->
+                            disasterRecoveryDrillService.runToExistingEmptyPrivateRepository(
+                                restoreId = restoreId,
+                                repositoryFullName = state.githubPublishExistingRepository,
+                            )
+                    }
+                    refreshRepositoriesInternal()
+                    refreshRestores()
+                    _state.update {
+                        it.copy(
+                            githubPublishRestoreId = null,
+                            githubPublishIsDrill = false,
+                            githubRestoreTargetMode = GithubRestoreTargetMode.NEW_REPOSITORY,
+                            githubPublishRepositoryName = "",
+                            githubPublishExistingRepository = "",
+                            githubPublishPrivate = true,
+                            lastPublishedRepositoryUrl = drillResult.repositoryUrl,
+                            message = buildString {
+                                append("Recovery drill passed for ${drillResult.repositoryFullName}: ")
+                                append("${drillResult.verifiedGitRefCount} Git refs verified")
+                                if (drillResult.verifiedLfsObjectCount > 0) {
+                                    append("; ${drillResult.verifiedLfsObjectCount} LFS objects verified")
+                                }
+                                if (drillResult.verifiedReleaseCount > 0) {
+                                    append("; ${drillResult.verifiedReleaseCount} releases / ")
+                                    append("${drillResult.verifiedReleaseAssetCount} assets verified")
+                                }
+                            },
+                        )
+                    }
+                    return@runBusy
+                }
+
                 val result = when (state.githubRestoreTargetMode) {
                     GithubRestoreTargetMode.NEW_REPOSITORY -> githubRestorePublisher.publishToNewRepository(
                         restoreId = restoreId,
@@ -531,6 +589,7 @@ class HomeViewModel @Inject constructor(
                 _state.update {
                     it.copy(
                         githubPublishRestoreId = null,
+                        githubPublishIsDrill = false,
                         githubRestoreTargetMode = GithubRestoreTargetMode.NEW_REPOSITORY,
                         githubPublishRepositoryName = "",
                         githubPublishExistingRepository = "",
@@ -558,7 +617,16 @@ class HomeViewModel @Inject constructor(
     }
 
     private suspend fun refreshRestores() {
-        _state.update { it.copy(restoredMirrors = mirrorRestoreCoordinator.listRestores()) }
+        val restores = mirrorRestoreCoordinator.listRestores()
+        val drillResults = restores.mapNotNull { restore ->
+            disasterRecoveryDrillService.latestResult(restore.id)?.let { restore.id to it }
+        }.toMap()
+        _state.update {
+            it.copy(
+                restoredMirrors = restores,
+                disasterRecoveryDrillResults = drillResults,
+            )
+        }
     }
 
     private suspend fun refreshRepositoriesInternal() {
