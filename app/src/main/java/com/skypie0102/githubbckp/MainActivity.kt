@@ -12,14 +12,19 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.layout.Box
 import androidx.core.content.ContextCompat
+import com.skypie0102.githubbckp.github.GithubAuthManager
 import com.skypie0102.githubbckp.ui.DisasterRecoveryDrillOverlay
+import com.skypie0102.githubbckp.ui.GithubTokenSetupOverlay
 import com.skypie0102.githubbckp.ui.HomeScreen
 import com.skypie0102.githubbckp.ui.HomeViewModel
 import com.skypie0102.githubbckp.ui.theme.GithubBckpTheme
 import dagger.hilt.android.AndroidEntryPoint
+import javax.inject.Inject
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
+    @Inject lateinit var githubAuthManager: GithubAuthManager
+
     private val viewModel: HomeViewModel by viewModels()
     private val notificationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission(),
@@ -31,9 +36,16 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             GithubBckpTheme {
-                Box {
-                    HomeScreen(viewModel)
-                    DisasterRecoveryDrillOverlay(viewModel)
+                if (!githubAuthManager.isAuthenticated()) {
+                    GithubTokenSetupOverlay(
+                        authManager = githubAuthManager,
+                        onConnected = { recreate() },
+                    )
+                } else {
+                    Box {
+                        HomeScreen(viewModel)
+                        DisasterRecoveryDrillOverlay(viewModel)
+                    }
                 }
             }
         }
