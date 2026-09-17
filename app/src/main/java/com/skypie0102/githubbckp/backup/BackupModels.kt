@@ -46,7 +46,6 @@ data class BackupRequest(
 
 data class BackupArtifact(
     val repository: RepositoryRef,
-    val type: BackupType,
     val file: File,
     val checksumSha256: String,
     val checksumMd5: String,
