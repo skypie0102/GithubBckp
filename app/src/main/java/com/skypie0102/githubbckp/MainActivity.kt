@@ -10,12 +10,10 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
-import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.core.content.ContextCompat
 import com.skypie0102.githubbckp.github.GithubAuthManager
-import com.skypie0102.githubbckp.ui.DisasterRecoveryDrillOverlay
 import com.skypie0102.githubbckp.ui.GithubTokenSetupOverlay
 import com.skypie0102.githubbckp.ui.HomeScreen
 import com.skypie0102.githubbckp.ui.HomeViewModel
@@ -52,13 +50,10 @@ class MainActivity : ComponentActivity() {
                         },
                     )
                 } else {
-                    Box {
-                        HomeScreen(
-                            viewModel = viewModel,
-                            onManageGithubToken = { showTokenSetup.value = true },
-                        )
-                        DisasterRecoveryDrillOverlay(viewModel)
-                    }
+                    HomeScreen(
+                        viewModel = viewModel,
+                        onManageGithubToken = { showTokenSetup.value = true },
+                    )
                 }
             }
         }
