@@ -63,7 +63,7 @@ class GitLfsDownloadService @Inject constructor(
         require(repositoryFullName.count { it == '/' } == 1) { "Invalid GitHub repository name" }
         scratchDirectory.mkdirs()
 
-        val representatives = representativeLfsPointers(uniquePointers)
+        val representatives = representativeLfsPointers(uniquePointers, REPRESENTATIVE_VERIFY_LIMIT)
             .associateBy { it.oidSha256 }
         val authorization = basicAuthorization(accessToken)
         val batchUrl = "https://github.com/$repositoryFullName.git/info/lfs/objects/batch"
