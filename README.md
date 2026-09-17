@@ -69,7 +69,7 @@ Completed:
 1. **Backup health dashboard (#33)** — every selected/available repository is classified as protected, warning, failed, stale, or never backed up using the latest attempt and latest non-pruned verified backup.
 2. **Failure and overdue-backup notifications (#34)** — failed backups can notify after durable failure recording; repeat failures are rate-limited; overdue selected repositories are checked locally and grouped into deduplicated alerts.
 3. **On-demand backup re-verification (#35)** — completed, non-pruned artifacts can be reread through their original provider, rehashed locally, and—when they are Git mirrors—run through the existing safe mirror/module validator.
-4. **Guided disaster-recovery drill (#36)** — a validated mirror can be rehearsed against a private new or provably empty target, with module capability guidance, isolated resumable drill transactions, post-publication Git verification, and a durable local drill result.
+4. **Guided disaster-recovery drill (#36)** — a validated mirror can be rehearsed against a private new or provably empty target, with module capability guidance, isolated resumable drill transactions, and independent post-publication Git/LFS/release verification.
 
 There are no active product-feature roadmap items. Feature development is frozen by default unless personal usage exposes a concrete recurring problem. Reliability, compatibility, security, and recovery-safety fixes remain in scope.
 
@@ -227,12 +227,16 @@ A drill:
 - requires a new private repository or an existing private repository that is still empty across Git refs and GitHub releases;
 - shows which present modules will be republished automatically: Git refs/history, Git LFS objects, and releases/assets;
 - shows wiki history and issue/pull-request discussion datasets as archival-only when present;
-- reuses the same recovery OAuth checks, empty-target guards, LFS upload verification, non-force Git publication, release/asset verification, and resumable recovery phases as ordinary recovery;
-- performs an additional read-only post-publication comparison of every writable local Git ref against the remote advertised ref and exact object ID;
+- reuses the same recovery OAuth checks, empty-target guards, LFS upload verification, non-force Git publication, release/asset publication verification, and resumable recovery phases as ordinary recovery;
+- independently compares every writable local Git ref with the remote advertised ref and exact object ID after publication;
+- requires every referenced LFS object to be advertised for download by the target, then re-downloads and SHA-256 checks a deterministic sample of up to three objects;
+- re-lists releases and assets after publication and verifies the expected release metadata plus every asset's size and SHA-256, downloading an asset when GitHub does not expose a digest;
 - records the latest successful drill result in app-private JSON and shows the target and verified counts on later app launches;
 - never deletes the drill repository automatically.
 
 A drill's transaction key is isolated from ordinary recovery and from drills targeting another repository. Retrying the same drill target can therefore resume safely without preventing a later real recovery to a different target.
+
+See [`docs/RECOVERY_DRILL.md`](docs/RECOVERY_DRILL.md).
 
 ## On-demand backup re-verification
 
@@ -250,13 +254,13 @@ See [`docs/BACKUP_AUDIT.md`](docs/BACKUP_AUDIT.md).
 
 Completed backups can export JSON history/audit reports without triggering another remote read. Backup-audit format v5 includes the latest recorded on-demand re-verification result when one exists. Imported mirrors can export module-level restore audit reports including Git, LFS, wiki, release, and discussion counts. The latest successful recovery-drill result is persisted separately in app-private JSON as an operational rehearsal record.
 
-See [`docs/BACKUP_AUDIT.md`](docs/BACKUP_AUDIT.md) and [`docs/RESTORE_AUDIT.md`](docs/RESTORE_AUDIT.md).
+See [`docs/BACKUP_AUDIT.md`](docs/BACKUP_AUDIT.md), [`docs/RESTORE_AUDIT.md`](docs/RESTORE_AUDIT.md), and [`docs/RECOVERY_DRILL.md`](docs/RECOVERY_DRILL.md).
 
 ## Security
 
 Do **not** commit OAuth client secrets, access/refresh tokens, signing keys, or generated `local.properties`.
 
-Git credentials are passed to JGit's transport layer rather than embedded in repository URLs. Temporary source/mirror and re-verification artifacts live below app cache and are removed after each operation. Redirected archive/LFS/release downloads do not forward GitHub authentication to unrelated hosts. Recovery transaction files and recovery-drill result files live in app-private storage; ordinary recovery and drill transactions use separate bindings.
+Git credentials are passed to JGit's transport layer rather than embedded in repository URLs. Temporary source/mirror, re-verification, and drill-verification artifacts live below app cache and are removed after each operation. Redirected archive/LFS/release downloads do not forward GitHub authentication to unrelated hosts. Recovery transaction files and recovery-drill result files live in app-private storage; ordinary recovery and drill transactions use separate bindings.
 
 ## Architecture
 
@@ -265,13 +269,13 @@ Key boundaries include:
 - `GithubAuthManager` — Device Flow, encrypted token/scope persistence, recovery-scope enforcement
 - `GithubGateway` / `GithubRestGateway` — repository discovery and GitHub API access
 - `BackupEngineFactory` — source snapshot vs Git mirror
-- `GitLfsPointerScanner` / `GitLfsDownloadService` / `GitLfsUploadService` — LFS preservation and recovery
+- `GitLfsPointerScanner` / `GitLfsDownloadService` / `GitLfsUploadService` — LFS preservation, recovery, and drill read-back verification
 - `GithubWikiBackupService` — wiki preservation/validation
 - `GithubReleaseBackupService` / `GithubReleaseRestoreService` — release preservation/recovery
 - `GithubDiscussionBackupService` — issue/PR metadata preservation/validation
 - `GitMirrorRestoreService` / `MirrorRestoreCoordinator` — safe local restore
 - `RecoveryTransactionStore` / `GithubMirrorRestorePublisher` — resumable safe publication with independently selectable transaction keys
-- `DisasterRecoveryDrillService` / `GitMirrorPushService.verifyPublished` — private guided rehearsal, isolated drill transactions, post-publication Git verification, and local drill results
+- `DisasterRecoveryDrillService` / `GitMirrorPushService.verifyPublished` / `DisasterRecoveryDrillReleaseVerifier` — private guided rehearsal, isolated drill transactions, independent post-publication verification, and local drill results
 - `StorageRouter` — provider-aware upload, verification, read-only download, and deletion
 - `BackupReverificationService` — fresh remote-byte verification and optional mirror/module validation
 - `BackupScheduler` / `ScheduledBackupWorker` / `BackupHealthCheckWorker` — backup scheduling and local health monitoring

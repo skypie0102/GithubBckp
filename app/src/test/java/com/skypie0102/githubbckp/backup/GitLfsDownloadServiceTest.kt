@@ -66,6 +66,20 @@ class GitLfsDownloadServiceTest {
     }
 
     @Test
+    fun representativeVerificationSampleIsDistinctAndBounded() {
+        val first = GitLfsPointer(oidSha256 = "a".repeat(64), sizeBytes = 1L)
+        val second = GitLfsPointer(oidSha256 = "b".repeat(64), sizeBytes = 2L)
+        val third = GitLfsPointer(oidSha256 = "c".repeat(64), sizeBytes = 3L)
+        val fourth = GitLfsPointer(oidSha256 = "d".repeat(64), sizeBytes = 4L)
+
+        assertEquals(
+            listOf(first, second, third),
+            representativeLfsPointers(listOf(first, first, second, third, fourth), limit = 3),
+        )
+        assertEquals(emptyList<GitLfsPointer>(), representativeLfsPointers(listOf(first), limit = 0))
+    }
+
+    @Test
     fun verifiesSizeAndSha256() {
         val root = Files.createTempDirectory("lfs-verify").toFile()
         try {

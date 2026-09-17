@@ -33,6 +33,7 @@ data class DisasterRecoveryDrillResult(
     val completedAtEpochMs: Long,
     val verifiedGitRefCount: Int,
     val verifiedLfsObjectCount: Int,
+    val verifiedLfsRepresentativeDownloadCount: Int = 0,
     val verifiedReleaseCount: Int,
     val verifiedReleaseAssetCount: Int,
     val automaticallyRepublished: List<String>,
@@ -77,6 +78,9 @@ class DisasterRecoveryDrillService @Inject constructor(
     private val repositoryGateway: GithubRepositoryRestoreGateway,
     private val authManager: GithubAuthManager,
     private val pushService: GitMirrorPushService,
+    private val lfsPointerScanner: GitLfsPointerScanner,
+    private val lfsDownloadService: GitLfsDownloadService,
+    private val releaseVerifier: DisasterRecoveryDrillReleaseVerifier,
 ) {
     suspend fun runToNewPrivateRepository(
         restoreId: String,
@@ -143,34 +147,77 @@ class DisasterRecoveryDrillService @Inject constructor(
         val token = authManager.requireRecoveryAccessToken()
         val credentials = UsernamePasswordCredentialsProvider("x-access-token", token)
         val repositoryDirectory = restoreCoordinator.requireRepositoryDirectory(record.id)
-        val verifiedRefs = pushService.verifyPublished(
-            repositoryDirectory = repositoryDirectory,
-            remoteUri = repository.cloneUrl,
-            credentialsProvider = credentials,
+        val scratchDirectory = File(
+            context.cacheDir,
+            "recovery-drill-verification/${record.id}-${System.nanoTime()}",
         )
-        if (verifiedRefs != publishResult.pushedRefCount) {
-            throw IOException(
-                "Post-publication Git verification count changed: published ${publishResult.pushedRefCount}, verified $verifiedRefs",
-            )
-        }
+        scratchDirectory.mkdirs()
 
-        val plan = record.toDisasterRecoveryDrillPlan()
-        val result = DisasterRecoveryDrillResult(
-            restoreId = record.id,
-            repositoryFullName = repository.fullName,
-            repositoryUrl = repository.htmlUrl,
-            completedAtEpochMs = System.currentTimeMillis(),
-            verifiedGitRefCount = verifiedRefs,
-            // LFS upload and release publication already perform remote verification
-            // before their counts are returned by the safe recovery publisher.
-            verifiedLfsObjectCount = publishResult.restoredLfsObjectCount,
-            verifiedReleaseCount = publishResult.restoredReleaseCount,
-            verifiedReleaseAssetCount = publishResult.restoredReleaseAssetCount,
-            automaticallyRepublished = plan.automaticallyRepublished,
-            archivalOnly = plan.archivalOnly,
-        )
-        persist(result)
-        return result
+        try {
+            val verifiedRefs = pushService.verifyPublished(
+                repositoryDirectory = repositoryDirectory,
+                remoteUri = repository.cloneUrl,
+                credentialsProvider = credentials,
+            )
+            if (verifiedRefs != publishResult.pushedRefCount) {
+                throw IOException(
+                    "Post-publication Git verification count changed: published ${publishResult.pushedRefCount}, verified $verifiedRefs",
+                )
+            }
+
+            val lfsPointers = withContext(Dispatchers.IO) {
+                lfsPointerScanner.scan(repositoryDirectory)
+            }
+            val lfsVerification = withContext(Dispatchers.IO) {
+                lfsDownloadService.verifyRemoteObjects(
+                    repositoryFullName = repository.fullName,
+                    accessToken = token,
+                    pointers = lfsPointers,
+                    scratchDirectory = scratchDirectory,
+                )
+            }
+            if (lfsVerification.availableObjectCount != publishResult.restoredLfsObjectCount) {
+                throw IOException(
+                    "Post-publication LFS verification count changed: published ${publishResult.restoredLfsObjectCount}, verified ${lfsVerification.availableObjectCount}",
+                )
+            }
+
+            val releaseVerification = withContext(Dispatchers.IO) {
+                releaseVerifier.verify(
+                    repositoryFullName = repository.fullName,
+                    accessToken = token,
+                    repositoryDirectory = repositoryDirectory,
+                )
+            }
+            if (releaseVerification.releaseCount != publishResult.restoredReleaseCount ||
+                releaseVerification.assetCount != publishResult.restoredReleaseAssetCount
+            ) {
+                throw IOException(
+                    "Post-publication release verification counts changed: published " +
+                        "${publishResult.restoredReleaseCount} releases/${publishResult.restoredReleaseAssetCount} assets, " +
+                        "verified ${releaseVerification.releaseCount} releases/${releaseVerification.assetCount} assets",
+                )
+            }
+
+            val plan = record.toDisasterRecoveryDrillPlan()
+            val result = DisasterRecoveryDrillResult(
+                restoreId = record.id,
+                repositoryFullName = repository.fullName,
+                repositoryUrl = repository.htmlUrl,
+                completedAtEpochMs = System.currentTimeMillis(),
+                verifiedGitRefCount = verifiedRefs,
+                verifiedLfsObjectCount = lfsVerification.availableObjectCount,
+                verifiedLfsRepresentativeDownloadCount = lfsVerification.downloadedRepresentativeCount,
+                verifiedReleaseCount = releaseVerification.releaseCount,
+                verifiedReleaseAssetCount = releaseVerification.assetCount,
+                automaticallyRepublished = plan.automaticallyRepublished,
+                archivalOnly = plan.archivalOnly,
+            )
+            persist(result)
+            return result
+        } finally {
+            scratchDirectory.deleteRecursively()
+        }
     }
 
     private suspend fun requireRestore(restoreId: String): MirrorRestoreRecord {
@@ -199,6 +246,7 @@ class DisasterRecoveryDrillService @Inject constructor(
         .put("completedAtEpochMs", completedAtEpochMs)
         .put("verifiedGitRefCount", verifiedGitRefCount)
         .put("verifiedLfsObjectCount", verifiedLfsObjectCount)
+        .put("verifiedLfsRepresentativeDownloadCount", verifiedLfsRepresentativeDownloadCount)
         .put("verifiedReleaseCount", verifiedReleaseCount)
         .put("verifiedReleaseAssetCount", verifiedReleaseAssetCount)
         .put("automaticallyRepublished", JSONArray(automaticallyRepublished))
@@ -215,6 +263,7 @@ class DisasterRecoveryDrillService @Inject constructor(
             completedAtEpochMs = json.getLong("completedAtEpochMs"),
             verifiedGitRefCount = json.getInt("verifiedGitRefCount"),
             verifiedLfsObjectCount = json.getInt("verifiedLfsObjectCount"),
+            verifiedLfsRepresentativeDownloadCount = json.optInt("verifiedLfsRepresentativeDownloadCount", 0),
             verifiedReleaseCount = json.getInt("verifiedReleaseCount"),
             verifiedReleaseAssetCount = json.getInt("verifiedReleaseAssetCount"),
             automaticallyRepublished = json.getJSONArray("automaticallyRepublished").toStringList(),

@@ -11,6 +11,11 @@ import javax.inject.Singleton
 import org.json.JSONArray
 import org.json.JSONObject
 
+data class GitLfsRemoteVerificationResult(
+    val availableObjectCount: Int,
+    val downloadedRepresentativeCount: Int,
+)
+
 @Singleton
 class GitLfsDownloadService @Inject constructor(
     private val objectStore: GitLfsObjectStore,
@@ -39,6 +44,55 @@ class GitLfsDownloadService @Inject constructor(
             }
         }
         return downloaded
+    }
+
+    /**
+     * Read-only post-publication proof used by the disaster-recovery drill.
+     * Every unique pointer must be advertised for download by the target. A
+     * deterministic bounded sample is downloaded again and fully verified by
+     * size and SHA-256 so the drill proves actual byte readability as well as
+     * remote availability.
+     */
+    fun verifyRemoteObjects(
+        repositoryFullName: String,
+        accessToken: String,
+        pointers: List<GitLfsPointer>,
+        scratchDirectory: File,
+    ): GitLfsRemoteVerificationResult {
+        val uniquePointers = pointers.distinctBy { it.oidSha256 }
+        if (uniquePointers.isEmpty()) return GitLfsRemoteVerificationResult(0, 0)
+        require(repositoryFullName.count { it == '/' } == 1) { "Invalid GitHub repository name" }
+        scratchDirectory.mkdirs()
+
+        val representatives = representativeLfsPointers(uniquePointers, REPRESENTATIVE_VERIFY_LIMIT)
+            .associateBy { it.oidSha256 }
+        val authorization = basicAuthorization(accessToken)
+        val batchUrl = "https://github.com/$repositoryFullName.git/info/lfs/objects/batch"
+        var downloadedRepresentatives = 0
+
+        uniquePointers.chunked(BATCH_SIZE).forEach { batch ->
+            val actions = requestDownloadActions(batchUrl, authorization, batch)
+            batch.forEach { pointer ->
+                val action = actions[pointer.oidSha256]
+                    ?: throw IOException("Git LFS batch response omitted ${pointer.oidSha256}")
+                if (pointer.oidSha256 !in representatives) return@forEach
+
+                val temp = File(scratchDirectory, "lfs-${pointer.oidSha256}.verify")
+                temp.delete()
+                try {
+                    downloadAction(action, temp, redirectsRemaining = MAX_REDIRECTS)
+                    objectStore.verify(temp, pointer)
+                    downloadedRepresentatives += 1
+                } finally {
+                    temp.delete()
+                }
+            }
+        }
+
+        return GitLfsRemoteVerificationResult(
+            availableObjectCount = uniquePointers.size,
+            downloadedRepresentativeCount = downloadedRepresentatives,
+        )
     }
 
     internal fun parseBatchResponse(
@@ -213,6 +267,7 @@ class GitLfsDownloadService @Inject constructor(
         const val READ_TIMEOUT_MS = 30_000
         const val LFS_READ_TIMEOUT_MS = 5 * 60_000
         const val MAX_REDIRECTS = 5
+        const val REPRESENTATIVE_VERIFY_LIMIT = 3
         val REDIRECT_CODES = setOf(301, 302, 303, 307, 308)
     }
 }
@@ -221,6 +276,14 @@ data class GitLfsDownloadAction(
     val href: String,
     val headers: Map<String, String>,
 )
+
+internal fun representativeLfsPointers(
+    pointers: List<GitLfsPointer>,
+    limit: Int = 3,
+): List<GitLfsPointer> {
+    require(limit >= 0) { "Representative LFS limit cannot be negative" }
+    return pointers.distinctBy { it.oidSha256 }.take(limit)
+}
 
 internal const val LFS_JSON_MEDIA_TYPE = "application/vnd.git-lfs+json"
 
