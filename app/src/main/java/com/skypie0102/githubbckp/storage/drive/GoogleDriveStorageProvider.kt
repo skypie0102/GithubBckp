@@ -40,32 +40,18 @@ class GoogleDriveStorageProvider @Inject constructor(
                     .put("backupType", artifact.type.name),
             )
 
-        val existingDriveFile = existing?.takeIf { it.provider == StorageDestination.GOOGLE_DRIVE }
-        val sessionUrl = try {
-            createResumableSession(
-                token = token,
-                metadata = metadata,
-                fileLength = artifact.file.length(),
-                mimeType = mimeType,
-                existingFileId = existingDriveFile?.id,
-            )
-        } catch (throwable: DriveHttpException) {
-            if (existingDriveFile != null && throwable.statusCode == HttpURLConnection.HTTP_NOT_FOUND) {
-                // A persisted Drive file ID can become invisible after the user
-                // authorizes a different Google account. In that case honor the
-                // current account by creating its new current mirror. The old row
-                // remains available for best-effort cleanup/audit history.
-                createResumableSession(
-                    token = token,
-                    metadata = metadata,
-                    fileLength = artifact.file.length(),
-                    mimeType = mimeType,
-                    existingFileId = null,
-                )
-            } else {
-                throw throwable
-            }
-        }
+        // Always create the replacement as a distinct Drive object. The previous
+        // verified object remains untouched until BackupCoordinator verifies and
+        // commits this new object, then cleanup retires the old ID. This avoids an
+        // interrupted in-place PATCH corrupting the only known-good mirror.
+        @Suppress("UNUSED_VARIABLE")
+        val previous = existing
+        val sessionUrl = createResumableSession(
+            token = token,
+            metadata = metadata,
+            fileLength = artifact.file.length(),
+            mimeType = mimeType,
+        )
         uploadToSession(
             sessionUrl = sessionUrl,
             token = token,
@@ -133,15 +119,8 @@ class GoogleDriveStorageProvider @Inject constructor(
         metadata: JSONObject,
         fileLength: Long,
         mimeType: String,
-        existingFileId: String?,
     ): String {
-        val url = if (existingFileId == null) {
-            RESUMABLE_CREATE_URL
-        } else {
-            "$RESUMABLE_UPDATE_URL/${path(existingFileId)}?uploadType=resumable&fields=id,name,size,md5Checksum,appProperties"
-        }
-        val method = if (existingFileId == null) "POST" else "PATCH"
-        val connection = open(url, method, token).apply {
+        val connection = open(RESUMABLE_CREATE_URL, "POST", token).apply {
             doOutput = true
             setRequestProperty("Content-Type", "application/json; charset=UTF-8")
             setRequestProperty("X-Upload-Content-Type", mimeType)
@@ -153,10 +132,7 @@ class GoogleDriveStorageProvider @Inject constructor(
             val code = connection.responseCode
             if (code !in 200..299) {
                 val error = connection.errorStream?.bufferedReader()?.use { it.readText() }.orEmpty()
-                throw DriveHttpException(
-                    statusCode = code,
-                    message = "Drive resumable-session HTTP $code: ${error.take(300)}",
-                )
+                throw IOException("Drive resumable-session HTTP $code: ${error.take(300)}")
             }
             connection.getHeaderField("Location")
                 ?: throw IOException("Drive did not return a resumable upload URL")
@@ -237,16 +213,10 @@ class GoogleDriveStorageProvider @Inject constructor(
     private fun query(value: String): String =
         URLEncoder.encode(value, StandardCharsets.UTF_8.name())
 
-    private class DriveHttpException(
-        val statusCode: Int,
-        message: String,
-    ) : IOException(message)
-
     private companion object {
         const val FILES_URL = "https://www.googleapis.com/drive/v3/files"
         const val RESUMABLE_CREATE_URL =
             "https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id,name,size,md5Checksum,appProperties"
-        const val RESUMABLE_UPDATE_URL = "https://www.googleapis.com/upload/drive/v3/files"
         const val CONNECT_TIMEOUT_MS = 30_000
         const val READ_TIMEOUT_MS = 120_000
         const val BUFFER_SIZE = 256 * 1024
