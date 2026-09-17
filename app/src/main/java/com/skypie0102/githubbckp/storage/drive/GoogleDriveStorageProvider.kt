@@ -41,13 +41,31 @@ class GoogleDriveStorageProvider @Inject constructor(
             )
 
         val existingDriveFile = existing?.takeIf { it.provider == StorageDestination.GOOGLE_DRIVE }
-        val sessionUrl = createResumableSession(
-            token = token,
-            metadata = metadata,
-            fileLength = artifact.file.length(),
-            mimeType = mimeType,
-            existingFileId = existingDriveFile?.id,
-        )
+        val sessionUrl = try {
+            createResumableSession(
+                token = token,
+                metadata = metadata,
+                fileLength = artifact.file.length(),
+                mimeType = mimeType,
+                existingFileId = existingDriveFile?.id,
+            )
+        } catch (throwable: DriveHttpException) {
+            if (existingDriveFile != null && throwable.statusCode == HttpURLConnection.HTTP_NOT_FOUND) {
+                // A persisted Drive file ID can become invisible after the user
+                // authorizes a different Google account. In that case honor the
+                // current account by creating its new current mirror. The old row
+                // remains available for best-effort cleanup/audit history.
+                createResumableSession(
+                    token = token,
+                    metadata = metadata,
+                    fileLength = artifact.file.length(),
+                    mimeType = mimeType,
+                    existingFileId = null,
+                )
+            } else {
+                throw throwable
+            }
+        }
         uploadToSession(
             sessionUrl = sessionUrl,
             token = token,
@@ -135,7 +153,10 @@ class GoogleDriveStorageProvider @Inject constructor(
             val code = connection.responseCode
             if (code !in 200..299) {
                 val error = connection.errorStream?.bufferedReader()?.use { it.readText() }.orEmpty()
-                throw IOException("Drive resumable-session HTTP $code: ${error.take(300)}")
+                throw DriveHttpException(
+                    statusCode = code,
+                    message = "Drive resumable-session HTTP $code: ${error.take(300)}",
+                )
             }
             connection.getHeaderField("Location")
                 ?: throw IOException("Drive did not return a resumable upload URL")
@@ -215,6 +236,11 @@ class GoogleDriveStorageProvider @Inject constructor(
 
     private fun query(value: String): String =
         URLEncoder.encode(value, StandardCharsets.UTF_8.name())
+
+    private class DriveHttpException(
+        val statusCode: Int,
+        message: String,
+    ) : IOException(message)
 
     private companion object {
         const val FILES_URL = "https://www.googleapis.com/drive/v3/files"
