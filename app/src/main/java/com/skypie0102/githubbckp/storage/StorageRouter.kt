@@ -14,8 +14,9 @@ class StorageRouter @Inject constructor(
 ) : StorageProvider {
     override suspend fun upload(
         artifact: BackupArtifact,
+        existing: RemoteBackup?,
         onProgress: suspend (uploadedBytes: Long, totalBytes: Long) -> Unit,
-    ): RemoteBackup = provider(preferences.destination()).upload(artifact, onProgress)
+    ): RemoteBackup = provider(preferences.destination()).upload(artifact, existing, onProgress)
 
     override suspend fun verify(remoteBackup: RemoteBackup): Boolean =
         provider(remoteBackup.provider).verify(remoteBackup)
