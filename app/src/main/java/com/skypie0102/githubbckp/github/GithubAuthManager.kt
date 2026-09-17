@@ -7,6 +7,9 @@ import java.net.URL
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
@@ -46,6 +49,9 @@ internal fun githubScopesContainWorkflow(value: String?): Boolean =
 class GithubAuthManager @Inject constructor(
     private val secureStore: SecureStore,
 ) {
+    private val _tokenEntryRequestVersion = MutableStateFlow(0L)
+    val tokenEntryRequestVersion: StateFlow<Long> = _tokenEntryRequestVersion.asStateFlow()
+
     /** No build-time GitHub OAuth application configuration is required. */
     fun isConfigured(): Boolean = true
 
@@ -65,18 +71,23 @@ class GithubAuthManager @Inject constructor(
         validation
     }
 
+    fun requestTokenEntry() {
+        _tokenEntryRequestVersion.value = _tokenEntryRequestVersion.value + 1L
+    }
+
     /**
-     * Compatibility guard for the old HomeScreen action. The real connection
-     * UI is GithubTokenOverlay; no OAuth app/client ID is used anymore.
+     * Compatibility bridge for the old HomeScreen action. It opens the PAT
+     * panel and aborts the removed Device Flow path before any OAuth request.
      */
     suspend fun startDeviceFlow(): GithubDeviceSession = withContext(Dispatchers.IO) {
-        throw IOException("GitHub Device Flow has been removed. Enter a personal access token in the GitHub token panel.")
+        requestTokenEntry()
+        throw IOException("Enter a GitHub personal access token in the GitHub token panel")
     }
 
     suspend fun pollUntilAuthorized(session: GithubDeviceSession): String = withContext(Dispatchers.IO) {
         @Suppress("UNUSED_VARIABLE")
         val ignored = session
-        throw IOException("GitHub Device Flow has been removed. Enter a personal access token in the GitHub token panel.")
+        throw IOException("GitHub Device Flow is no longer used")
     }
 
     suspend fun requireAccessToken(): String = withContext(Dispatchers.IO) {
@@ -88,6 +99,7 @@ class GithubAuthManager @Inject constructor(
     suspend fun requireRecoveryAccessToken(): String = withContext(Dispatchers.IO) {
         val token = requireAccessToken()
         if (!hasWorkflowScopeCached()) {
+            requestTokenEntry()
             throw GithubWorkflowPermissionRequiredException()
         }
         token
