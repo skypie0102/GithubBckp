@@ -10,7 +10,6 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.workDataOf
 import com.skypie0102.githubbckp.backup.BackupOrigin
-import com.skypie0102.githubbckp.backup.BackupType
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
@@ -25,13 +24,9 @@ class BackupScheduler @Inject constructor(
 ) {
     private val workManager = WorkManager.getInstance(context)
 
-    fun enqueue(
-        repositoryIds: List<Long>,
-        type: BackupType = BackupType.SOURCE_ARCHIVE,
-    ) {
+    fun enqueue(repositoryIds: List<Long>) {
         enqueueWithConstraints(
             repositoryIds = repositoryIds,
-            type = type,
             origin = BackupOrigin.MANUAL,
             scheduledRunId = null,
             constraints = manualConstraints(),
@@ -41,12 +36,10 @@ class BackupScheduler @Inject constructor(
 
     fun enqueueScheduled(
         repositoryIds: List<Long>,
-        type: BackupType,
         scheduledRunId: String,
     ) {
         enqueueWithConstraints(
             repositoryIds = repositoryIds,
-            type = type,
             origin = BackupOrigin.SCHEDULED,
             scheduledRunId = scheduledRunId,
             constraints = scheduledConstraints(),
@@ -110,7 +103,6 @@ class BackupScheduler @Inject constructor(
 
     private fun enqueueWithConstraints(
         repositoryIds: List<Long>,
-        type: BackupType,
         origin: BackupOrigin,
         scheduledRunId: String?,
         constraints: Constraints,
@@ -122,7 +114,6 @@ class BackupScheduler @Inject constructor(
                 .setInputData(
                     workDataOf(
                         RepositoryBackupWorker.KEY_REPOSITORY_ID to repositoryId,
-                        RepositoryBackupWorker.KEY_BACKUP_TYPE to type.name,
                         RepositoryBackupWorker.KEY_BACKUP_ORIGIN to origin.name,
                         RepositoryBackupWorker.KEY_SCHEDULED_RUN_ID to scheduledRunId,
                     ),
@@ -132,7 +123,7 @@ class BackupScheduler @Inject constructor(
                 .build()
 
             workManager.enqueueUniqueWork(
-                "backup-$repositoryId-${type.name}",
+                "backup-$repositoryId-mirror",
                 ExistingWorkPolicy.KEEP,
                 request,
             )
