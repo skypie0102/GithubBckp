@@ -75,11 +75,11 @@ class BackupProblemNotificationPolicyTest {
     }
 
     @Test
-    fun `pruned completion does not protect an overdue repository`() {
-        val pruned = completed(1L, NOW - hours(1)).copy(remoteDeletedAtEpochMs = NOW - hours(1))
+    fun `superseded completion does not protect an overdue repository`() {
+        val superseded = completed(1L, NOW - hours(1)).copy(remoteDeletedAtEpochMs = NOW - hours(1))
         val overdue = findOverdueBackupRepositories(
             repositories = listOf(repository(1L)),
-            backups = listOf(pruned),
+            backups = listOf(superseded),
             settings = enabledSettings(BackupCadence.DAILY),
             scheduleEnabledAtEpochMs = NOW - hours(100),
             nowEpochMs = NOW,
@@ -98,7 +98,6 @@ class BackupProblemNotificationPolicyTest {
     private fun enabledSettings(cadence: BackupCadence) = BackupScheduleSettings(
         enabled = true,
         cadence = cadence,
-        backupType = BackupType.GIT_MIRROR,
     )
 
     private fun repository(
