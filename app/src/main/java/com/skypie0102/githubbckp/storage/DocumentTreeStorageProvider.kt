@@ -27,7 +27,6 @@ class DocumentTreeStorageProvider @Inject constructor(
 ) : StorageProvider {
     override suspend fun upload(
         artifact: BackupArtifact,
-        existing: RemoteBackup?,
         onProgress: suspend (uploadedBytes: Long, totalBytes: Long) -> Unit,
     ): RemoteBackup = withContext(Dispatchers.IO) {
         val rootUri = preferences.documentTreeUri()
@@ -41,22 +40,10 @@ class DocumentTreeStorageProvider @Inject constructor(
             .findOrCreateDirectory(artifact.repository.owner)
             .findOrCreateDirectory(artifact.repository.name)
 
-        // Resolve the previous logical mirror only inside the *currently selected*
-        // tree. A persisted URI from an older tree selection must never silently
-        // keep receiving writes after the user chooses a different folder.
-        val recordedDocument = existing
-            ?.takeIf { it.provider == StorageDestination.DOCUMENT_TREE }
-            ?.name
-            ?.let(repositoryFolder::findFile)
-            ?.takeIf { it.isFile && it.canWrite() }
-        val stableDocument = repositoryFolder.findFile(artifact.file.name)
-            ?.takeIf { it.isFile && it.canWrite() }
-        val currentDocument = recordedDocument ?: stableDocument
-
         // Never truncate the last known-good document while producing its
         // replacement. Write a sibling first and verify its full bytes locally.
         // BackupCoordinator independently verifies and persists this staged object
-        // before it asks the provider to retire the previous document.
+        // before it asks the provider to retire any superseded document.
         val stagedName = "${artifact.file.name}.pending-${System.nanoTime()}"
         val stagedDocument = repositoryFolder.createFile(mimeType(artifact), stagedName)
             ?: throw IOException("Could not create a staged mirror in the selected folder")
@@ -65,9 +52,10 @@ class DocumentTreeStorageProvider @Inject constructor(
             writeArtifact(artifact, stagedDocument, onProgress)
             requireArtifactDigests(artifact, stagedDocument)
 
-            // If no stable-name document exists, normalize immediately. Otherwise
-            // keep the verified staging name until coordinator cleanup removes the
-            // previous current object. The next successful update can normalize it.
+            // If the stable mirror name is free, normalize immediately. If an old
+            // verified object still owns it, keep the staging name until coordinator
+            // cleanup retires that older object. The next successful replacement can
+            // normalize the name once it is available.
             val stableStillExists = repositoryFolder.findFile(artifact.file.name)
                 ?.takeIf { it.exists() && it.uri != stagedDocument.uri }
             if (stableStillExists == null && stagedDocument.name != artifact.file.name) {
