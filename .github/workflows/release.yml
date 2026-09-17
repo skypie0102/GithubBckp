@@ -88,7 +88,7 @@ jobs:
             echo "Preparing $RELEASE_TAG from $GITHUB_SHA."
           fi
 
-      - name: Prepare persistent release signing
+      - name: Prepare release signing
         if: steps.release_version.outputs.release_needed == 'true'
         shell: bash
         env:
@@ -99,22 +99,38 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [ -z "$KEYSTORE_BASE64" ] || [ -z "$SECRET_KEYSTORE_PASSWORD" ] || [ -z "$SECRET_KEY_ALIAS" ] || [ -z "$SECRET_KEY_PASSWORD" ]; then
-            echo "Persistent Android release signing secrets are required." >&2
-            echo "Configure ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, and ANDROID_KEY_PASSWORD." >&2
-            echo "GithubBckp deliberately does not generate a one-off fallback key because Google Drive OAuth is bound to the signing certificate SHA-1." >&2
-            exit 1
+          if [ -n "$KEYSTORE_BASE64" ] && [ -n "$SECRET_KEYSTORE_PASSWORD" ] && [ -n "$SECRET_KEY_ALIAS" ] && [ -n "$SECRET_KEY_PASSWORD" ]; then
+            printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$GITHUBBCKP_KEYSTORE_PATH"
+            echo "GITHUBBCKP_KEYSTORE_PASSWORD=$SECRET_KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
+            echo "GITHUBBCKP_KEY_ALIAS=$SECRET_KEY_ALIAS" >> "$GITHUB_ENV"
+            echo "GITHUBBCKP_KEY_PASSWORD=$SECRET_KEY_PASSWORD" >> "$GITHUB_ENV"
+            echo "SIGNING_MODE=persistent release key" >> "$GITHUB_ENV"
+            ACTIVE_STORE_PASSWORD="$SECRET_KEYSTORE_PASSWORD"
+            ACTIVE_ALIAS="$SECRET_KEY_ALIAS"
+          else
+            TEMP_PASSWORD='githubbckp-oneoff'
+            TEMP_ALIAS='githubbckp-oneoff'
+            keytool -genkeypair \
+              -keystore "$GITHUBBCKP_KEYSTORE_PATH" \
+              -storepass "$TEMP_PASSWORD" \
+              -keypass "$TEMP_PASSWORD" \
+              -alias "$TEMP_ALIAS" \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 3650 \
+              -dname "CN=GithubBckp ${RELEASE_TAG} One-Off Release, O=GithubBckp, C=PH"
+            echo "GITHUBBCKP_KEYSTORE_PASSWORD=$TEMP_PASSWORD" >> "$GITHUB_ENV"
+            echo "GITHUBBCKP_KEY_ALIAS=$TEMP_ALIAS" >> "$GITHUB_ENV"
+            echo "GITHUBBCKP_KEY_PASSWORD=$TEMP_PASSWORD" >> "$GITHUB_ENV"
+            echo "SIGNING_MODE=one-off fallback key (persistent release secrets not configured)" >> "$GITHUB_ENV"
+            ACTIVE_STORE_PASSWORD="$TEMP_PASSWORD"
+            ACTIVE_ALIAS="$TEMP_ALIAS"
           fi
-
-          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$GITHUBBCKP_KEYSTORE_PATH"
-          echo "GITHUBBCKP_KEYSTORE_PASSWORD=$SECRET_KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
-          echo "GITHUBBCKP_KEY_ALIAS=$SECRET_KEY_ALIAS" >> "$GITHUB_ENV"
-          echo "GITHUBBCKP_KEY_PASSWORD=$SECRET_KEY_PASSWORD" >> "$GITHUB_ENV"
 
           SIGNING_SHA1="$(keytool -list -v \
             -keystore "$GITHUBBCKP_KEYSTORE_PATH" \
-            -storepass "$SECRET_KEYSTORE_PASSWORD" \
-            -alias "$SECRET_KEY_ALIAS" | sed -n 's/^[[:space:]]*SHA1: //p' | head -n 1)"
+            -storepass "$ACTIVE_STORE_PASSWORD" \
+            -alias "$ACTIVE_ALIAS" | sed -n 's/^[[:space:]]*SHA1: //p' | head -n 1)"
           test -n "$SIGNING_SHA1"
           echo "SIGNING_SHA1=$SIGNING_SHA1" >> "$GITHUB_ENV"
 
@@ -162,6 +178,7 @@ jobs:
             Version code: ${{ env.APP_VERSION_CODE }}
             Version name: ${{ env.RELEASE_VERSION }}
             Package: com.skypie0102.githubbckp
+            Signing mode: ${{ env.SIGNING_MODE }}
             Signing SHA-1: ${{ env.SIGNING_SHA1 }}
           files: |
             githubbckp-${{ env.RELEASE_TAG }}.apk
