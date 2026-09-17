@@ -44,48 +44,53 @@ class DocumentTreeStorageProvider @Inject constructor(
         // Reuse only a document that is discoverable below the *currently selected*
         // repository folder. A persisted URI from an older document-tree selection
         // must not silently keep receiving backups after the user changes folders.
-        val existingDocument = existing
+        val recordedDocument = existing
             ?.takeIf { it.provider == StorageDestination.DOCUMENT_TREE }
             ?.name
             ?.let(repositoryFolder::findFile)
             ?.takeIf { it.isFile && it.canWrite() }
-        val document = repositoryFolder.findFile(artifact.file.name)
+        val stableDocument = repositoryFolder.findFile(artifact.file.name)
             ?.takeIf { it.isFile && it.canWrite() }
-            ?: existingDocument
-            ?: repositoryFolder.createFile(mimeType(artifact), artifact.file.name)
-            ?: throw IOException("Could not create ${artifact.file.name} in the selected folder")
+        val currentDocument = recordedDocument ?: stableDocument
 
-        val totalBytes = artifact.file.length()
-        var uploadedBytes = 0L
-        val output = context.contentResolver.openOutputStream(document.uri, "wt")
-            ?: throw IOException("Could not open the destination file for writing")
-        output.buffered().use { destination ->
-            FileInputStream(artifact.file).use { source ->
-                val buffer = ByteArray(BUFFER_SIZE)
-                while (true) {
-                    val count = source.read(buffer)
-                    if (count < 0) break
-                    destination.write(buffer, 0, count)
-                    uploadedBytes += count
-                    onProgress(uploadedBytes, totalBytes)
-                }
+        // Never truncate the last known-good document while producing its
+        // replacement. Write a sibling first, verify its full bytes locally, then
+        // retire the previous document. If the process dies while writing the
+        // staged file, the current verified mirror remains untouched.
+        val stagedName = "${artifact.file.name}.pending-${System.nanoTime()}"
+        val stagedDocument = repositoryFolder.createFile(mimeType(artifact), stagedName)
+            ?: throw IOException("Could not create a staged mirror in the selected folder")
+
+        try {
+            writeArtifact(artifact, stagedDocument, onProgress)
+            requireArtifactDigests(artifact, stagedDocument)
+
+            if (currentDocument != null && currentDocument.uri != stagedDocument.uri) {
+                // Best effort: coordinator cleanup is deliberately idempotent and
+                // retries removal after its independent provider verification.
+                runCatching { currentDocument.delete() }
             }
-        }
 
-        if (document.name != artifact.file.name) {
-            // Best effort migration from the old timestamped naming scheme when
-            // that old file still lives below the selected destination tree.
-            document.renameTo(artifact.file.name)
-        }
+            val stableStillExists = repositoryFolder.findFile(artifact.file.name)
+                ?.takeIf { it.exists() && it.uri != stagedDocument.uri }
+            if (stableStillExists == null && stagedDocument.name != artifact.file.name) {
+                // Rename is cosmetic. If the provider cannot rename, keep the
+                // verified staged document and persist its actual URI/name.
+                stagedDocument.renameTo(artifact.file.name)
+            }
 
-        RemoteBackup(
-            id = document.uri.toString(),
-            name = document.name ?: artifact.file.name,
-            sizeBytes = totalBytes,
-            checksumSha256 = artifact.checksumSha256,
-            checksumMd5 = artifact.checksumMd5,
-            provider = StorageDestination.DOCUMENT_TREE,
-        )
+            RemoteBackup(
+                id = stagedDocument.uri.toString(),
+                name = stagedDocument.name ?: artifact.file.name,
+                sizeBytes = artifact.file.length(),
+                checksumSha256 = artifact.checksumSha256,
+                checksumMd5 = artifact.checksumMd5,
+                provider = StorageDestination.DOCUMENT_TREE,
+            )
+        } catch (throwable: Throwable) {
+            runCatching { stagedDocument.delete() }
+            throw throwable
+        }
     }
 
     override suspend fun verify(remoteBackup: RemoteBackup): Boolean = withContext(Dispatchers.IO) {
@@ -111,8 +116,47 @@ class DocumentTreeStorageProvider @Inject constructor(
 
     override suspend fun delete(remoteBackup: RemoteBackup) = withContext(Dispatchers.IO) {
         val document = DocumentFile.fromSingleUri(context, Uri.parse(remoteBackup.id))
-            ?: throw IOException("Backup file is no longer available")
+            ?: return@withContext
+        if (!document.exists()) return@withContext
         check(document.delete()) { "Could not delete ${remoteBackup.name}" }
+    }
+
+    private suspend fun writeArtifact(
+        artifact: BackupArtifact,
+        document: DocumentFile,
+        onProgress: suspend (uploadedBytes: Long, totalBytes: Long) -> Unit,
+    ) {
+        val totalBytes = artifact.file.length()
+        var uploadedBytes = 0L
+        val output = context.contentResolver.openOutputStream(document.uri, "wt")
+            ?: throw IOException("Could not open the staged mirror for writing")
+        output.buffered().use { destination ->
+            FileInputStream(artifact.file).use { source ->
+                val buffer = ByteArray(BUFFER_SIZE)
+                while (true) {
+                    val count = source.read(buffer)
+                    if (count < 0) break
+                    destination.write(buffer, 0, count)
+                    uploadedBytes += count
+                    onProgress(uploadedBytes, totalBytes)
+                }
+            }
+        }
+    }
+
+    private fun requireArtifactDigests(artifact: BackupArtifact, document: DocumentFile) {
+        val input = context.contentResolver.openInputStream(document.uri)
+            ?: throw IOException("Could not reopen the staged mirror for verification")
+        val digests = input.use(::calculateDigests)
+        check(digests.sizeBytes == artifact.file.length()) {
+            "Staged mirror size verification failed"
+        }
+        check(digests.sha256.equals(artifact.checksumSha256, ignoreCase = true)) {
+            "Staged mirror SHA-256 verification failed"
+        }
+        check(digests.md5.equals(artifact.checksumMd5, ignoreCase = true)) {
+            "Staged mirror MD5 verification failed"
+        }
     }
 
     private fun DocumentFile.findOrCreateDirectory(name: String): DocumentFile =
