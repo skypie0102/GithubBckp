@@ -146,6 +146,6 @@ The release build uses R8 minification and resource shrinking. The large Materia
 
 The GitHub release workflow follows the Intake Edit release shape: it validates the app version, builds a signed release APK, verifies the signature, renames the artifact to `githubbckp-v<version>.apk`, creates a SHA-256 sidecar, and publishes both files to a GitHub Release.
 
-Unlike Intake Edit's current one-off fallback signing, GithubBckp requires a persistent release key because Google Drive Android OAuth is bound to the signing certificate SHA-1. The workflow fails instead of silently generating a disposable key when signing secrets are missing.
+Release signing mirrors Intake Edit: the workflow uses configured persistent signing secrets when available and otherwise generates a one-off fallback key. Google Drive Android OAuth is bound to the signing certificate SHA-1, so one-off releases require the corresponding release SHA-1 to be registered before Drive authorization will work.
 
 See [`RELEASE.md`](RELEASE.md).
