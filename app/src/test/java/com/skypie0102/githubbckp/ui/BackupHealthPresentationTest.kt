@@ -26,6 +26,46 @@ class BackupHealthPresentationTest {
     }
 
     @Test
+    fun `legacy source snapshot does not protect mirror health`() {
+        val legacySnapshot = completed(id = 9L, repositoryId = 1L, completedAt = NOW - hours(1)).copy(
+            type = BackupType.SOURCE_ARCHIVE,
+        )
+        val summary = summarizeBackupHealth(
+            repositories = listOf(repository(id = 1L)),
+            backups = listOf(legacySnapshot),
+            scheduleEnabled = false,
+            cadence = BackupCadence.DAILY,
+            nowEpochMs = NOW,
+        )
+
+        assertEquals(0, summary.verifiedCount)
+        assertEquals(RepositoryBackupHealthState.NEVER_BACKED_UP, summary.repositories.single().state)
+    }
+
+    @Test
+    fun `legacy snapshot attempt does not override current mirror health`() {
+        val mirror = completed(id = 10L, repositoryId = 1L, completedAt = NOW - hours(3))
+        val newerLegacyFailure = BackupEntity(
+            id = 11L,
+            repositoryId = 1L,
+            type = BackupType.SOURCE_ARCHIVE,
+            status = BackupStatus.FAILED,
+            startedAtEpochMs = NOW - hours(1),
+            completedAtEpochMs = NOW,
+            errorMessage = "legacy failure",
+        )
+        val summary = summarizeBackupHealth(
+            repositories = listOf(repository(id = 1L)),
+            backups = listOf(mirror, newerLegacyFailure),
+            scheduleEnabled = false,
+            cadence = BackupCadence.DAILY,
+            nowEpochMs = NOW,
+        )
+
+        assertEquals(RepositoryBackupHealthState.PROTECTED, summary.repositories.single().state)
+    }
+
+    @Test
     fun `unselected repositories are excluded from health summary`() {
         val summary = summarizeBackupHealth(
             repositories = listOf(
@@ -161,13 +201,13 @@ class BackupHealthPresentationTest {
     }
 
     @Test
-    fun `retention-pruned completion does not count as a current verified artifact`() {
-        val pruned = completed(id = 10L, repositoryId = 1L, completedAt = NOW - hours(2)).copy(
+    fun `superseded completion does not count as a current verified artifact`() {
+        val superseded = completed(id = 10L, repositoryId = 1L, completedAt = NOW - hours(2)).copy(
             remoteDeletedAtEpochMs = NOW - hours(1),
         )
         val summary = summarizeBackupHealth(
             repositories = listOf(repository(id = 1L)),
-            backups = listOf(pruned),
+            backups = listOf(superseded),
             scheduleEnabled = false,
             cadence = BackupCadence.DAILY,
             nowEpochMs = NOW,
