@@ -27,6 +27,7 @@ class DocumentTreeStorageProvider @Inject constructor(
 ) : StorageProvider {
     override suspend fun upload(
         artifact: BackupArtifact,
+        existing: RemoteBackup?,
         onProgress: suspend (uploadedBytes: Long, totalBytes: Long) -> Unit,
     ): RemoteBackup = withContext(Dispatchers.IO) {
         val rootUri = preferences.documentTreeUri()
@@ -39,12 +40,19 @@ class DocumentTreeStorageProvider @Inject constructor(
             .findOrCreateDirectory("GitHub Backups")
             .findOrCreateDirectory(artifact.repository.owner)
             .findOrCreateDirectory(artifact.repository.name)
-        val document = repositoryFolder.createFile(mimeType(artifact), artifact.file.name)
+
+        val existingDocument = existing
+            ?.takeIf { it.provider == StorageDestination.DOCUMENT_TREE }
+            ?.let { remote -> DocumentFile.fromSingleUri(context, Uri.parse(remote.id)) }
+            ?.takeIf { it.exists() && it.isFile && it.canWrite() }
+        val document = existingDocument
+            ?: repositoryFolder.findFile(artifact.file.name)?.takeIf { it.isFile && it.canWrite() }
+            ?: repositoryFolder.createFile(mimeType(artifact), artifact.file.name)
             ?: throw IOException("Could not create ${artifact.file.name} in the selected folder")
 
         val totalBytes = artifact.file.length()
         var uploadedBytes = 0L
-        val output = context.contentResolver.openOutputStream(document.uri, "w")
+        val output = context.contentResolver.openOutputStream(document.uri, "wt")
             ?: throw IOException("Could not open the destination file for writing")
         output.buffered().use { destination ->
             FileInputStream(artifact.file).use { source ->
@@ -57,6 +65,11 @@ class DocumentTreeStorageProvider @Inject constructor(
                     onProgress(uploadedBytes, totalBytes)
                 }
             }
+        }
+
+        if (document.name != artifact.file.name) {
+            // Best effort migration from the old timestamped naming scheme.
+            document.renameTo(artifact.file.name)
         }
 
         RemoteBackup(
