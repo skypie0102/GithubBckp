@@ -171,9 +171,15 @@ private fun RecoveryDrillRestoreCard(
                     .format(Date(previous.completedAtEpochMs))
                 Text("Last drill passed $timestamp", style = MaterialTheme.typography.bodySmall)
                 Text(
-                    "Verified ${previous.verifiedGitRefCount} Git refs" +
-                        if (previous.verifiedLfsObjectCount > 0) " • ${previous.verifiedLfsObjectCount} LFS" else "" +
-                        if (previous.verifiedReleaseAssetCount > 0) " • ${previous.verifiedReleaseAssetCount} release assets" else "",
+                    buildString {
+                        append("Verified ${previous.verifiedGitRefCount} Git refs")
+                        if (previous.verifiedLfsObjectCount > 0) {
+                            append(" • ${previous.verifiedLfsObjectCount} LFS objects")
+                        }
+                        if (previous.verifiedReleaseAssetCount > 0) {
+                            append(" • ${previous.verifiedReleaseAssetCount} release assets")
+                        }
+                    },
                     style = MaterialTheme.typography.bodySmall,
                 )
                 OutlinedButton(onClick = { uriHandler.openUri(previous.repositoryUrl) }, enabled = !busy) {
