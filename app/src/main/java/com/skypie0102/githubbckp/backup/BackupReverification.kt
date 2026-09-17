@@ -72,7 +72,7 @@ class BackupReverificationService @Inject constructor(
             ?: error("Backup history row no longer exists")
         check(backup.canReverifyBackup()) {
             if (backup.remoteDeletedAtEpochMs != null) {
-                "The remote backup was pruned and cannot be re-verified"
+                "This history row no longer owns a current remote object and cannot be re-verified"
             } else {
                 "This backup does not contain enough persisted provider/checksum metadata for re-verification"
             }
