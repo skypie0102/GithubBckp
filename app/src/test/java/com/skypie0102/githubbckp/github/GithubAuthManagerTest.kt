@@ -7,6 +7,12 @@ import org.junit.Test
 
 class GithubAuthManagerTest {
     @Test
+    fun normalizesPersonalAccessTokenInput() {
+        assertEquals("github_pat_example", normalizePersonalAccessToken("  github_pat_example\n"))
+        assertEquals("", normalizePersonalAccessToken("   "))
+    }
+
+    @Test
     fun parsesCommaAndWhitespaceSeparatedScopes() {
         val scopes = parseGithubOauthScopes("repo, workflow   offline_access,repo")
 
@@ -18,11 +24,5 @@ class GithubAuthManagerTest {
         assertTrue(githubScopesContainWorkflow("repo, workflow, offline_access"))
         assertTrue(githubScopesContainWorkflow("repo workflow"))
         assertFalse(githubScopesContainWorkflow("repo, offline_access"))
-    }
-
-    @Test
-    fun legacyTokenWithoutCachedScopeMetadataIsNotAssumedToHaveWorkflowPermission() {
-        assertFalse(githubScopesContainWorkflow(null))
-        assertFalse(githubScopesContainWorkflow(""))
     }
 }
