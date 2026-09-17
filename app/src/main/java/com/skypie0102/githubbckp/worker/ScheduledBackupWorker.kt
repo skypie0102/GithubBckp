@@ -65,7 +65,6 @@ class ScheduledBackupWorker(
 
         dependencies.backupScheduler().enqueueScheduled(
             repositoryIds = repositoryIds,
-            type = settings.backupType,
             scheduledRunId = scheduledRunId,
         )
         schedulePreferences.saveRunStatus(
