@@ -49,20 +49,24 @@ Implemented behavior:
 - exported backup-audit JSON includes the latest recorded re-verification result;
 - re-verification never changes the historical `COMPLETED` backup result and never mutates the remote artifact.
 
+### P1 — Guided disaster-recovery drill — #36 — complete
+
+Validated restored mirrors can be used for a guided recovery rehearsal without weakening the normal recovery safety model.
+
+Implemented behavior:
+
+- the drill starts from a locally validated imported mirror;
+- the UI identifies Git/LFS/releases as automatically republishable when present and wiki/discussion datasets as archival-only;
+- drills require either a newly created private repository or an existing private repository that is still provably empty;
+- the normal recovery publisher remains responsible for OAuth scope checks, empty-target checks, LFS publication, non-force Git publication, release/asset publication, and resumable phases;
+- drill transactions use isolated target-specific transaction keys, so a rehearsal cannot consume the restored mirror's normal recovery binding and retries of the same rehearsal remain resumable;
+- after publication, every writable Git ref is compared with the remote advertised ref/object ID; LFS and release-asset counts are reported only after their existing remote verification succeeds;
+- the latest successful drill result is stored in app-private JSON and shown with the restored mirror;
+- the app never automatically deletes a drill repository.
+
 ## Active roadmap
 
-### P1 — Guided disaster-recovery drill — #36
-
-Goal: make recovery testing a routine operation rather than something first attempted during an emergency.
-
-Acceptance criteria:
-
-- guide the user from a selected verified mirror through safe import and recovery;
-- require a new or provably empty private GitHub target;
-- show which modules can be republished automatically and which are archival only;
-- verify representative Git refs plus applicable LFS and release assets after publication;
-- produce a concise drill result/audit record;
-- do not automatically delete repositories or bypass existing recovery safety checks.
+There are currently **no active product-feature roadmap items**. The personal reliability roadmap is complete.
 
 ## Later only if personal use creates a real need
 
@@ -89,4 +93,4 @@ These cuts are deliberate safety/maintenance decisions, not release blockers.
 
 ## Priority rule
 
-After the remaining active roadmap item is complete, feature development should stop by default. New features require a concrete problem observed during personal use. Reliability fixes, compatibility fixes, security fixes, and recovery-safety improvements remain in scope at any time.
+Feature development is now frozen by default. New features require a concrete recurring problem observed during personal use. Reliability fixes, compatibility fixes, security fixes, and recovery-safety improvements remain in scope at any time.
