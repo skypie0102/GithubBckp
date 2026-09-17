@@ -34,6 +34,8 @@ class BackupCoordinator @Inject constructor(
             ),
         )
         var artifact: BackupArtifact? = null
+        var replacementCandidate: RemoteBackup? = null
+        var replacementCommitted = false
 
         return try {
             val workingDirectory = File(context.cacheDir, "backups/${request.repository.id}/$backupId")
@@ -50,6 +52,7 @@ class BackupCoordinator @Inject constructor(
 
             backupDao.updateBackupStatus(backupId, BackupStatus.UPLOADING)
             val remoteBackup = storageProvider.upload(artifact = artifact)
+            replacementCandidate = remoteBackup
 
             backupDao.updateBackupStatus(backupId, BackupStatus.VERIFYING)
             check(storageProvider.verify(remoteBackup)) {
@@ -72,6 +75,7 @@ class BackupCoordinator @Inject constructor(
                 remoteChecksumMd5 = remoteBackup.checksumMd5,
                 warningMessage = creationWarnings,
             )
+            replacementCommitted = true
 
             val cleanupWarnings = cleanupSupersededBackups(previousBackups, remoteBackup)
             if (cleanupWarnings.isNotEmpty()) {
@@ -86,6 +90,15 @@ class BackupCoordinator @Inject constructor(
             }
             true
         } catch (throwable: Throwable) {
+            // A staged replacement that never became the committed current mirror
+            // is disposable. Best-effort deletion prevents failed verification or
+            // database writes from accumulating orphan candidates while leaving the
+            // previous verified mirror untouched.
+            if (!replacementCommitted) {
+                replacementCandidate?.let { candidate ->
+                    runCatching { storageProvider.delete(candidate) }
+                }
+            }
             backupDao.failBackup(
                 backupId = backupId,
                 status = BackupStatus.FAILED,
