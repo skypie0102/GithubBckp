@@ -77,7 +77,7 @@ The installable artifact is now the signed, minified/resource-shrunk `release` A
 
 The GitHub Actions release flow mirrors Intake Edit's release publishing shape: version validation, signed APK build, signature verification, versioned filename, SHA-256 sidecar, and GitHub Release publication.
 
-GithubBckp intentionally requires a persistent signing key instead of Intake Edit's current disposable fallback key because Google Drive Android OAuth is bound to the APK signing certificate SHA-1.
+Release signing now mirrors Intake Edit: persistent signing secrets are optional and the workflow falls back to a one-off key when they are absent. Google Drive users must register the SHA-1 of the actually installed release; a persistent key remains optional if stable updates and a stable OAuth identity are desired.
 
 ## Active roadmap
 
