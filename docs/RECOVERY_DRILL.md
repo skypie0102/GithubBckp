@@ -7,7 +7,7 @@ It deliberately reuses the normal recovery engine. The drill does **not** have a
 ## Before running a drill
 
 1. Import a Git mirror through the normal restore picker. The app validates the mirror before retaining it in app-private storage.
-2. Make sure GitHub is connected with the recovery `workflow` permission available.
+2. Make sure GitHub is connected with a personal access token suitable for recovery. For the simplest classic-token setup, use `repo` + `workflow` scopes.
 3. Open **Recovery drill**.
 4. Select one of the locally validated mirrors.
 
