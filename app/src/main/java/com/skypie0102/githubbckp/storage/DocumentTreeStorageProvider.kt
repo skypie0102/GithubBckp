@@ -44,7 +44,7 @@ class DocumentTreeStorageProvider @Inject constructor(
         // replacement. Write a sibling first and verify its full bytes locally.
         // BackupCoordinator independently verifies and persists this staged object
         // before it asks the provider to retire any superseded document.
-        val stagedName = "${artifact.file.name}.pending-${System.nanoTime()}"
+        val stagedName = stagedMirrorName(artifact.file.name)
         val stagedDocument = repositoryFolder.createFile(mimeType(artifact), stagedName)
             ?: throw IOException("Could not create a staged mirror in the selected folder")
 
@@ -54,8 +54,8 @@ class DocumentTreeStorageProvider @Inject constructor(
 
             // If the stable mirror name is free, normalize immediately. If an old
             // verified object still owns it, keep the staging name until coordinator
-            // cleanup retires that older object. The next successful replacement can
-            // normalize the name once it is available.
+            // cleanup retires that older object. Staged names still end in
+            // `.mirror.zip`, so a crash-safe current mirror remains recognizable.
             val stableStillExists = repositoryFolder.findFile(artifact.file.name)
                 ?.takeIf { it.exists() && it.uri != stagedDocument.uri }
             if (stableStillExists == null && stagedDocument.name != artifact.file.name) {
@@ -139,6 +139,16 @@ class DocumentTreeStorageProvider @Inject constructor(
         }
         check(digests.md5.equals(artifact.checksumMd5, ignoreCase = true)) {
             "Staged mirror MD5 verification failed"
+        }
+    }
+
+    private fun stagedMirrorName(stableName: String): String {
+        val marker = ".pending-${System.nanoTime()}"
+        val mirrorSuffix = ".mirror.zip"
+        return if (stableName.endsWith(mirrorSuffix, ignoreCase = true)) {
+            stableName.dropLast(mirrorSuffix.length) + marker + mirrorSuffix
+        } else {
+            stableName + marker
         }
     }
 
