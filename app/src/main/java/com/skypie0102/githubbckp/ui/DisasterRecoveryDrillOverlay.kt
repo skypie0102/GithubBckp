@@ -172,12 +172,15 @@ private fun RecoveryDrillRestoreCard(
                 Text("Last drill passed $timestamp", style = MaterialTheme.typography.bodySmall)
                 Text(
                     buildString {
-                        append("Verified ${previous.verifiedGitRefCount} Git refs")
+                        append("Post-publication: ${previous.verifiedGitRefCount} Git refs matched")
                         if (previous.verifiedLfsObjectCount > 0) {
-                            append(" • ${previous.verifiedLfsObjectCount} LFS objects")
+                            append(" • ${previous.verifiedLfsObjectCount} LFS objects available")
+                            if (previous.verifiedLfsRepresentativeDownloadCount > 0) {
+                                append(" (${previous.verifiedLfsRepresentativeDownloadCount} re-downloaded + SHA-256 checked)")
+                            }
                         }
-                        if (previous.verifiedReleaseAssetCount > 0) {
-                            append(" • ${previous.verifiedReleaseAssetCount} release assets")
+                        if (previous.verifiedReleaseCount > 0 || previous.verifiedReleaseAssetCount > 0) {
+                            append(" • ${previous.verifiedReleaseCount} releases / ${previous.verifiedReleaseAssetCount} assets re-verified")
                         }
                     },
                     style = MaterialTheme.typography.bodySmall,
@@ -213,7 +216,7 @@ private fun RecoveryDrillTargetCard(
         ) {
             Text("2. Choose a private drill target", style = MaterialTheme.typography.titleMedium)
             Text(
-                "The normal recovery engine will publish ${plan.automaticallyRepublished.joinToString()} and then verify the published Git refs. LFS and release counts are reported only after their existing remote verification completes.",
+                "The normal recovery engine publishes ${plan.automaticallyRepublished.joinToString()}. After publication the drill independently compares every writable Git ref, checks every referenced LFS object is downloadable and re-hashes a bounded sample, then re-reads releases/assets and verifies asset SHA-256.",
                 style = MaterialTheme.typography.bodySmall,
             )
             if (plan.archivalOnly.isNotEmpty()) {
