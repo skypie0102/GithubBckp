@@ -46,7 +46,7 @@ class BackupAuditTest {
         val repository = json.getJSONObject("repository")
         val backupJson = json.getJSONObject("backup")
 
-        assertEquals(5, json.getInt("formatVersion"))
+        assertEquals(6, json.getInt("formatVersion"))
         assertEquals("github-backup-artifact-audit", json.getString("reportType"))
         assertEquals(999, json.getLong("generatedAtEpochMs"))
         assertEquals("octo/demo", repository.getString("fullName"))
@@ -59,7 +59,7 @@ class BackupAuditTest {
         assertEquals("SCHEDULED", backupJson.getString("origin"))
         assertEquals("run-123", backupJson.getString("scheduledRunId"))
         assertEquals("COMPLETED", backupJson.getString("status"))
-        assertEquals("DELETED_BY_RETENTION", json.getJSONObject("storage").getString("remoteState"))
+        assertEquals("REMOTE_OBJECT_REMOVED", json.getJSONObject("storage").getString("remoteState"))
         assertEquals(
             "PERSISTED_VERIFIED_HISTORY",
             json.getJSONObject("integrityVerification").getString("state"),
@@ -74,7 +74,7 @@ class BackupAuditTest {
     }
 
     @Test
-    fun includesLatestRecordedReverification() {
+    fun includesLatestRecordedReverificationAndMarksLegacyBackupType() {
         val backup = BackupEntity(
             id = 11,
             repositoryId = 101,
@@ -101,6 +101,7 @@ class BackupAuditTest {
         assertEquals(40, reverification.getLong("checkedAtEpochMs"))
         assertEquals("VERIFIED", reverification.getString("status"))
         assertEquals("Remote artifact bytes verified", reverification.getString("detail"))
+        assertTrue(json.getJSONArray("limitations").toString().contains("legacy backup type"))
     }
 
     @Test
@@ -134,6 +135,7 @@ class BackupAuditTest {
         assertTrue(backupJson.isNull("scheduledRunId"))
         assertTrue(json.getJSONArray("limitations").toString().contains("pre-v4"))
         assertTrue(json.getJSONArray("limitations").toString().contains("origin"))
+        assertTrue(json.getJSONArray("limitations").toString().contains("legacy backup type"))
     }
 
     @Test
