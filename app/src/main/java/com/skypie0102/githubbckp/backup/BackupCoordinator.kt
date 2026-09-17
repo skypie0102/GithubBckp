@@ -44,17 +44,12 @@ class BackupCoordinator @Inject constructor(
                 onProgress = { backupDao.updateBackupStatus(backupId, it) },
             )
 
-            // Existing verified objects are replacement candidates. Providers may
-            // update one in place or stage a distinct object, but older rows are
-            // not retired until the new remote bytes independently verify.
+            // Existing verified objects are retired only after a newly staged
+            // replacement independently verifies and is persisted as current.
             val previousBackups = backupDao.getCurrentRemoteBackups(request.repository.id, request.type)
-            val previousRemote = previousBackups.firstOrNull()?.toRemoteBackupOrNull()
 
             backupDao.updateBackupStatus(backupId, BackupStatus.UPLOADING)
-            val remoteBackup = storageProvider.upload(
-                artifact = artifact,
-                existing = previousRemote,
-            )
+            val remoteBackup = storageProvider.upload(artifact = artifact)
 
             backupDao.updateBackupStatus(backupId, BackupStatus.VERIFYING)
             check(storageProvider.verify(remoteBackup)) {
@@ -114,8 +109,8 @@ class BackupCoordinator @Inject constructor(
                 if (previous.provider != current.provider || previous.id != current.id) {
                     storageProvider.delete(previous)
                 }
-                // If the provider updated the object in place, this old history
-                // row still stops owning the shared remote identity.
+                // If a provider ever returns a shared identity, the old history
+                // row still stops owning that current remote object.
                 backupDao.markRemoteDeleted(backup.id, System.currentTimeMillis())
             }
             cleanup.onFailure { throwable ->
