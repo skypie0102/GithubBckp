@@ -138,10 +138,14 @@ The main screen is a normal scrolling Compose layout. Account/tools actions live
 
 The source-snapshot format selector, snapshot schedule selector, and retention controls have been removed.
 
-## Build size and signing
+## Build and release
 
-Release and `personal` variants use R8 minification and resource shrinking. The large Material extended-icons dependency and Compose debug tooling dependency were removed from the installed dependency graph.
+There are only two normal Android build types: `debug` for development and `release` for the installable APK.
 
-The normal personal APK is built locally with `assemblePersonal`: it inherits release shrinking but uses the developer's persistent local debug signing key. GitHub-hosted CI builds/tests that variant but deliberately does not distribute its runner-signed APK, because an ephemeral signing certificate would change the SHA-1 used by Google Drive Android OAuth.
+The release build uses R8 minification and resource shrinking. The large Material extended-icons dependency and Compose debug tooling dependency were removed from the installed dependency graph.
 
-See [`PERSONAL_RELEASE.md`](PERSONAL_RELEASE.md).
+The GitHub release workflow follows the Intake Edit release shape: it validates the app version, builds a signed release APK, verifies the signature, renames the artifact to `githubbckp-v<version>.apk`, creates a SHA-256 sidecar, and publishes both files to a GitHub Release.
+
+Unlike Intake Edit's current one-off fallback signing, GithubBckp requires a persistent release key because Google Drive Android OAuth is bound to the signing certificate SHA-1. The workflow fails instead of silently generating a disposable key when signing secrets are missing.
+
+See [`RELEASE.md`](RELEASE.md).
