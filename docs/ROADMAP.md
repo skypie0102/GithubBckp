@@ -4,83 +4,97 @@ GithubBckp is a personal/internal disaster-recovery tool. The roadmap optimizes 
 
 ## Current product boundary
 
-The supported recovery promise is intentionally narrow:
+The active product is intentionally small:
 
-- source snapshots and full Git mirrors can be backed up to the configured personal destination;
-- Git mirrors preserve main Git history/refs, Git LFS, initialized wiki history, releases/assets, and issue/PR discussion metadata;
+- each selected repository has one current Git mirror at the configured personal destination;
+- manual and automatic runs update that logical mirror instead of creating intentional timestamped generations;
+- mirrors preserve Git refs/history, referenced Git LFS objects, initialized wiki history when available, releases/assets, and supported issue/PR discussion metadata;
 - imported mirrors are validated locally before they are retained;
 - main Git, Git LFS, and releases/assets can be recovered to a new or provably empty GitHub repository;
 - wiki and discussion data are preservation/local-validation surfaces rather than automated GitHub publication surfaces;
-- recovery never force-pushes or destructively rewrites an arbitrary non-empty repository.
+- recovery never force-pushes or destructively rewrites an arbitrary non-empty repository;
+- GitHub authentication uses a user-supplied PAT stored through Android Keystore-backed encrypted storage;
+- backup destinations are Google Drive or a user-selected Android document tree.
+
+Source snapshots, configurable retention/version-history controls, GitHub Device Flow, and the guided recovery-drill UI are no longer part of the active product.
 
 ## Completed reliability work
 
-### P0 — Backup health dashboard — #33 — complete
+### Backup health dashboard — complete
 
-The Home screen classifies every currently selected, available repository as protected, warning, failed-after-last-success, stale, or never backed up. Health uses the latest attempt and latest non-pruned verified backup rather than the fixed-size Recent backups list. Automatic-backup staleness uses two cadence windows to account for WorkManager's opportunistic execution.
+The Home screen classifies every currently selected, available repository as protected, warning, failed-after-last-success, stale, or never backed up. Health uses the latest attempt and latest completed backup row that still represents a current remote object rather than the fixed-size Recent backup activity list.
 
-### P0 — Failure and overdue-backup notifications — #34 — complete
+Automatic-backup staleness uses two cadence windows to account for WorkManager's opportunistic execution.
 
-The app requests notification permission on supported Android versions and surfaces backup trouble without requiring the app to remain open.
+### Failure and overdue-backup notifications — complete
 
-Implemented behavior:
+The app can surface backup trouble without remaining open:
 
-- a failed backup can produce a notification only after the failure is durably recorded;
-- repeated failures for the same repository/backup format are rate-limited to one alert per six hours;
-- automatic-backup health is checked locally every 24 hours while scheduling is enabled;
-- repositories become overdue after two cadence windows; repositories with no successful backup receive the same grace window starting when scheduling is enabled;
-- overdue repositories are grouped into one notification and are re-notified only when a repository newly enters the overdue set;
+- a failed mirror update can notify only after the failure is persisted;
+- repeated failures for the same repository/mirror are rate-limited;
+- automatic-backup health is checked locally while scheduling is enabled;
+- repositories become overdue after two cadence windows;
+- overdue repositories are grouped and deduplicated;
 - unavailable and unselected repositories are excluded;
 - disabling automatic backups clears overdue-notification state;
 - tapping an alert opens the app's Home/backup-health surface.
 
-### P1 — On-demand backup re-verification — #35 — complete
+Notification permission affects the alert surface only, not backup execution.
 
-Completed, non-pruned backups with persisted provider/checksum metadata can be freshly re-verified from Recent backups.
+### On-demand stored-mirror re-verification — complete
 
-Implemented behavior:
+Eligible completed current mirrors can be freshly re-verified from backup activity:
 
-- the app reads the artifact through the provider that originally stored it rather than the currently selected destination;
-- document-tree and Google Drive artifacts are fully streamed into temporary app-cache storage;
-- byte size, SHA-256, and MD5 are recomputed locally and compared with the persisted verified backup metadata;
-- Git mirrors additionally run through the existing safe local mirror/module validator without publishing anything to GitHub;
-- the temporary downloaded artifact is deleted after the check;
-- the latest `VERIFIED` or `FAILED` result, timestamp, and detail are persisted in schema v9 and shown in Recent backups;
-- exported backup-audit JSON includes the latest recorded re-verification result;
-- re-verification never changes the historical `COMPLETED` backup result and never mutates the remote artifact.
+- the app reads the artifact through the provider that originally stored it;
+- the complete object is streamed into temporary app-cache storage;
+- byte size, SHA-256, and MD5 are recomputed locally;
+- Git mirrors run through the existing safe local mirror/module validator without publishing anything to GitHub;
+- temporary downloaded files are removed after the check;
+- the latest `VERIFIED` or `FAILED` result is stored separately from creation-time completion state;
+- audit export includes the latest recorded re-verification result;
+- re-verification never mutates the remote object.
 
-### P1 — Guided disaster-recovery drill — #36 — complete
+### One-current-mirror cleanup — complete
 
-Validated restored mirrors can be used for a guided recovery rehearsal without weakening the normal recovery safety model.
+The active backup path has been simplified around one current mirror per repository:
 
-Implemented behavior:
+- new manual and scheduled work always requests `GIT_MIRROR`;
+- source-archive creation paths and format selectors are removed;
+- mirror filenames are stable instead of timestamped;
+- Google Drive can update the persisted file ID in place;
+- document-tree storage rewrites the existing document when possible;
+- older distinct duplicates are removed only after the new mirror verifies successfully, and cleanup failure is recorded as a warning rather than invalidating the verified current mirror;
+- configurable keep-last-N retention has been removed;
+- historical Room rows remain available for activity/audit compatibility.
 
-- the drill starts from a locally validated imported mirror;
-- the UI identifies Git/LFS/releases as automatically republishable when present and wiki/discussion datasets as archival-only;
-- drills require either a newly created private repository or an existing private repository that is still provably empty;
-- the normal recovery publisher remains responsible for OAuth scope checks, empty-target checks, LFS publication, non-force Git publication, release/asset publication, and resumable phases;
-- drill transactions use isolated target-specific transaction keys, so a rehearsal cannot consume the restored mirror's normal recovery binding and retries of the same rehearsal remain resumable;
-- after publication, every writable Git ref is compared with the remote advertised ref/object ID; LFS and release-asset counts are reported only after their existing remote verification succeeds;
-- the latest successful drill result is stored in app-private JSON and shown with the restored mirror;
-- the app never automatically deletes a drill repository.
+### Personal build/signing cleanup — complete
+
+The normal personal install artifact is the locally built `personal` variant. It uses release shrinking/resource shrinking but is signed with the operator's persistent local Android debug keystore.
+
+GitHub-hosted CI compiles/tests the variant but does not publish its runner-signed APK because an ephemeral certificate would change the SHA-1 used by Android OAuth clients such as Google Drive.
 
 ## Active roadmap
 
-There are currently **no active product-feature roadmap items**. The personal reliability roadmap is complete.
+There are currently **no active product-feature roadmap items**.
+
+The next work should come from concrete problems observed in personal use, especially failures involving mirror integrity, storage replacement, authentication, scheduling, or recovery.
 
 ## Later only if personal use creates a real need
 
-These are not active roadmap commitments:
+These are not active commitments:
 
-- storage-usage visibility and per-repository artifact-size summaries;
-- export/import of non-secret app configuration such as repository selection, schedule, and retention preferences.
+- storage-usage visibility and per-repository current-mirror size summaries;
+- export/import of non-secret app configuration such as repository selection and schedule;
+- a dedicated destructive-free recovery rehearsal flow, only if ordinary validated restore/recovery proves insufficient for personal confidence.
 
-Implement these only when actual usage demonstrates that they remove recurring friction.
+Implement these only when real usage demonstrates recurring value.
 
 ## Explicitly cut / non-goals
 
-The following are intentionally **not planned** for the personal-use product unless the operating assumptions change:
+The following are intentionally not planned unless the operating assumptions change:
 
+- source-snapshot backups as a second active format;
+- user-managed historical backup generations or retention policies;
 - native recreation of issues, pull requests, comments, reviews, or their original authors/timestamps;
 - crawling timeline-event and referenced discussion-attachment bytes solely for archival completeness;
 - destructive recovery into arbitrary non-empty repositories, including force-push/ref-deletion workflows;
@@ -89,8 +103,8 @@ The following are intentionally **not planned** for the personal-use product unl
 - exact recreation of GitHub release `latest` selection, historical server timestamps, or immutable-release state;
 - Play Store/public-distribution work.
 
-These cuts are deliberate safety/maintenance decisions, not release blockers.
+These cuts are deliberate safety and maintenance decisions, not release blockers.
 
 ## Priority rule
 
-Feature development is now frozen by default. New features require a concrete recurring problem observed during personal use. Reliability fixes, compatibility fixes, security fixes, and recovery-safety improvements remain in scope at any time.
+Feature development is frozen by default. Reliability fixes, compatibility fixes, security fixes, storage-integrity fixes, and recovery-safety improvements remain in scope at any time.
