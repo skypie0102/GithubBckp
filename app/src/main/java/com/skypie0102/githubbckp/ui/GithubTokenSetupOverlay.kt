@@ -39,9 +39,7 @@ fun GithubTokenSetupOverlay(
 
     Surface(modifier = Modifier.fillMaxSize()) {
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(24.dp),
+            modifier = Modifier.fillMaxSize().padding(24.dp),
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
@@ -54,11 +52,15 @@ fun GithubTokenSetupOverlay(
                     style = MaterialTheme.typography.headlineSmall,
                 )
                 Text(
-                    "Enter a GitHub personal access token. It is validated first, then encrypted locally with Android Keystore. Nothing is baked into the APK.",
+                    "GithubBckp only needs read access. The token is encrypted locally with Android Keystore.",
                     style = MaterialTheme.typography.bodyMedium,
                 )
                 Text(
-                    "The token needs access to every private repository you want to back up. Recovery also requires permission to create/update the target repository and its supported Git/LFS/release surfaces.",
+                    "Fine-grained PAT (recommended): select every repository you want backed up. Repository permissions: Contents = Read-only and Metadata = Read-only. No write, administration, issues, pull requests, actions, or package permissions are needed.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                Text(
+                    "Classic PAT: use public_repo for public repositories only, or repo if any private repository must be backed up.",
                     style = MaterialTheme.typography.bodySmall,
                 )
                 OutlinedTextField(
@@ -73,9 +75,7 @@ fun GithubTokenSetupOverlay(
                     label = { Text("GitHub personal access token") },
                     visualTransformation = PasswordVisualTransformation(),
                 )
-                error?.let {
-                    Text(it, color = MaterialTheme.colorScheme.error)
-                }
+                error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                 Button(
                     onClick = {
                         if (busy) return@Button
@@ -96,11 +96,8 @@ fun GithubTokenSetupOverlay(
                     modifier = Modifier.fillMaxWidth(),
                     enabled = !busy && token.isNotBlank(),
                 ) {
-                    if (busy) {
-                        CircularProgressIndicator()
-                    } else {
-                        Text(if (canCancel) "Validate and replace" else "Save and connect")
-                    }
+                    if (busy) CircularProgressIndicator()
+                    else Text(if (canCancel) "Validate and replace" else "Save and connect")
                 }
                 if (canCancel) {
                     OutlinedButton(
