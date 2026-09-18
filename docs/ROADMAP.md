@@ -1,120 +1,535 @@
-# Personal-use roadmap
+# GithubBckp refactor roadmap
 
-GithubBckp is a personal/internal disaster-recovery tool. The roadmap optimizes for **backup reliability, recoverability, and operator confidence**, not broad GitHub feature parity or public distribution.
+GithubBckp is being reduced to one responsibility:
 
-## Current product boundary
+> Keep one current local `.tar.gz` Git mirror for every selected GitHub repository.
 
-The active product is intentionally small:
+This roadmap replaces the previous recovery-oriented product plan. The refactor branch is `refactor/simple-local-mirrors` and the working draft PR is #52.
 
-- each selected repository has one current Git mirror at the configured personal destination;
-- manual and automatic runs replace that logical mirror instead of creating intentional timestamped generations;
-- a replacement is verified and committed before the previous verified remote object is retired;
-- mirrors preserve Git refs/history, referenced Git LFS objects, initialized wiki history when available, releases/assets, and supported issue/PR discussion metadata;
-- imported mirrors are validated locally before they are retained;
-- main Git, Git LFS, and releases/assets can be recovered to a new or provably empty GitHub repository;
-- wiki and discussion data are preservation/local-validation surfaces rather than automated GitHub publication surfaces;
-- recovery never force-pushes or destructively rewrites an arbitrary non-empty repository;
-- GitHub authentication uses a user-supplied PAT stored through Android Keystore-backed encrypted storage;
-- backup destinations are Google Drive or a user-selected Android document tree.
+## Product boundary
 
-Source snapshots, configurable retention/version-history controls, GitHub Device Flow, the guided recovery-drill UI, and the extra `personal` Android build variant are no longer part of the active product.
+The refactored app will:
 
-## Completed reliability work
+- authenticate with a user-supplied GitHub personal access token;
+- list repositories available to that token;
+- let the user select repositories to mirror;
+- store backups only in a user-selected local Android document tree;
+- keep one logical backup artifact per repository;
+- create a real bare Git mirror, including refs and history;
+- preserve referenced Git LFS objects;
+- package every completed backup as `mirror.tar.gz`;
+- update an existing mirror with fetch/prune semantics rather than cloning from scratch;
+- avoid extraction/recompression entirely when remote refs and repository metadata are unchanged;
+- run manual, daily, or weekly updates;
+- expose every active repository job through a foreground notification;
+- keep a simple health dashboard.
 
-### Backup health dashboard — complete
+The refactored app will not provide:
 
-The Home screen classifies every currently selected, available repository as protected, warning, failed-after-last-success, stale, or never backed up. Health uses the latest Git-mirror attempt and latest completed Git-mirror row that still represents a current remote object rather than the fixed-size Recent backup activity list.
+- Google Drive API storage;
+- multiple backup generations or retention controls;
+- restore/import/publish workflows;
+- force-push or repository creation;
+- release/asset backup;
+- issue, pull-request, review, or discussion backup;
+- wiki backup;
+- Git LFS upload;
+- source archive mode.
 
-Legacy source-snapshot rows remain historical data but do not satisfy current mirror health. Automatic-backup staleness uses two cadence windows to account for WorkManager's opportunistic execution.
+## Storage contract
 
-### Failure and overdue-backup notifications — complete
+Each GitHub repository ID maps to one logical archive:
 
-The app can surface backup trouble without remaining open:
+```text
+<selected root>/
+└── GitHub Backups/
+    └── <github-repository-id>/
+        └── mirror.tar.gz
+```
 
-- a failed mirror update can notify only after the failure is persisted;
-- repeated failures for the same repository/mirror are rate-limited;
-- automatic-backup health is checked locally while scheduling is enabled;
-- repositories become overdue after two cadence windows;
-- legacy source snapshots do not suppress mirror overdue alerts;
-- overdue repositories are grouped and deduplicated;
-- unavailable and unselected repositories are excluded;
-- disabling automatic backups clears overdue-notification state;
-- tapping an alert opens the app's Home/backup-health surface.
+A transactional update may temporarily create:
 
-Notification permission affects the alert surface only, not backup execution.
+```text
+mirror.tar.gz
+mirror.pending.tar.gz
+```
 
-### On-demand stored-mirror re-verification — complete
+The pending file is not a retained backup generation. It exists only so a failed write, process death, or power loss cannot destroy the previous verified mirror.
 
-Eligible completed current mirrors can be freshly re-verified from backup activity:
+## Archive contract
 
-- the app reads the artifact through the provider that originally stored it;
-- the complete object is streamed into temporary app-cache storage;
-- byte size, SHA-256, and MD5 are recomputed locally;
-- Git mirrors run through the existing safe local mirror/module validator without publishing anything to GitHub;
-- temporary downloaded files are removed after the check;
-- the latest `VERIFIED` or `FAILED` result is stored separately from creation-time completion state;
-- audit export includes the latest recorded re-verification result;
-- re-verification never mutates the remote object.
+`mirror.tar.gz` contains:
 
-### One-current-mirror cleanup — complete
+```text
+manifest.json
+repository.git/
+    HEAD
+    config
+    refs/
+    objects/
+    lfs/
+        objects/
+```
 
-The active backup path has been simplified around one current mirror per repository:
+`repository.git` is a bare Git repository.
 
-- new manual and scheduled work always requests `GIT_MIRROR`;
-- source-archive creation paths and format selectors are removed;
-- local mirror artifact names are stable instead of timestamped;
-- Google Drive uploads a distinct resumable replacement so the previous verified file remains untouched until the new object verifies and is committed;
-- document-tree storage writes and fully rehashes a sibling staging document before the previous verified document is retired;
-- `BackupCoordinator` records the verified replacement as `COMPLETED` before cleanup begins;
-- failed replacement candidates are removed best-effort;
-- older duplicate rows are retired from the logical current set after replacement commit, while physical cleanup failure is surfaced as a warning;
-- configurable keep-last-N retention has been removed;
-- historical Room rows remain available for activity/audit compatibility.
+The versioned manifest records repository identity, remote URL, default branch, privacy state, timestamps, refs digest, source HEAD, LFS presence, archive format version, and app version.
 
-### Release pipeline cleanup — complete
+## Update algorithm
 
-The installable artifact is now the signed, minified/resource-shrunk `release` APK. The extra `personal` build type has been removed.
+### First backup
 
-The GitHub Actions release flow mirrors Intake Edit's release publishing shape: version validation, signed APK build, signature verification, versioned filename, SHA-256 sidecar, and GitHub Release publication.
+```text
+clone --mirror equivalent
+→ scan reachable Git LFS pointers
+→ download missing LFS objects
+→ calculate refs digest
+→ write manifest
+→ create mirror.pending.tar.gz
+→ fully verify archive and bare repository
+→ persist pending archive to selected folder
+→ verify persisted SHA-256
+→ promote to mirror.tar.gz
+```
 
-Release signing now mirrors Intake Edit: persistent signing secrets are optional and the workflow falls back to a one-off key when they are absent. Google Drive users must register the SHA-1 of the actually installed release; a persistent key remains optional if stable updates and a stable OAuth identity are desired.
+### Existing backup
 
-## Active roadmap
+```text
+read manifest.json directly from tar.gz
+→ ls-remote
+→ compare refs digest + repository metadata
+```
 
-There are currently **no active product-feature roadmap items**.
+If unchanged:
 
-The next work should come from concrete problems observed in personal use, especially failures involving mirror integrity, storage replacement, authentication, scheduling, or recovery.
+```text
+record successful check
+→ no extraction
+→ no recompression
+→ no archive rewrite
+```
 
-## Architecture cleanup status
+If changed:
 
-The obsolete backup modes and duplicate-generation machinery are removed from active execution. The remaining larger subsystems are not compatibility trash; they implement currently retained features:
+```text
+extract existing mirror to app-private working storage
+→ fetch + prune refs
+→ download missing LFS objects
+→ Git GC
+→ update manifest
+→ build mirror.pending.tar.gz
+→ verify
+→ transactionally replace mirror.tar.gz
+→ delete loose working files
+```
 
-- Git LFS preservation;
-- wiki preservation;
-- releases/assets preservation and restore;
-- issue/pull-request discussion preservation;
-- stored-mirror re-verification and audit;
-- safe restore/recovery;
-- automatic scheduling and health notifications.
+Deleted branches and tags are pruned. Files removed from the latest repository state disappear from the latest tree, while historical blobs remain when still reachable from Git history.
 
-If the product is later narrowed to **Git repository data only**, those optional preservation/recovery surfaces can be removed in a separate scope-reduction pass. Until that product decision is made, deleting them would remove working backup coverage rather than merely clean dead code.
+---
 
-## Explicitly cut / non-goals
+## Phase 0 — Refactor branch and CI
 
-The following are intentionally not planned unless the operating assumptions change:
+Status: **in progress**
 
-- source-snapshot backups as a second active format;
-- user-managed historical backup generations or retention policies;
-- GitHub Device Flow;
-- guided disaster-recovery drills as a separate product surface;
-- native recreation of issues, pull requests, comments, reviews, or their original authors/timestamps;
-- crawling timeline-event and referenced discussion-attachment bytes solely for archival completeness;
-- destructive recovery into arbitrary non-empty repositories, including force-push/ref-deletion workflows;
-- organization/team membership, permission, or identity reconstruction;
-- automatic wiki publication through undocumented or unsafe initialization behavior;
-- exact recreation of GitHub release `latest` selection, historical server timestamps, or immutable-release state;
-- Play Store/public-distribution work.
+- [x] Create `refactor/simple-local-mirrors`.
+- [x] Open draft PR #52.
+- [x] Keep existing Android CI running against every refactor commit.
+- [ ] Keep PR draft until the replacement pipeline is the only active pipeline.
 
-## Priority rule
+Exit criteria:
 
-Feature development is frozen by default. Reliability fixes, compatibility fixes, security fixes, storage-integrity fixes, and recovery-safety improvements remain in scope at any time.
+- all work happens on the dedicated branch;
+- Android build, unit tests, and lint are green before merge.
+
+---
+
+## Phase 1 — New mirror archive foundation
+
+Status: **in progress**
+
+- [x] Add Apache Commons Compress.
+- [x] Add `TarGzArchive`.
+- [x] Reject path traversal during extraction.
+- [x] Reject symbolic/hard-link archive entries.
+- [x] Add versioned `MirrorManifest`.
+- [x] Read `manifest.json` without extracting the full archive.
+- [x] Add `MirrorVerifier`.
+- [x] Reopen extracted `repository.git` with JGit and require a bare repository.
+- [x] Add archive and manifest unit tests.
+- [ ] Validate LFS objects during full mirror verification.
+- [ ] Add corruption/truncation tests.
+
+Exit criteria:
+
+- a synthetic bare repository can be packed, deleted, extracted, reopened by JGit, and verified;
+- malformed/path-traversing archives fail closed.
+
+---
+
+## Phase 2 — Incremental Git mirror engine
+
+Status: **in progress**
+
+- [x] Add pure `GitMirrorOperations`.
+- [x] Mirror clone semantics.
+- [x] Fetch with `+refs/*:refs/*`.
+- [x] Prune deleted remote refs.
+- [x] Update symbolic HEAD to the current default branch.
+- [x] Git GC after updates.
+- [x] Deterministic refs digest.
+- [x] Add local Git integration test covering updated and removed refs.
+- [x] Add `MirrorEngine.create`.
+- [x] Add `MirrorEngine.update`.
+- [x] Skip extraction/rebuild when refs and repository metadata are unchanged.
+- [x] Reuse read-side Git LFS scanning/download.
+- [ ] Add end-to-end create/update tests around an archived mirror.
+- [ ] Test force-updated branches and deleted tags.
+- [ ] Test empty repositories.
+
+Exit criteria:
+
+- changed repositories transfer only missing Git/LFS data;
+- deleted refs disappear from the mirror;
+- unchanged repositories do not rewrite the archive.
+
+---
+
+## Phase 3 — Local-only transactional storage
+
+Status: **in progress**
+
+- [x] Add `LocalMirrorStore`.
+- [x] Use GitHub repository ID as the storage directory key.
+- [x] Write `mirror.pending.tar.gz` before touching the stable mirror.
+- [x] Re-hash persisted bytes before promotion.
+- [x] Reconcile a pending archive after interruption.
+- [x] Keep the stable archive untouched when candidate writing/verification fails.
+- [ ] Add storage-space readiness checks.
+- [ ] Add explicit SAF permission-loss diagnostics.
+- [ ] Add startup reconciliation across all selected repositories.
+
+Exit criteria:
+
+- killing the process at any update stage cannot corrupt the last verified mirror;
+- only one logical current artifact remains after reconciliation.
+
+---
+
+## Phase 4 — One-row-per-repository data model
+
+Status: **in progress**
+
+- [x] Add `MirrorEntity` keyed by `repositoryId`.
+- [x] Add `MirrorDao`.
+- [x] Add Room migration 9 → 10.
+- [x] Register the mirror table in `AppDatabase`.
+- [ ] Move health/state reads to `MirrorEntity`.
+- [ ] Stop writing new rows to the historical `backups` table.
+- [ ] Remove the historical backup model after migration is complete.
+
+Target mirror state:
+
+```text
+repositoryId (PK)
+archiveUri
+archiveSizeBytes
+archiveSha256
+formatVersion
+lastCheckedAt
+lastSuccessfulSyncAt
+lastChangedAt
+lastAttemptAt
+lastAttemptStatus
+lastSourceHead
+lastRefsDigest
+lastError
+lastWarning
+```
+
+Exit criteria:
+
+- Room cannot represent multiple current mirrors for a repository.
+
+---
+
+## Phase 5 — Cut over worker/coordinator
+
+Status: **not started**
+
+Replace the current coordinator path with one repository sync operation:
+
+```text
+RepositoryBackupWorker
+    ↓
+MirrorSyncCoordinator
+    ↓
+MirrorEngine
+    ↓
+LocalMirrorStore
+    ↓
+MirrorDao
+```
+
+Tasks:
+
+- [ ] add `MirrorSyncCoordinator`;
+- [ ] copy an existing stored mirror to app-private working storage;
+- [ ] create when no mirror exists;
+- [ ] update when a mirror exists;
+- [ ] persist successful no-change checks without rewriting archive;
+- [ ] persist success/failure directly to `MirrorEntity`;
+- [ ] always clean app-private loose files in `finally`;
+- [ ] make repository work unique by GitHub repository ID.
+
+Exit criteria:
+
+- manual backup/update uses only the new tar.gz pipeline.
+
+---
+
+## Phase 6 — Scheduling and mandatory active-job notifications
+
+Status: **not started**
+
+Keep WorkManager with only:
+
+- Off
+- Daily
+- Weekly
+
+Tasks:
+
+- [ ] remove obsolete backup-format preferences;
+- [ ] retain unique repository work;
+- [ ] foreground every active repository job;
+- [ ] expose stages: checking, extracting, fetching, LFS, optimizing, compressing, verifying, committing;
+- [ ] add progress where measurable;
+- [ ] add cancel action;
+- [ ] group simultaneous repository notifications;
+- [ ] block job start when Android notification visibility is unavailable;
+- [ ] show notification-disabled state as a readiness/health problem.
+
+Exit criteria:
+
+- every running mirror job has an ongoing device notification for its complete lifetime.
+
+---
+
+## Phase 7 — Authentication and onboarding
+
+Status: **in progress**
+
+- [x] Replace recovery/write permission wording.
+- [x] State exact recommended fine-grained PAT permissions:
+  - Contents: Read-only
+  - Metadata: Read-only
+- [x] State that no write/admin permission is required.
+- [x] Explain classic `repo` scope only as a broader compatibility fallback.
+- [ ] validate that accessible repositories can actually be read with Git operations;
+- [ ] move notification permission request into explained onboarding;
+- [ ] enforce onboarding order: token → folder → notifications → repository selection.
+
+Exit criteria:
+
+- users know exactly which permissions are required before creating a token;
+- inaccessible private repositories fail during readiness validation rather than during a scheduled backup.
+
+---
+
+## Phase 8 — Delete legacy product code
+
+Status: **not started**
+
+Delete after the new worker path is operational so the branch stays buildable during migration.
+
+Remove:
+
+- [ ] `GoogleDriveAuthManager`;
+- [ ] `GoogleDriveStorageProvider`;
+- [ ] `StorageRouter`;
+- [ ] Google Play Services Auth dependency;
+- [ ] storage destination selector/state;
+- [ ] `GitMirrorRestoreService`;
+- [ ] `MirrorRestoreCoordinator`;
+- [ ] `GithubMirrorRestorePublisher`;
+- [ ] `GithubRepositoryRestoreGateway`;
+- [ ] `GitMirrorPushService`;
+- [ ] `GithubReleaseRestoreService`;
+- [ ] `RecoveryTransactionStore`;
+- [ ] `RestoreAuditReport`;
+- [ ] `GitLfsUploadService`;
+- [ ] `GithubReleaseBackupService`;
+- [ ] `GithubDiscussionBackupService`;
+- [ ] `GithubWikiBackupService`;
+- [ ] related UI, tests, Room fields, and documentation.
+
+Exit criteria:
+
+- no Google authorization code remains;
+- no restore/publish code remains;
+- no GitHub-hosted metadata backup modules remain;
+- the APK has no dependency used only by those features.
+
+---
+
+## Phase 9 — UI and health dashboard rebuild
+
+Status: **not started**
+
+Target Home screen:
+
+```text
+GitHub account
+Backup folder
+Automatic updates
+Health summary
+Repository list
+```
+
+Repository health states:
+
+- HEALTHY
+- UPDATING
+- STALE
+- FAILED
+- MISSING
+- BLOCKED
+- NEVER_BACKED_UP
+
+Tasks:
+
+- [ ] distinguish last successful check from last archive change;
+- [ ] show archive size;
+- [ ] show source HEAD;
+- [ ] show last failure;
+- [ ] show schedule;
+- [ ] remove restore/import/reverify/audit/provider controls;
+- [ ] reduce `HomeViewModel` and `HomeScreen` rather than layering more state onto them.
+
+Freshness tolerance:
+
+- daily schedule: stale after 48 hours without a successful check;
+- weekly schedule: stale after 14 days without a successful check.
+
+Exit criteria:
+
+- the complete application workflow is understandable from the Home screen.
+
+---
+
+## Phase 10 — Legacy archive migration
+
+Status: **not started**
+
+Existing `.mirror.zip` backups must not be silently destroyed.
+
+Policy:
+
+1. detect old ZIP mirrors as legacy;
+2. do not mutate them in place;
+3. create a new vNext `.tar.gz` mirror;
+4. fully verify the new mirror;
+5. only then remove an app-owned legacy ZIP for that repository.
+
+Google-Drive-only installations must select a local folder before any new work starts.
+
+Exit criteria:
+
+- an upgrade cannot leave a repository with no verified backup due to migration failure.
+
+---
+
+## Phase 11 — Hardening matrix
+
+Status: **not started**
+
+Required tests include:
+
+- revoked/expired PAT;
+- missing fine-grained repository access;
+- organization token approval pending;
+- repository deleted;
+- repository renamed;
+- repository made private;
+- default branch changed;
+- branch force-pushed;
+- branch deleted;
+- tag deleted;
+- empty repository;
+- large repository;
+- Unicode paths;
+- Git LFS pointers and corrupted LFS object;
+- corrupt/truncated tar.gz;
+- archive manually deleted;
+- selected folder moved;
+- SAF permission revoked;
+- notification permission/channel unavailable;
+- storage exhaustion during extraction;
+- storage exhaustion during compression;
+- process death during fetch;
+- process death during compression;
+- process death before/after promotion;
+- WorkManager retry;
+- multiple simultaneous selected repositories.
+
+Exit criteria:
+
+- interruption testing demonstrates the previous verified mirror survives every failed update stage.
+
+---
+
+## Phase 12 — Documentation and release cutover
+
+Status: **not started**
+
+Keep only documentation that serves the new product:
+
+- `README.md`
+- `docs/ARCHITECTURE.md`
+- `docs/BACKUP_FORMAT.md`
+- `docs/SCHEDULED_BACKUPS.md`
+- `docs/ROADMAP.md`
+- `docs/RELEASE.md`
+
+Delete obsolete recovery/Drive/metadata-backup documents.
+
+The final architecture should reduce to:
+
+```text
+Compose UI
+    ↓
+HomeViewModel
+    ↓
+WorkManager / MirrorSyncCoordinator
+    ↓
+MirrorEngine
+   ↙       ↘
+GitHub     LocalMirrorStore
+              ↓
+          mirror.tar.gz
+```
+
+## Definition of done
+
+The refactor is complete when:
+
+1. one repository maps to one local logical `mirror.tar.gz`;
+2. new code never creates `.mirror.zip`;
+3. initial backup creates a bare Git mirror;
+4. unchanged repositories are checked without recompression;
+5. changed repositories fetch only missing Git/LFS data;
+6. deleted upstream refs are pruned;
+7. every changed update ends as a verified `.tar.gz`;
+8. failed updates never damage the previous verified mirror;
+9. temporary loose files are cleaned after success, failure, cancellation, and restart;
+10. Google Drive code and dependencies are gone;
+11. restore/recovery/publish code is gone;
+12. release/discussion/wiki backup code is gone;
+13. daily and weekly are the only automatic cadences;
+14. every running job has an ongoing foreground notification;
+15. jobs do not start when required notification visibility is unavailable;
+16. onboarding states exact read-only PAT permissions;
+17. health distinguishes last check from last actual source change;
+18. Room cannot represent multiple current mirrors for one repository;
+19. legacy ZIP migration cannot delete the only verified backup;
+20. CI build, tests, and lint are green.
