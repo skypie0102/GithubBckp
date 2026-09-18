@@ -184,6 +184,37 @@ class LocalMirrorStore @Inject constructor(
         folder.findFile(STABLE_NAME) != null || folder.findFile(PENDING_NAME) != null
     }
 
+    suspend fun deleteLegacyMirrors(owner: String, name: String): List<String> =
+        withContext(Dispatchers.IO) {
+            val rootUri = preferences.documentTreeUri() ?: return@withContext emptyList()
+            val root = DocumentFile.fromTreeUri(context, rootUri) ?: return@withContext emptyList()
+            val backups = root.findFile(ROOT_DIRECTORY)?.takeIf { it.isDirectory }
+                ?: return@withContext emptyList()
+            val ownerFolder = backups.findFile(owner)?.takeIf { it.isDirectory }
+                ?: return@withContext emptyList()
+            val repositoryFolder = ownerFolder.findFile(name)?.takeIf { it.isDirectory }
+                ?: return@withContext emptyList()
+
+            val failures = mutableListOf<String>()
+            repositoryFolder.listFiles()
+                .filter { document ->
+                    document.isFile && isLegacyMirrorFileName(owner, name, document.name.orEmpty())
+                }
+                .forEach { document ->
+                    if (!document.delete()) {
+                        failures += document.name ?: "legacy mirror"
+                    }
+                }
+
+            if (repositoryFolder.listFiles().isEmpty()) {
+                repositoryFolder.delete()
+            }
+            if (ownerFolder.listFiles().isEmpty()) {
+                ownerFolder.delete()
+            }
+            failures
+        }
+
     suspend fun delete(repositoryId: Long) = withContext(Dispatchers.IO) {
         val folder = repositoryFolder(repositoryId, create = false) ?: return@withContext
         folder.findFile(PENDING_NAME)?.delete()
@@ -292,7 +323,14 @@ class LocalMirrorStore @Inject constructor(
         )
     }
 
-    internal fun requiredUpdateWorkspaceBytes(compressedBytes: Long, expandedBytes: Long): Long {
+    internal fun isLegacyMirrorFileName(owner: String, name: String, fileName: String): Boolean {
+    val safeName = "$owner-$name".replace(Regex("[^A-Za-z0-9._-]"), "_")
+    val stable = "$safeName.mirror.zip"
+    if (fileName == stable) return true
+    return fileName.startsWith("$safeName.pending-") && fileName.endsWith(".mirror.zip")
+}
+
+internal fun requiredUpdateWorkspaceBytes(compressedBytes: Long, expandedBytes: Long): Long {
     require(compressedBytes >= 0L) { "Compressed size cannot be negative" }
     require(expandedBytes >= 0L) { "Expanded size cannot be negative" }
 
