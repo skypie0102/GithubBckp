@@ -18,6 +18,7 @@ class GitMirrorOperationsTest {
             val remoteDirectory = File(root, "remote.git")
             Git.init()
                 .setBare(true)
+                .setInitialBranch("main")
                 .setDirectory(remoteDirectory)
                 .call()
                 .close()
