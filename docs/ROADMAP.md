@@ -2,7 +2,7 @@
 
 GithubBckp is being reduced to one responsibility:
 
-> Keep one current local `.tar.gz` Git mirror for every selected GitHub repository.
+> Keep one current local Git mirror and one current latest-release backup for every selected GitHub repository.
 
 This roadmap replaces the previous recovery-oriented product plan. The refactor branch is `refactor/simple-local-mirrors` and the working draft PR is #52.
 
@@ -17,7 +17,8 @@ The refactored app will:
 - keep one logical backup artifact per repository;
 - create a real bare Git mirror, including refs and history;
 - preserve referenced Git LFS objects;
-- package every completed backup as `mirror.tar.gz`;
+- package every completed mirror as `.tar.gz`;
+- retain one verified backup of the latest published GitHub Release, including its source tarball and uploaded assets;
 - update an existing mirror with fetch/prune semantics rather than cloning from scratch;
 - avoid extraction/recompression entirely when remote refs and repository metadata are unchanged;
 - run manual, daily, or weekly updates;
@@ -30,7 +31,7 @@ The refactored app will not provide:
 - multiple backup generations or retention controls;
 - restore/import/publish workflows;
 - force-push or repository creation;
-- release/asset backup;
+- multiple historical release generations;
 - issue, pull-request, review, or discussion backup;
 - wiki backup;
 - Git LFS upload;
@@ -536,7 +537,7 @@ The refactor is complete when:
 9. temporary loose files are cleaned after success, failure, cancellation, and restart;
 10. Google Drive code and dependencies are gone;
 11. restore/recovery/publish code is gone;
-12. release/discussion/wiki backup code is gone;
+12. legacy release/discussion/wiki backup modules are gone; latest-release backup is handled by the new narrow read-only subsystem;
 13. daily and weekly are the only automatic cadences;
 14. every running job has an ongoing foreground notification;
 15. jobs do not start when required notification visibility is unavailable;
@@ -589,3 +590,27 @@ Status: **implemented; CI/release pending**
 - [x] represent symlinks as safe regular files containing their link target;
 - [x] avoid duplicating large Git LFS payloads in the human-readable checkout;
 - [x] bump release version to 0.3.3 / code 7.
+
+
+## 0.3.4 latest release backup
+
+Status: **implemented; final CI/release pending**
+
+- [x] add a separate one-row-per-repository `latest_releases` state table (Room 11 → 12);
+- [x] query GitHub's latest published non-draft/non-prerelease Release;
+- [x] keep existing fine-grained PAT requirement at Contents: Read-only;
+- [x] compare release ID + `updated_at` and skip unchanged release downloads;
+- [x] stream the release tag source tarball to app-private temporary storage;
+- [x] stream every uploaded GitHub Release asset without loading it fully into memory;
+- [x] sanitize asset filenames and prevent local path collisions;
+- [x] record source/assets sizes and SHA-256 values in `release.json`;
+- [x] verify every source/asset file before durable commit;
+- [x] persist one transactional latest-release tar.gz under a `latest-release/` subdirectory;
+- [x] preserve the previous release bundle until the new pending archive is verified;
+- [x] recover a verified pending release bundle after interruption;
+- [x] retain an older local release bundle if GitHub currently reports no latest published release;
+- [x] run latest-release sync after mirror sync inside the same foreground repository worker;
+- [x] show release-specific foreground notification stages;
+- [x] show the backed-up release tag/status on repository rows;
+- [x] add parser, redirect-validation, manifest, verifier, naming, and no-redownload policy tests;
+- [x] bump release version to 0.3.4 / code 8.
