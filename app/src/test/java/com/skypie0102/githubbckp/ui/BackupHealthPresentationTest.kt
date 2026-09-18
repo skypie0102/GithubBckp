@@ -1,117 +1,86 @@
 package com.skypie0102.githubbckp.ui
 
-import com.skypie0102.githubbckp.backup.BackupStatus
-import com.skypie0102.githubbckp.backup.BackupType
-import com.skypie0102.githubbckp.data.local.BackupEntity
+import com.skypie0102.githubbckp.data.local.MirrorEntity
 import com.skypie0102.githubbckp.data.local.RepositoryEntity
+import com.skypie0102.githubbckp.mirror.MirrorAttemptStatus
 import com.skypie0102.githubbckp.worker.BackupCadence
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class BackupHealthPresentationTest {
     @Test
-    fun `selected repository with no verified backup needs attention`() {
+    fun selectedRepositoryWithoutMirrorNeedsAttention() {
         val summary = summarizeBackupHealth(
-            repositories = listOf(repository(id = 1L)),
-            backups = emptyList(),
+            repositories = listOf(repository(1L)),
+            mirrors = emptyList(),
             scheduleEnabled = false,
             cadence = BackupCadence.DAILY,
             nowEpochMs = NOW,
         )
 
-        assertEquals(1, summary.selectedCount)
+        assertEquals(RepositoryBackupHealthState.NEVER_BACKED_UP, summary.repositories.single().state)
         assertEquals(0, summary.verifiedCount)
         assertEquals(1, summary.attentionCount)
-        assertEquals(RepositoryBackupHealthState.NEVER_BACKED_UP, summary.repositories.single().state)
     }
 
     @Test
-    fun `legacy source snapshot does not protect mirror health`() {
-        val legacySnapshot = completed(id = 9L, repositoryId = 1L, completedAt = NOW - hours(1)).copy(
-            type = BackupType.SOURCE_ARCHIVE,
-        )
+    fun unchangedRepositoryUsesLastCheckedForFreshness() {
         val summary = summarizeBackupHealth(
-            repositories = listOf(repository(id = 1L)),
-            backups = listOf(legacySnapshot),
-            scheduleEnabled = false,
-            cadence = BackupCadence.DAILY,
-            nowEpochMs = NOW,
-        )
-
-        assertEquals(0, summary.verifiedCount)
-        assertEquals(RepositoryBackupHealthState.NEVER_BACKED_UP, summary.repositories.single().state)
-    }
-
-    @Test
-    fun `legacy snapshot attempt does not override current mirror health`() {
-        val mirror = completed(id = 10L, repositoryId = 1L, completedAt = NOW - hours(3))
-        val newerLegacyFailure = BackupEntity(
-            id = 11L,
-            repositoryId = 1L,
-            type = BackupType.SOURCE_ARCHIVE,
-            status = BackupStatus.FAILED,
-            startedAtEpochMs = NOW - hours(1),
-            completedAtEpochMs = NOW,
-            errorMessage = "legacy failure",
-        )
-        val summary = summarizeBackupHealth(
-            repositories = listOf(repository(id = 1L)),
-            backups = listOf(mirror, newerLegacyFailure),
-            scheduleEnabled = false,
-            cadence = BackupCadence.DAILY,
-            nowEpochMs = NOW,
-        )
-
-        assertEquals(RepositoryBackupHealthState.PROTECTED, summary.repositories.single().state)
-    }
-
-    @Test
-    fun `unselected repositories are excluded from health summary`() {
-        val summary = summarizeBackupHealth(
-            repositories = listOf(
-                repository(id = 1L, selected = true),
-                repository(id = 2L, selected = false),
+            repositories = listOf(repository(1L)),
+            mirrors = listOf(
+                mirror(
+                    id = 1L,
+                    checkedAt = NOW - hours(2),
+                    changedAt = NOW - hours(400),
+                ),
             ),
-            backups = emptyList(),
-            scheduleEnabled = false,
-            cadence = BackupCadence.DAILY,
-            nowEpochMs = NOW,
-        )
-
-        assertEquals(listOf(1L), summary.repositories.map { it.repositoryId })
-    }
-
-    @Test
-    fun `recent verified backup is protected`() {
-        val summary = summarizeBackupHealth(
-            repositories = listOf(repository(id = 1L)),
-            backups = listOf(completed(id = 10L, repositoryId = 1L, completedAt = NOW - hours(6))),
             scheduleEnabled = true,
             cadence = BackupCadence.DAILY,
             nowEpochMs = NOW,
         )
 
-        assertEquals(RepositoryBackupHealthState.PROTECTED, summary.repositories.single().state)
-        assertEquals(1, summary.verifiedCount)
-        assertEquals(1, summary.protectedCount)
-        assertEquals(0, summary.attentionCount)
+        val health = summary.repositories.single()
+        assertEquals(RepositoryBackupHealthState.HEALTHY, health.state)
+        assertEquals(NOW - hours(2), health.latestCheckedAtEpochMs)
+        assertEquals(NOW - hours(400), health.latestChangedAtEpochMs)
     }
 
     @Test
-    fun `failed attempt after latest verified backup is failed`() {
-        val verifiedAt = NOW - hours(8)
+    fun dailyScheduleMarksMirrorStaleAfterTwoCadenceWindowsWithoutCheck() {
         val summary = summarizeBackupHealth(
-            repositories = listOf(repository(id = 1L)),
-            backups = listOf(
-                completed(id = 10L, repositoryId = 1L, completedAt = verifiedAt),
-                BackupEntity(
-                    id = 11L,
-                    repositoryId = 1L,
-                    type = BackupType.GIT_MIRROR,
-                    status = BackupStatus.FAILED,
-                    startedAtEpochMs = verifiedAt + hours(1),
-                    completedAtEpochMs = verifiedAt + hours(2),
-                    errorMessage = "network unavailable",
+            repositories = listOf(repository(1L)),
+            mirrors = listOf(mirror(1L, checkedAt = NOW - hours(49))),
+            scheduleEnabled = true,
+            cadence = BackupCadence.DAILY,
+            nowEpochMs = NOW,
+        )
+
+        assertEquals(RepositoryBackupHealthState.STALE, summary.repositories.single().state)
+    }
+
+    @Test
+    fun activeAttemptIsUpdating() {
+        val summary = summarizeBackupHealth(
+            repositories = listOf(repository(1L)),
+            mirrors = listOf(
+                mirror(1L).copy(lastAttemptStatus = MirrorAttemptStatus.UPDATING.name),
+            ),
+            scheduleEnabled = false,
+            cadence = BackupCadence.DAILY,
+            nowEpochMs = NOW,
+        )
+
+        assertEquals(RepositoryBackupHealthState.UPDATING, summary.repositories.single().state)
+    }
+
+    @Test
+    fun failedAttemptKeepsExistingMirrorButShowsFailure() {
+        val summary = summarizeBackupHealth(
+            repositories = listOf(repository(1L)),
+            mirrors = listOf(
+                mirror(1L).copy(
+                    lastAttemptStatus = MirrorAttemptStatus.FAILED.name,
+                    lastError = "network unavailable",
                 ),
             ),
             scheduleEnabled = false,
@@ -121,72 +90,19 @@ class BackupHealthPresentationTest {
 
         val health = summary.repositories.single()
         assertEquals(RepositoryBackupHealthState.FAILED, health.state)
-        assertEquals(1, summary.verifiedCount)
         assertEquals("network unavailable", health.errorMessage)
-    }
-
-    @Test
-    fun `later successful backup clears earlier failure`() {
-        val summary = summarizeBackupHealth(
-            repositories = listOf(repository(id = 1L)),
-            backups = listOf(
-                BackupEntity(
-                    id = 10L,
-                    repositoryId = 1L,
-                    type = BackupType.GIT_MIRROR,
-                    status = BackupStatus.FAILED,
-                    startedAtEpochMs = NOW - hours(12),
-                    completedAtEpochMs = NOW - hours(11),
-                    errorMessage = "temporary failure",
-                ),
-                completed(id = 11L, repositoryId = 1L, completedAt = NOW - hours(3)),
-            ),
-            scheduleEnabled = false,
-            cadence = BackupCadence.DAILY,
-            nowEpochMs = NOW,
-        )
-
-        assertEquals(RepositoryBackupHealthState.PROTECTED, summary.repositories.single().state)
-    }
-
-    @Test
-    fun `daily schedule marks backup stale after two cadence windows`() {
-        val summary = summarizeBackupHealth(
-            repositories = listOf(repository(id = 1L)),
-            backups = listOf(completed(id = 10L, repositoryId = 1L, completedAt = NOW - hours(49))),
-            scheduleEnabled = true,
-            cadence = BackupCadence.DAILY,
-            nowEpochMs = NOW,
-        )
-
-        assertEquals(RepositoryBackupHealthState.STALE, summary.repositories.single().state)
         assertEquals(1, summary.verifiedCount)
-        assertEquals(1, summary.attentionCount)
     }
 
     @Test
-    fun `staleness is not applied when automatic backups are disabled`() {
+    fun successfulMetadataWithoutArchiveIsMissing() {
         val summary = summarizeBackupHealth(
-            repositories = listOf(repository(id = 1L)),
-            backups = listOf(completed(id = 10L, repositoryId = 1L, completedAt = NOW - hours(200))),
-            scheduleEnabled = false,
-            cadence = BackupCadence.DAILY,
-            nowEpochMs = NOW,
-        )
-
-        assertEquals(RepositoryBackupHealthState.PROTECTED, summary.repositories.single().state)
-    }
-
-    @Test
-    fun `completed backup warning remains visible`() {
-        val summary = summarizeBackupHealth(
-            repositories = listOf(repository(id = 1L)),
-            backups = listOf(
-                completed(
-                    id = 10L,
-                    repositoryId = 1L,
-                    completedAt = NOW - hours(3),
-                    warning = "Wiki preserved but not automatically published",
+            repositories = listOf(repository(1L)),
+            mirrors = listOf(
+                mirror(1L).copy(
+                    archiveUri = null,
+                    archiveSizeBytes = null,
+                    archiveSha256 = null,
                 ),
             ),
             scheduleEnabled = false,
@@ -194,27 +110,23 @@ class BackupHealthPresentationTest {
             nowEpochMs = NOW,
         )
 
-        assertEquals(RepositoryBackupHealthState.WARNING, summary.repositories.single().state)
-        assertEquals(1, summary.verifiedCount)
-        assertEquals(0, summary.protectedCount)
-        assertEquals(1, summary.attentionCount)
+        assertEquals(RepositoryBackupHealthState.MISSING, summary.repositories.single().state)
     }
 
     @Test
-    fun `superseded completion does not count as a current verified artifact`() {
-        val superseded = completed(id = 10L, repositoryId = 1L, completedAt = NOW - hours(2)).copy(
-            remoteDeletedAtEpochMs = NOW - hours(1),
-        )
+    fun unselectedRepositoriesAreExcluded() {
         val summary = summarizeBackupHealth(
-            repositories = listOf(repository(id = 1L)),
-            backups = listOf(superseded),
+            repositories = listOf(
+                repository(1L, selected = true),
+                repository(2L, selected = false),
+            ),
+            mirrors = listOf(mirror(1L), mirror(2L)),
             scheduleEnabled = false,
             cadence = BackupCadence.DAILY,
             nowEpochMs = NOW,
         )
 
-        assertEquals(0, summary.verifiedCount)
-        assertEquals(RepositoryBackupHealthState.NEVER_BACKED_UP, summary.repositories.single().state)
+        assertEquals(listOf(1L), summary.repositories.map { it.repositoryId })
     }
 
     private fun repository(id: Long, selected: Boolean = true) = RepositoryEntity(
@@ -226,20 +138,22 @@ class BackupHealthPresentationTest {
         selectedForBackup = selected,
     )
 
-    private fun completed(
+    private fun mirror(
         id: Long,
-        repositoryId: Long,
-        completedAt: Long,
-        warning: String? = null,
-    ) = BackupEntity(
-        id = id,
-        repositoryId = repositoryId,
-        type = BackupType.GIT_MIRROR,
-        status = BackupStatus.COMPLETED,
-        startedAtEpochMs = completedAt - hours(1),
-        completedAtEpochMs = completedAt,
-        checksumSha256 = "sha256",
-        warningMessage = warning,
+        checkedAt: Long = NOW - hours(1),
+        changedAt: Long = NOW - hours(1),
+    ) = MirrorEntity(
+        repositoryId = id,
+        archiveUri = "content://mirror/$id",
+        archiveSizeBytes = 1024L,
+        archiveSha256 = "sha256",
+        lastCheckedAtEpochMs = checkedAt,
+        lastSuccessfulSyncAtEpochMs = checkedAt,
+        lastChangedAtEpochMs = changedAt,
+        lastAttemptAtEpochMs = checkedAt,
+        lastAttemptStatus = MirrorAttemptStatus.COMPLETED.name,
+        lastSourceHead = "deadbeef",
+        lastRefsDigest = "refs",
     )
 
     private fun hours(value: Long): Long = value * 60L * 60L * 1000L
