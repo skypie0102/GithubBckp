@@ -77,6 +77,23 @@ class MirrorEngine @Inject constructor(
     private val lfsPointerScanner: GitLfsPointerScanner,
     private val lfsDownloadService: GitLfsDownloadService,
 ) {
+    suspend fun remoteRequiresRebuild(
+        repository: MirrorRepository,
+        manifest: MirrorManifest,
+        onProgress: suspend (MirrorStage) -> Unit = {},
+    ): Boolean = withContext(Dispatchers.IO) {
+        check(manifest.repositoryId == repository.id) {
+            "Stored mirror belongs to repository ${manifest.repositoryId}, expected ${repository.id}"
+        }
+        val token = authManager.requireAccessToken()
+        onProgress(MirrorStage.CHECKING_REMOTE)
+        val remoteRefsDigest = GitMirrorOperations.remoteRefsDigest(
+            remoteUri = repository.remoteUrl,
+            credentialsProvider = credentials(token),
+        )
+        mirrorRequiresRebuild(manifest, repository, remoteRefsDigest)
+    }
+
     suspend fun create(
         repository: MirrorRepository,
         workingDirectory: File,
