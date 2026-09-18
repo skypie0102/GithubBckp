@@ -65,7 +65,10 @@ class LocalMirrorStore @Inject constructor(
         null
     }
 
-    suspend fun estimateUpdateWorkingBytes(repositoryId: Long): Long? = withContext(Dispatchers.IO) {
+    suspend fun estimateUpdateWorkingBytes(
+        repositoryId: Long,
+        reserveBrowsableCheckoutUpgrade: Boolean = false,
+    ): Long? = withContext(Dispatchers.IO) {
         for (folder in repositoryFolders(repositoryId)) {
             reconcileFolder(repositoryId, folder)
             val document = currentMirrorDocument(folder) ?: continue
@@ -74,7 +77,11 @@ class LocalMirrorStore @Inject constructor(
             val input = context.contentResolver.openInputStream(document.uri)
                 ?: throw IOException("Stored mirror can no longer be opened")
             val expandedBytes = input.use(TarGzArchive::expandedSizeBytes)
-            return@withContext requiredUpdateWorkspaceBytes(compressedBytes, expandedBytes)
+            return@withContext requiredUpdateWorkspaceBytes(
+                compressedBytes = compressedBytes,
+                expandedBytes = expandedBytes,
+                reserveBrowsableCheckoutUpgrade = reserveBrowsableCheckoutUpgrade,
+            )
         }
         null
     }
@@ -532,7 +539,11 @@ internal fun isLegacyMirrorFileName(owner: String, name: String, fileName: Strin
     return fileName.startsWith("$safeName.pending-") && fileName.endsWith(".mirror.zip")
 }
 
-internal fun requiredUpdateWorkspaceBytes(compressedBytes: Long, expandedBytes: Long): Long {
+internal fun requiredUpdateWorkspaceBytes(
+    compressedBytes: Long,
+    expandedBytes: Long,
+    reserveBrowsableCheckoutUpgrade: Boolean = false,
+): Long {
     require(compressedBytes >= 0L) { "Compressed size cannot be negative" }
     require(expandedBytes >= 0L) { "Expanded size cannot be negative" }
 
@@ -545,10 +556,22 @@ internal fun requiredUpdateWorkspaceBytes(compressedBytes: Long, expandedBytes: 
 
     val archiveCopies = multiply(compressedBytes, 2L)
     val growthHeadroom = maxOf(expandedBytes / 4L, MIN_UPDATE_HEADROOM_BYTES)
-    return add(add(archiveCopies, expandedBytes), growthHeadroom)
+    val checkoutUpgradeReserve = if (reserveBrowsableCheckoutUpgrade) {
+        maxOf(
+            multiply(expandedBytes, 2L),
+            MIN_BROWSABLE_CHECKOUT_UPGRADE_HEADROOM_BYTES,
+        )
+    } else {
+        0L
+    }
+    return add(
+        add(add(archiveCopies, expandedBytes), growthHeadroom),
+        checkoutUpgradeReserve,
+    )
 }
 
 private const val MIN_UPDATE_HEADROOM_BYTES = 64L * 1024L * 1024L
+private const val MIN_BROWSABLE_CHECKOUT_UPGRADE_HEADROOM_BYTES = 128L * 1024L * 1024L
 private const val MAX_READABLE_LABEL_LENGTH = 180
 
 internal enum class PendingMirrorRecoveryAction {
