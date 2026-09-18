@@ -2,6 +2,7 @@ package com.skypie0102.githubbckp.mirror
 
 import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
@@ -72,36 +73,88 @@ object TarGzArchive {
         val root = destinationDirectory.canonicalFile
         val rootPrefix = root.path + File.separator
 
+        openArchive(archive) { tarInput ->
+            while (true) {
+                val entry = tarInput.nextTarEntry ?: break
+                if (entry.isSymbolicLink || entry.isLink) {
+                    throw IOException("Mirror archive contains an unsupported link: ${entry.name}")
+                }
+
+                val output = File(root, entry.name).canonicalFile
+                if (output.path != root.path && !output.path.startsWith(rootPrefix)) {
+                    throw IOException("Mirror archive contains an unsafe path: ${entry.name}")
+                }
+
+                if (entry.isDirectory) {
+                    if (!output.isDirectory && !output.mkdirs()) {
+                        throw IOException("Could not create archive directory: ${entry.name}")
+                    }
+                } else {
+                    output.parentFile?.let { parent ->
+                        if (!parent.isDirectory && !parent.mkdirs()) {
+                            throw IOException("Could not create archive parent: ${entry.name}")
+                        }
+                    }
+                    FileOutputStream(output).use { destination ->
+                        tarInput.copyTo(destination, bufferSize = BUFFER_SIZE)
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Reads one small regular-file entry without extracting the full archive.
+     * This is used for the manifest so scheduled checks can decide that a
+     * mirror is unchanged before allocating temporary extraction space.
+     */
+    @Throws(IOException::class)
+    fun readTextEntry(
+        archive: File,
+        entryName: String,
+        maxBytes: Int = DEFAULT_TEXT_ENTRY_LIMIT,
+    ): String {
+        require(maxBytes > 0) { "maxBytes must be positive" }
+
+        openArchive(archive) { tarInput ->
+            while (true) {
+                val entry = tarInput.nextTarEntry ?: break
+                if (entry.name != entryName) continue
+                if (entry.isDirectory || entry.isSymbolicLink || entry.isLink) {
+                    throw IOException("Archive entry is not a regular file: $entryName")
+                }
+                if (entry.size > maxBytes.toLong()) {
+                    throw IOException("Archive entry is too large: $entryName")
+                }
+
+                val output = ByteArrayOutputStream(entry.size.coerceAtLeast(0L).toInt())
+                val buffer = ByteArray(8 * 1024)
+                var total = 0
+                while (true) {
+                    val read = tarInput.read(buffer)
+                    if (read < 0) break
+                    total += read
+                    if (total > maxBytes) {
+                        throw IOException("Archive entry is too large: $entryName")
+                    }
+                    output.write(buffer, 0, read)
+                }
+                return output.toString(Charsets.UTF_8.name())
+            }
+        }
+
+        throw IOException("Archive entry is missing: $entryName")
+    }
+
+    private inline fun <T> openArchive(
+        archive: File,
+        block: (TarArchiveInputStream) -> T,
+    ): T {
         FileInputStream(archive).use { fileInput ->
             BufferedInputStream(fileInput).use { bufferedInput ->
                 GzipCompressorInputStream(bufferedInput).use { gzipInput ->
                     TarArchiveInputStream(gzipInput).use { tarInput ->
-                        while (true) {
-                            val entry = tarInput.nextTarEntry ?: break
-                            if (entry.isSymbolicLink || entry.isLink) {
-                                throw IOException("Mirror archive contains an unsupported link: ${entry.name}")
-                            }
-
-                            val output = File(root, entry.name).canonicalFile
-                            if (output.path != root.path && !output.path.startsWith(rootPrefix)) {
-                                throw IOException("Mirror archive contains an unsafe path: ${entry.name}")
-                            }
-
-                            if (entry.isDirectory) {
-                                if (!output.isDirectory && !output.mkdirs()) {
-                                    throw IOException("Could not create archive directory: ${entry.name}")
-                                }
-                            } else {
-                                output.parentFile?.let { parent ->
-                                    if (!parent.isDirectory && !parent.mkdirs()) {
-                                        throw IOException("Could not create archive parent: ${entry.name}")
-                                    }
-                                }
-                                FileOutputStream(output).use { destination ->
-                                    tarInput.copyTo(destination, bufferSize = BUFFER_SIZE)
-                                }
-                            }
-                        }
+                        return block(tarInput)
                     }
                 }
             }
@@ -109,4 +162,5 @@ object TarGzArchive {
     }
 
     private const val BUFFER_SIZE = 256 * 1024
+    private const val DEFAULT_TEXT_ENTRY_LIMIT = 1024 * 1024
 }
