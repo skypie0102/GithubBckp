@@ -1,67 +1,109 @@
 # GithubBckp
 
-GithubBckp is a personal/internal Android app for keeping recoverable copies of GitHub repositories in storage controlled by the user. Public Play Store distribution is outside scope.
+GithubBckp is a personal/internal Android app for keeping one current local Git mirror for each selected GitHub repository.
 
-The product goal is narrow: keep **one current, verified Git mirror per selected repository** and update that same logical backup on manual or automatic runs.
+The product is intentionally narrow:
 
-## What it backs up
+- connect GitHub with a personal access token;
+- choose repositories;
+- choose a local Android document-tree folder;
+- create one `mirror.tar.gz` per repository;
+- update that mirror manually, daily, or weekly;
+- show every running repository job in an ongoing notification;
+- show simple mirror health.
 
-GithubBckp is mirror-only. A backup performs mirror-style Git preservation and packages the repository into one `.mirror.zip` artifact. It preserves Git refs/history, referenced Git LFS objects, initialized wiki history when present, releases/assets, and issue/pull-request discussion metadata supported by the app.
+There is no Google Drive integration, restore/publish workflow, backup retention/history, source-archive mode, or backup of GitHub-hosted releases/issues/discussions/wiki data.
 
-Every completed replacement is checksummed and remotely verified before it becomes current. The previous verified mirror is not retired until the replacement is committed successfully.
+## What is preserved
 
-Source snapshots and retention/version-copy controls have been removed. Older database rows can still describe historical backup types, but new manual and scheduled backups always use Git mirrors.
+Each backup contains a real bare Git mirror:
 
-## Authentication
+- branches, tags, and fetched refs;
+- commits, trees, and blobs reachable through those refs;
+- referenced Git LFS objects, verified by size and SHA-256.
 
-### GitHub
+Git history is preserved. If a file disappears from the latest branch state, that deletion is reflected in the mirror while historical blobs remain when still reachable from Git history.
 
-Enter a GitHub personal access token (PAT) in the app. GithubBckp validates it against GitHub and stores it encrypted through the Android Keystore-backed secure store.
+## Backup format
 
-The PAT must be able to read every private repository you want to back up. Recovery additionally needs the permissions required by the chosen recovery target.
-
-The PAT is never embedded in the APK, Gradle configuration, repository, CI logs, or release metadata.
-
-### Google Drive
-
-Google Drive authorization is separate from GitHub authentication. The Drive adapter uses Google Play services `AuthorizationClient` with `drive.file`.
-
-Android Google OAuth clients are bound to both the package name and APK signing certificate. Register:
+Each GitHub repository ID maps to one logical file:
 
 ```text
-Package: com.skypie0102.githubbckp
-SHA-1:   <persistent release signing certificate SHA-1>
+<selected folder>/
+└── GitHub Backups/
+    └── <github-repository-id>/
+        └── mirror.tar.gz
 ```
 
-The release workflow prints the signing SHA-1 into each GitHub release body. If Drive account selection returns without connecting, the app also reports the installed package and signing SHA-1 so the OAuth client can be checked directly.
+The archive contains:
 
-## Backup destinations
+```text
+manifest.json
+repository.git/
+```
 
-### Backup folder
+Git LFS objects live in `repository.git/lfs/objects/`.
 
-The Android Storage Access Framework can write to a user-selected document tree, including local storage, removable storage, or a compatible cloud DocumentsProvider.
+Updates are transactional. A temporary `mirror.pending.tar.gz` may exist while a replacement is being written and verified, but it is not retained as another backup generation.
 
-Replacement mirrors are written to a sibling staging document and fully rehashed before the previous verified document is retired. An interrupted write therefore does not truncate the last known-good mirror.
+See [docs/BACKUP_FORMAT.md](docs/BACKUP_FORMAT.md).
 
-### Google Drive
+## Incremental updates
 
-A replacement is uploaded as a new resumable Drive object and verified before the previous verified Drive object is retired. An interrupted upload therefore does not overwrite the only known-good mirror.
+For an existing mirror the app first reads `manifest.json` directly from the archive and runs `ls-remote`.
 
-## Automatic backups
+If the remote refs and repository metadata are unchanged, the app records a successful check and does not extract or recompress the archive.
 
-Automatic backups support disabled, daily, or weekly execution. WorkManager runs opportunistically under unmetered-network, battery-not-low, and storage-not-low constraints.
+If the repository changed:
 
-Automatic runs use the same replacement flow as manual runs. They do not intentionally create historical generations.
+1. extract the current archive into app-private temporary storage;
+2. fetch missing Git objects;
+3. prune refs deleted upstream;
+4. download newly referenced Git LFS objects;
+5. run Git cleanup;
+6. update the manifest;
+7. build and verify a new `mirror.pending.tar.gz`;
+8. persist and hash the pending file;
+9. replace the stable `mirror.tar.gz`;
+10. delete loose temporary files.
 
-Scheduled health is considered overdue after two cadence windows: 48 hours for daily and 14 days for weekly. Legacy source-snapshot rows do not satisfy current mirror health.
+## GitHub token permissions
 
-## Recovery and verification
+Fine-grained personal access token is recommended.
 
-A validated mirror can be restored locally and published to either a new GitHub repository or an existing repository that is still empty. Recovery never force-pushes arbitrary live repositories.
+Repository access:
 
-Eligible completed current mirrors expose **Re-verify stored mirror**. The app reads the entire stored object again, recomputes its digests, and runs the local mirror/module validator. Re-verification never creates another remote backup object.
+- select every repository you want GithubBckp to mirror.
 
-Completed backups and imported mirrors can export JSON audit reports.
+Repository permissions:
+
+- **Contents: Read-only**
+- **Metadata: Read-only**
+
+No GitHub write or administration permission is required.
+
+A classic PAT with the broader `repo` scope can be used as a compatibility fallback when fine-grained token ownership restrictions prevent one token from covering the needed private repositories.
+
+Tokens are stored locally through the Android Keystore-backed secure store and are never embedded in the APK or repository.
+
+## Automatic updates
+
+Automatic updates support:
+
+- Off
+- Daily
+- Weekly
+
+WorkManager timing is opportunistic rather than an exact alarm.
+
+Scheduled work requires GitHub access, a configured local backup folder, network availability, and visible notifications. If notification visibility is unavailable, the app does not start a repository backup.
+
+Health becomes stale after two missed cadence windows:
+
+- Daily: 48 hours without a successful check
+- Weekly: 14 days without a successful check
+
+A repository that was checked successfully today stays healthy even if its archive has not changed for weeks.
 
 ## Build and CI
 
@@ -77,43 +119,4 @@ Repository gate:
 ./gradlew :app:assembleDebug :app:assembleRelease :app:testDebugUnitTest :app:lintDebug
 ```
 
-Debug builds are for development only.
-
-## Release APK
-
-The APK release flow mirrors the Intake Edit repository:
-
-- merge/push a new app version to `main`;
-- the release workflow validates `versionName` / `versionCode`;
-- it builds the minified/shrunk **release** APK;
-- it verifies the APK signature;
-- it publishes a GitHub release and workflow artifact;
-- the install file is named `githubbckp-v<version>.apk`, not `app-debug.apk`;
-- a matching `.sha256` file is published alongside it.
-
-Like Intake Edit, the workflow can publish without signing secrets by generating a one-off release key. If the optional Android signing secrets are configured, it uses that persistent key instead.
-
-With the no-secret one-off path, Android will require uninstall/reinstall for a later APK signed by a different key. Google Drive OAuth is also tied to the signing SHA-1, so the Android OAuth client must be updated to the SHA-1 printed in that release before Drive authorization will work for that build.
-
-Optional persistent-signing secrets are:
-
-```text
-ANDROID_KEYSTORE_BASE64
-ANDROID_KEYSTORE_PASSWORD
-ANDROID_KEY_ALIAS
-ANDROID_KEY_PASSWORD
-```
-
-See [`docs/RELEASE.md`](docs/RELEASE.md).
-
-## Security
-
-Do not commit personal access tokens, Google credentials/tokens, keystores, or generated `local.properties`.
-
-Git credentials are passed to JGit's transport layer rather than embedded in repository URLs. Temporary backup, verification, and restore files live in app-private/cache storage and are cleaned up after use.
-
-## Personal-use non-goals
-
-The app intentionally does not provide destructive overwrite of arbitrary non-empty repositories, force-push recovery workflows, native recreation of GitHub identities/timestamps for discussions, organization/team reconstruction, automatic wiki publication, or Play Store/public-distribution work.
-
-See [`docs/ROADMAP.md`](docs/ROADMAP.md) and [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the product boundary and implementation structure.
+See [docs/ROADMAP.md](docs/ROADMAP.md), [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), and [docs/RELEASE.md](docs/RELEASE.md).
