@@ -447,7 +447,7 @@ Required tests include:
 
 - [x] revoked/expired PAT response policy and scheduled token revalidation;
 - [x] missing fine-grained repository access via unreadable-repository preflight;
-- organization token approval pending; same unreadable-repository path is implemented, but live org-approval testing remains manual;
+- organization token approval pending; same unreadable-repository path is implemented, with live org-approval validation tracked in issue #53;
 - [x] repository deleted/unreadable remote;
 - [x] repository renamed;
 - [x] repository privacy changed;
@@ -466,9 +466,9 @@ Required tests include:
 - [x] notification permission/app/channel unavailable;
 - [x] preflight temporary-space estimate before extraction;
 - [x] simulated storage exhaustion/write failure during compression;
-- process death during fetch; automated failed-fetch coverage proves the stable archive is untouched, but device-level process-kill testing remains;
-- process death during compression; automated truncated-candidate coverage proves the stable archive is untouched, but device-level process-kill testing remains;
-- process death before/after promotion; recovery state-machine coverage is implemented, but device-level process-kill testing remains;
+- process death during fetch; automated failed-fetch coverage proves the stable archive is untouched, with device-level process-kill validation tracked in issue #53;
+- process death during compression; automated truncated-candidate coverage proves the stable archive is untouched, with device-level process-kill validation tracked in issue #53;
+- process death before/after promotion; recovery state-machine coverage is implemented, with device-level process-kill validation tracked in issue #53;
 - [x] bounded WorkManager retry policy;
 - [x] multiple simultaneous selected repositories use independent unique work plans.
 
