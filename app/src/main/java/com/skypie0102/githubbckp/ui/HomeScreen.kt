@@ -87,6 +87,11 @@ fun HomeScreen(
             viewModel.completeDriveAuthorization(result.data)
         } else {
             viewModel.driveAuthorizationCancelled()
+            Toast.makeText(
+                context,
+                "Google Drive authorization did not complete. Check the OAuth package/SHA-1 shown in the Drive card.",
+                Toast.LENGTH_LONG,
+            ).show()
         }
     }
     val folderLauncher = rememberLauncherForActivityResult(
@@ -230,6 +235,10 @@ fun HomeScreen(
                     detail = buildString {
                         append(if (state.driveConnected) "Connected" else "Not connected")
                         if (driveSelected) append(" • selected")
+                        if (!state.driveConnected && state.driveOauthConfigurationHint.isNotBlank()) {
+                            append("\nOAuth: ")
+                            append(state.driveOauthConfigurationHint)
+                        }
                     },
                     action = when {
                         !state.driveConnected -> "Connect Drive"
@@ -276,7 +285,7 @@ fun HomeScreen(
                     ) {
                         Text("Mirror-only backups", style = MaterialTheme.typography.titleMedium)
                         Text(
-                            "Each repository has one current .mirror.zip object. Manual and automatic backups update that same logical object instead of creating timestamped copies.",
+                            "The first backup creates one current .mirror.zip object for each repository. Later backups replace that logical object instead of creating timestamped copies.",
                             style = MaterialTheme.typography.bodyMedium,
                         )
                         Text(
@@ -349,7 +358,7 @@ fun HomeScreen(
                         enabled = !state.busy,
                         modifier = Modifier.fillMaxWidth(),
                     ) {
-                        Text("Update selected mirrors")
+                        Text("Back up selected repositories")
                     }
                 }
             }
@@ -363,9 +372,9 @@ fun HomeScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
-                            Text("Automatic mirror updates", style = MaterialTheme.typography.titleMedium)
+                            Text("Automatic mirror backups", style = MaterialTheme.typography.titleMedium)
                             Text(
-                                "Updates the same mirror for every selected repository.",
+                                "Creates the first mirror when needed, then refreshes the current mirror for every selected repository.",
                                 style = MaterialTheme.typography.bodySmall,
                             )
                             state.scheduledRunStatus?.let { status ->
@@ -401,7 +410,7 @@ fun HomeScreen(
             }
             item {
                 Text(
-                    "Android runs periodic work opportunistically. Automatic mirror updates require unmetered connectivity and adequate battery/storage.",
+                    "Android runs periodic work opportunistically. Automatic backups require unmetered connectivity and adequate battery/storage.",
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
