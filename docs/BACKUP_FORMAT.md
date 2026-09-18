@@ -93,3 +93,22 @@ The durable `mirror.tar.gz` is never edited in place.
 The app rebuilds into app-private temporary storage, verifies the result, writes `mirror.pending.tar.gz`, re-hashes the persisted bytes, and only then retires the previous stable archive.
 
 If the app is interrupted with only a pending archive available, startup reconciliation re-verifies it before promotion.
+
+
+## Git LFS
+
+Git LFS objects are part of the mirror completeness contract.
+
+For every reachable standard LFS pointer, the app:
+
+1. requests a read/download action from the Git LFS Batch API;
+2. accepts only the basic transfer adapter with SHA-256 object IDs;
+3. follows HTTPS redirects only;
+4. removes Authorization when a redirect changes host;
+5. writes each object to a temporary file;
+6. verifies declared size and SHA-256 before accepting it;
+7. stores the verified object under `repository.git/lfs/objects/`.
+
+During later updates, already-present LFS objects are re-verified and reused; only missing referenced objects are downloaded.
+
+There is no Git LFS upload or restore path.
