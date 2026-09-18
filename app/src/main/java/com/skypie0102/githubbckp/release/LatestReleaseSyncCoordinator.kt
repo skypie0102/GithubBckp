@@ -78,16 +78,17 @@ class LatestReleaseSyncCoordinator @Inject constructor(
                     storedArchiveExists = stored != null,
                 )
             ) {
+                val existing = checkNotNull(stored)
                 dao.upsert(
                     (previous ?: LatestReleaseEntity(repository.githubId)).copy(
                         releaseId = latest.id,
                         tagName = latest.tagName,
                         releaseName = latest.name,
                         releaseUpdatedAt = latest.updatedAt,
-                        archiveUri = stored.uri.toString(),
-                        archiveName = stored.name,
-                        archiveSizeBytes = stored.sizeBytes,
-                        archiveSha256 = stored.sha256,
+                        archiveUri = existing.uri.toString(),
+                        archiveName = existing.name,
+                        archiveSizeBytes = existing.sizeBytes,
+                        archiveSha256 = existing.sha256,
                         lastCheckedAtEpochMs = checkedAt,
                         lastAttemptAtEpochMs = attemptAt,
                         lastAttemptStatus = LatestReleaseAttemptStatus.COMPLETED.name,
