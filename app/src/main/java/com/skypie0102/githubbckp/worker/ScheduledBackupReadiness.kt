@@ -4,6 +4,7 @@ enum class ScheduledBackupBlockReason {
     GITHUB_DISCONNECTED,
     DOCUMENT_TREE_MISSING,
     NOTIFICATIONS_DISABLED,
+    REPOSITORY_ACCESS_UNAVAILABLE,
 }
 
 data class ScheduledBackupReadiness(
