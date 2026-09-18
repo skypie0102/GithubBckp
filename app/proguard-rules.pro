@@ -1,5 +1,7 @@
-# JGit contains optional JVM-only integrations that are not available on Android.
-# These code paths are not used by GithubBckp's HTTPS mirror workflow.
+# JGit still contains bytecode references to optional JVM-only APIs.
+# GithubBckp does not invoke JGit GC on Android, and JGit 7.8 also guards its
+# ProcessHandle PID lookup with Android detection. Suppress R8 missing-class
+# diagnostics for JVM-only integrations that are outside our HTTPS mirror path.
 -dontwarn java.lang.ProcessHandle
 -dontwarn java.lang.management.**
 -dontwarn javax.management.**
