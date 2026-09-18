@@ -1,7 +1,12 @@
 package com.skypie0102.githubbckp.ui
 
 import android.Manifest
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
+import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -26,7 +31,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.skypie0102.githubbckp.worker.BackupCadence
 import com.skypie0102.githubbckp.worker.ScheduledBackupRunOutcome
@@ -37,6 +44,9 @@ fun HomeScreen(
     onManageGithubToken: () -> Unit,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    val setupComplete =
+        state.githubConnected && state.documentTreeConfigured && state.notificationsReady
 
     val folderLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocumentTree(),
@@ -48,8 +58,14 @@ fun HomeScreen(
         }
     }
 
-    val notificationLauncher = rememberLauncherForActivityResult(
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission(),
+    ) {
+        viewModel.refreshReadiness()
+    }
+
+    val notificationSettingsLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult(),
     ) {
         viewModel.refreshReadiness()
     }
@@ -97,88 +113,106 @@ fun HomeScreen(
                 onManageGithubToken = onManageGithubToken,
                 onChooseFolder = { folderLauncher.launch(null) },
                 onEnableNotifications = {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                        notificationLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                    val permissionGranted =
+                        Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+                            ContextCompat.checkSelfPermission(
+                                context,
+                                Manifest.permission.POST_NOTIFICATIONS,
+                            ) == PackageManager.PERMISSION_GRANTED
+
+                    if (!permissionGranted && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
                     } else {
-                        viewModel.refreshReadiness()
+                        notificationSettingsLauncher.launch(notificationSettingsIntent(context))
                     }
                 },
             )
         }
 
-        item {
-            ScheduleCard(
-                enabled = state.scheduleEnabled,
-                cadence = state.scheduleCadence,
-                onEnabledChanged = viewModel::setScheduleEnabled,
-                onCadenceChanged = viewModel::setScheduleCadence,
-            )
-        }
-
-        if (state.backupHealth.selectedCount > 0) {
+        if (setupComplete) {
             item {
-                BackupHealthCard(summary = state.backupHealth)
+                RepositoryActions(
+                    busy = state.busy,
+                    hasRepositories = state.repositories.isNotEmpty(),
+                    onRefresh = viewModel::refreshRepositories,
+                    onSelectAll = { viewModel.setAllRepositoriesSelected(true) },
+                    onClearAll = { viewModel.setAllRepositoriesSelected(false) },
+                    onUpdateSelected = viewModel::backupSelectedRepositories,
+                )
             }
-        }
 
-        item {
-            RepositoryActions(
-                busy = state.busy,
-                hasRepositories = state.repositories.isNotEmpty(),
-                onRefresh = viewModel::refreshRepositories,
-                onSelectAll = { viewModel.setAllRepositoriesSelected(true) },
-                onClearAll = { viewModel.setAllRepositoriesSelected(false) },
-                onUpdateSelected = viewModel::backupSelectedRepositories,
-            )
-        }
-
-        items(
-            items = state.repositories,
-            key = { it.githubId },
-        ) { repository ->
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Checkbox(
-                        checked = repository.selectedForBackup,
-                        onCheckedChange = {
-                            viewModel.setRepositorySelected(repository.githubId, it)
-                        },
-                        enabled = repository.isAvailable,
-                    )
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            "${repository.owner}/${repository.name}",
-                            style = MaterialTheme.typography.titleSmall,
-                        )
-                        Text(
-                            buildString {
-                                append(repository.defaultBranch)
-                                if (repository.isPrivate) append(" • private")
-                                if (!repository.isAvailable) append(" • unavailable")
+            items(
+                items = state.repositories,
+                key = { it.githubId },
+            ) { repository ->
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Checkbox(
+                            checked = repository.selectedForBackup,
+                            onCheckedChange = {
+                                viewModel.setRepositorySelected(repository.githubId, it)
                             },
-                            style = MaterialTheme.typography.bodySmall,
+                            enabled = repository.isAvailable,
                         )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                "${repository.owner}/${repository.name}",
+                                style = MaterialTheme.typography.titleSmall,
+                            )
+                            Text(
+                                buildString {
+                                    append(repository.defaultBranch)
+                                    if (repository.isPrivate) append(" • private")
+                                    if (!repository.isAvailable) append(" • unavailable")
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
                     }
                 }
             }
-        }
 
-        state.scheduledRunStatus?.let { status ->
-            item {
-                val summary = when (status.outcome) {
-                    ScheduledBackupRunOutcome.QUEUED ->
-                        "Last scheduled run queued ${status.repositoryCount} repositories."
-                    ScheduledBackupRunOutcome.SKIPPED_NO_REPOSITORIES ->
-                        "Last scheduled run had no selected repositories."
-                    ScheduledBackupRunOutcome.SKIPPED_NOT_READY ->
-                        "Last scheduled run was blocked: ${status.blockReason ?: "not ready"}."
+            if (state.repositories.isNotEmpty()) {
+                item {
+                    ScheduleCard(
+                        enabled = state.scheduleEnabled,
+                        cadence = state.scheduleCadence,
+                        onEnabledChanged = viewModel::setScheduleEnabled,
+                        onCadenceChanged = viewModel::setScheduleCadence,
+                    )
                 }
-                Text(summary, style = MaterialTheme.typography.bodySmall)
+            }
+
+            if (state.backupHealth.selectedCount > 0) {
+                item {
+                    BackupHealthCard(summary = state.backupHealth)
+                }
+            }
+
+            state.scheduledRunStatus?.let { status ->
+                item {
+                    val summary = when (status.outcome) {
+                        ScheduledBackupRunOutcome.QUEUED ->
+                            "Last scheduled run queued ${status.repositoryCount} repositories."
+                        ScheduledBackupRunOutcome.SKIPPED_NO_REPOSITORIES ->
+                            "Last scheduled run had no selected repositories."
+                        ScheduledBackupRunOutcome.SKIPPED_NOT_READY ->
+                            "Last scheduled run was blocked: ${status.blockReason ?: "not ready"}."
+                    }
+                    Text(summary, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        } else {
+            item {
+                Text(
+                    "Complete setup before choosing repositories or enabling automatic updates.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
             }
         }
 
@@ -199,9 +233,13 @@ private fun SetupCard(
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Text("Setup", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "Complete these steps in order before repository selection.",
+                style = MaterialTheme.typography.bodySmall,
+            )
 
             Text(
-                if (state.githubConnected) "GitHub connected" else "GitHub token required",
+                "1. GitHub — " + if (state.githubConnected) "connected" else "token required",
                 style = MaterialTheme.typography.bodyMedium,
             )
             OutlinedButton(onClick = onManageGithubToken) {
@@ -211,32 +249,60 @@ private fun SetupCard(
             HorizontalDivider()
 
             Text(
-                if (state.documentTreeConfigured) {
-                    "Backup folder: ${state.documentTreeName ?: "Selected local folder"}"
-                } else {
-                    "Choose a local folder for mirror.tar.gz backups."
-                },
+                "2. Local backup folder — " +
+                    if (state.documentTreeConfigured) {
+                        state.documentTreeName ?: "selected"
+                    } else {
+                        "required"
+                    },
                 style = MaterialTheme.typography.bodyMedium,
             )
-            OutlinedButton(onClick = onChooseFolder) {
+            Text(
+                "The app stores one mirror.tar.gz per repository in this folder.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            OutlinedButton(
+                onClick = onChooseFolder,
+                enabled = state.githubConnected,
+            ) {
                 Text(if (state.documentTreeConfigured) "Change folder" else "Choose folder")
             }
 
             HorizontalDivider()
 
             Text(
-                if (state.notificationsReady) {
-                    "Active-job notifications ready"
-                } else {
-                    "Notifications are required so every running backup stays visible."
-                },
+                "3. Active-job notifications — " +
+                    if (state.notificationsReady) "ready" else "required",
                 style = MaterialTheme.typography.bodyMedium,
             )
+            Text(
+                "Every running mirror job must remain visible in Android notifications, including its stage, progress when measurable, and Cancel action.",
+                style = MaterialTheme.typography.bodySmall,
+            )
             if (!state.notificationsReady) {
-                OutlinedButton(onClick = onEnableNotifications) {
+                OutlinedButton(
+                    onClick = onEnableNotifications,
+                    enabled = state.documentTreeConfigured,
+                ) {
                     Text("Enable notifications")
                 }
             }
+
+            HorizontalDivider()
+
+            Text(
+                "4. Repositories — " +
+                    if (
+                        state.githubConnected &&
+                        state.documentTreeConfigured &&
+                        state.notificationsReady
+                    ) {
+                        "ready to choose"
+                    } else {
+                        "available after steps 1–3"
+                    },
+                style = MaterialTheme.typography.bodyMedium,
+            )
         }
     }
 }
@@ -313,6 +379,10 @@ private fun RepositoryActions(
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text("Repositories", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "Refresh verifies actual Git read access before a repository can be selected.",
+                style = MaterialTheme.typography.bodySmall,
+            )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(
                     onClick = onRefresh,
@@ -339,3 +409,14 @@ private fun RepositoryActions(
         }
     }
 }
+
+private fun notificationSettingsIntent(context: Context): Intent =
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+            .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+    } else {
+        Intent(
+            Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+            Uri.parse("package:${context.packageName}"),
+        )
+    }
