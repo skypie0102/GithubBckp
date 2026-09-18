@@ -33,6 +33,7 @@ enum class MirrorStage {
     OPTIMIZING,
     PACKAGING,
     VERIFYING,
+    COMMITTING,
 }
 
 sealed interface MirrorSyncResult {
