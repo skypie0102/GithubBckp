@@ -23,7 +23,7 @@ interface RepositoryDao {
         }
     }
 
-    @Query("SELECT * FROM repositories WHERE isAvailable = 1 ORDER BY owner, name")
+    @Query("SELECT * FROM repositories ORDER BY isAvailable DESC, owner, name")
     fun observeRepositories(): Flow<List<RepositoryEntity>>
 
     @Query("SELECT * FROM repositories ORDER BY owner, name")
