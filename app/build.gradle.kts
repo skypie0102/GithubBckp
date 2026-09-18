@@ -93,7 +93,6 @@ dependencies {
     implementation(libs.androidx.hilt.navigation.compose)
 
     implementation(libs.kotlinx.coroutines.android)
-    implementation(libs.google.play.services.auth)
     implementation(libs.jgit)
     implementation(libs.commons.compress)
 
