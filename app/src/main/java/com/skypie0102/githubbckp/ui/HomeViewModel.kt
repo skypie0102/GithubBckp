@@ -3,7 +3,7 @@ package com.skypie0102.githubbckp.ui
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.skypie0102.githubbckp.data.local.BackupDao
+import com.skypie0102.githubbckp.data.local.RepositoryDao
 import com.skypie0102.githubbckp.data.local.MirrorDao
 import com.skypie0102.githubbckp.data.local.MirrorEntity
 import com.skypie0102.githubbckp.data.local.RepositoryEntity
@@ -40,7 +40,7 @@ data class HomeUiState(
 
 @HiltViewModel
 class HomeViewModel @Inject constructor(
-    private val backupDao: BackupDao,
+    private val repositoryDao: RepositoryDao,
     private val mirrorDao: MirrorDao,
     private val githubAuthManager: GithubAuthManager,
     private val githubGateway: GithubGateway,
@@ -68,7 +68,7 @@ class HomeViewModel @Inject constructor(
         backupScheduler.reconcileSchedule()
 
         viewModelScope.launch {
-            backupDao.observeRepositories().collect { repositories ->
+            repositoryDao.observeRepositories().collect { repositories ->
                 _state.update { current ->
                     current.copy(
                         repositories = repositories,
@@ -122,9 +122,9 @@ class HomeViewModel @Inject constructor(
     fun refreshRepositories() {
         viewModelScope.launch {
             runBusy {
-                val existing = backupDao.getRepositories().associateBy { it.githubId }
+                val existing = repositoryDao.getRepositories().associateBy { it.githubId }
                 val remote = githubGateway.listRepositories()
-                backupDao.upsertRepositories(
+                repositoryDao.upsertRepositories(
                     remote.map { repository ->
                         repository.toEntity(
                             selectedForBackup = existing[repository.id]?.selectedForBackup ?: true,
@@ -142,12 +142,12 @@ class HomeViewModel @Inject constructor(
     }
 
     fun setRepositorySelected(repositoryId: Long, selected: Boolean) {
-        viewModelScope.launch { backupDao.setRepositorySelected(repositoryId, selected) }
+        viewModelScope.launch { repositoryDao.setRepositorySelected(repositoryId, selected) }
     }
 
     fun setAllRepositoriesSelected(selected: Boolean) {
         viewModelScope.launch {
-            backupDao.setAvailableRepositoriesSelected(selected)
+            repositoryDao.setAvailableRepositoriesSelected(selected)
             _state.update {
                 it.copy(
                     message = if (selected) {
