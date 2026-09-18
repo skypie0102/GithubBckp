@@ -9,7 +9,7 @@ The product is intentionally narrow:
 - choose a local Android document-tree folder;
 - create one `mirror.tar.gz` per repository;
 - update that mirror manually, daily, or weekly;
-- show every running repository job in an ongoing notification;
+- show every running repository job in a grouped ongoing notification, with exact progress when measurable;
 - show simple mirror health.
 
 There is no Google Drive integration, restore/publish workflow, backup retention/history, source-archive mode, or backup of GitHub-hosted releases/issues/discussions/wiki data.
@@ -96,7 +96,7 @@ Automatic updates support:
 
 WorkManager timing is opportunistic rather than an exact alarm.
 
-Scheduled work requires GitHub access, a configured local backup folder, network availability, and visible notifications. If notification visibility is unavailable, the app does not start a repository backup.
+Scheduled work requires a currently valid GitHub token, repository Git-readability, a configured local backup folder, network availability, and visible notifications. Repositories that lose token/org access are blocked before their repository backup worker starts.
 
 Health becomes stale after two missed cadence windows:
 
