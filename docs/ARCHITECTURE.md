@@ -88,7 +88,7 @@ This keeps unchanged but regularly checked repositories healthy.
 
 `RepositoryBackupWorker` is unique per repository and runs as foreground work.
 
-The active notification follows actual mirror stages:
+The active notification follows actual mirror stages and simultaneous repository jobs share one notification group:
 
 - checking GitHub;
 - extracting mirror;
@@ -98,7 +98,7 @@ The active notification follows actual mirror stages:
 - compressing;
 - verifying.
 
-Backups do not start when notifications cannot be shown.
+Backups do not start when notifications cannot be shown. Scheduled fan-out also revalidates the token and repository Git readability before enqueueing repository jobs.
 
 ## Database
 
