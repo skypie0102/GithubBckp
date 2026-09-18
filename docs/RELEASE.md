@@ -1,102 +1,78 @@
 # Android release APK
 
-GithubBckp publishes a versioned signed **release APK** through GitHub Actions.
+GithubBckp publishes a versioned installable **release APK** through GitHub Actions.
 
-Persistent signing secrets are optional. When they are absent, the workflow generates a one-off release key for that release.
+## Release model
 
-## Refactor release
+The release flow intentionally uses **no persistent signing secrets or stored keystore**.
 
-The local-mirror refactor is versioned as **0.3.0** with Android version code **4**. The release is published only after the refactor branch is merged to `main`.
+Android requires an APK to contain a signature before it can be installed, so the workflow follows the same model used by the Intake Edit releases:
 
-## Release artifact
+1. create a disposable one-off key inside the GitHub Actions runner;
+2. build the minified/resource-shrunk release APK with that temporary key;
+3. verify it with `apksigner`;
+4. publish the APK and SHA-256 checksum;
+5. allow the runner and temporary key to disappear.
 
-For app version `<version>`, the release workflow produces:
+Nothing needs to be configured in GitHub Secrets.
 
-```text
-githubbckp-v<version>.apk
-githubbckp-v<version>.apk.sha256
-```
+Because every release can use a different disposable key, a future release may require uninstall/reinstall rather than update-in-place. The user-selected repository mirrors live outside app-private storage and are not embedded in the APK.
 
-The APK is a minified/resource-shrunk release build, not a debug APK.
+## 0.3.0
 
-The files are attached to the workflow run and to a GitHub Release tagged with the app `versionName`.
-
-## Signing modes
-
-Without signing secrets, the workflow generates a one-off key. A later APK signed by a different key requires uninstall/reinstall.
-
-For stable update-in-place installs, configure one persistent signing keystore. Do not commit it to the repository.
-
-Example:
-
-```bash
-keytool -genkeypair \
-  -keystore githubbckp-release.jks \
-  -alias githubbckp \
-  -keyalg RSA \
-  -keysize 2048 \
-  -validity 10000
-```
-
-Add the base64-encoded keystore to Actions secrets as `ANDROID_KEYSTORE_BASE64`, plus:
+The local-mirror refactor is versioned as:
 
 ```text
-ANDROID_KEYSTORE_PASSWORD
-ANDROID_KEY_ALIAS
-ANDROID_KEY_PASSWORD
+versionName: 0.3.0
+versionCode: 4
+package: com.skypie0102.githubbckp
 ```
 
-On Linux:
+The release is published from `main` as tag `v0.3.0`.
 
-```bash
-base64 -w0 githubbckp-release.jks
+## Release assets
+
+The workflow publishes:
+
+```text
+githubbckp-v0.3.0.apk
+githubbckp-v0.3.0.apk.sha256
 ```
 
-On systems whose `base64` does not support `-w0`, encode the file and remove line breaks before saving the secret.
+The APK is the optimized release build, not the much larger debug/testing APK.
 
-## Publishing a release
+## Publishing
 
-Update both `versionName` and `versionCode` in `app/build.gradle.kts`, then merge/push that version to `main`.
+A push/merge to `main` triggers the release workflow. It:
 
-The release workflow:
-
-1. validates the version;
-2. skips publishing if the matching `v<version>` tag already exists;
-3. restores the persistent release keystore or generates a one-off fallback key;
+1. reads `versionName` and `versionCode` from `app/build.gradle.kts`;
+2. skips publishing when `v<version>` already exists;
+3. generates the one-off Android key;
 4. runs unit tests and lint;
-5. builds the signed release APK;
-6. verifies the APK signature with `apksigner`;
-7. renames the APK to `githubbckp-v<version>.apk`;
+5. builds the minified/resource-shrunk release APK;
+6. verifies the APK signature;
+7. renames it to `githubbckp-v<version>.apk`;
 8. creates a SHA-256 sidecar;
-9. publishes both files to a GitHub Release.
+9. uploads both as workflow artifacts;
+10. publishes both to the matching GitHub Release.
 
-The workflow can also be started manually with a tag, but the tag must match the app's `versionName`.
+The workflow may also be started manually with a tag, but the requested tag must match the app's `versionName`.
 
-## Installing and updating
+## Device gate
 
-If releases use one-off fallback keys, expect to uninstall before installing a later release because the signing certificate changes.
+Repository owner **skypie0102** tested the refactored app on a real Android device, confirmed repository backup worked successfully, and explicitly accepted that testing as sufficient for the 0.3.0 device gate.
 
-If a persistent release key is configured, future versions signed with that key can update in place as long as `versionCode` increases.
-
-Uninstalling clears app data, including the encrypted GitHub token and local app settings. The mirror archives in the user-selected document tree are external to app-private data and should remain in that selected storage location.
-
-## 0.3.0 device gate
-
-Repository owner **skypie0102** tested the refactored app on a real device, confirmed repository backup worked successfully, and explicitly accepted that testing as sufficient for the 0.3.0 device/manual release gate.
-
-GitHub issue #53 is therefore closed as **completed by owner attestation**. The detailed process-kill/SAF/organization/concurrency scenarios remain in that issue as historical QA detail and are not represented as separately evidenced tests.
+Issue #53 is closed as completed by owner attestation.
 
 ## Verification
 
-Before treating a release as known-good:
+Before treating a later release as known-good:
 
-1. confirm fine-grained PAT setup and repository discovery;
+1. confirm PAT setup and repository discovery;
 2. choose a local backup folder;
 3. confirm active-job notifications are visible;
-4. create a first mirror and verify `mirror.tar.gz` is produced;
-5. run another update without GitHub changes and confirm the archive is not rebuilt;
+4. create a first mirror;
+5. run an unchanged update and confirm the archive is not rebuilt;
 6. change the source repository and confirm the same logical mirror is updated;
-7. delete a test branch/tag upstream and confirm fetch/prune removes that ref from the mirror;
-8. interrupt an update and confirm the previous verified mirror remains intact;
-9. confirm daily/weekly scheduling updates the same logical mirror;
-10. confirm the health dashboard distinguishes last checked from last changed.
+7. confirm deleted refs are pruned;
+8. confirm health distinguishes last checked from last changed.
