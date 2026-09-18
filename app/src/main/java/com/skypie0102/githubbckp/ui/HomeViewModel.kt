@@ -122,12 +122,22 @@ class HomeViewModel @Inject constructor(
     }
 
     fun refreshReadiness() {
-        _state.update {
-            it.copy(
+        _state.update { current ->
+            val refreshed = current.copy(
                 githubConnected = githubAuthManager.isAuthenticated(),
                 documentTreeConfigured = storagePreferences.isDocumentTreeConfigured(),
                 documentTreeName = storagePreferences.documentTreeDisplayName(),
                 notificationsReady = activeBackupNotificationManager.isReady(),
+            )
+            refreshed.copy(
+                backupHealth = summarizeBackupHealth(
+                    repositories = refreshed.repositories,
+                    mirrors = mirrorHealthState,
+                    scheduleEnabled = refreshed.scheduleEnabled,
+                    cadence = refreshed.scheduleCadence,
+                    nowEpochMs = System.currentTimeMillis(),
+                    globalBlockMessage = refreshed.globalBackupBlockMessage(),
+                ),
             )
         }
         viewModelScope.launch { mirrorStorageReconciler.reconcileAll() }
@@ -194,11 +204,21 @@ class HomeViewModel @Inject constructor(
         viewModelScope.launch {
             runBusy {
                 storagePreferences.persistDocumentTree(uri)
-                _state.update {
-                    it.copy(
-                        documentTreeConfigured = true,
+                _state.update { current ->
+                    val refreshed = current.copy(
+                        documentTreeConfigured = storagePreferences.isDocumentTreeConfigured(),
                         documentTreeName = storagePreferences.documentTreeDisplayName(),
                         message = "Local backup folder selected",
+                    )
+                    refreshed.copy(
+                        backupHealth = summarizeBackupHealth(
+                            repositories = refreshed.repositories,
+                            mirrors = mirrorHealthState,
+                            scheduleEnabled = refreshed.scheduleEnabled,
+                            cadence = refreshed.scheduleCadence,
+                            nowEpochMs = System.currentTimeMillis(),
+                            globalBlockMessage = refreshed.globalBackupBlockMessage(),
+                        ),
                     )
                 }
                 mirrorStorageReconciler.reconcileAll()
