@@ -1,58 +1,62 @@
 # Scheduled mirror updates
 
-Automatic backups are controlled by WorkManager and run daily or weekly. New scheduled work is mirror-only: each selected repository has one current logical Git mirror, and scheduled runs update that mirror rather than creating intentional generations.
+Automatic updates use WorkManager and support only:
 
-## Execution model
+- Off
+- Daily
+- Weekly
 
-The periodic worker is a lightweight controller. It reads the currently selected, available repositories and enqueues one repository mirror-update job per repository. WorkManager periodic execution is opportunistic rather than an exact clock alarm.
+The periodic worker is a lightweight controller. It finds selected, currently available repositories and enqueues one unique repository job for each.
 
-Scheduled repository jobs require:
+## Readiness
 
-- unmetered network connectivity;
-- battery not low;
-- storage not low.
+Before fan-out, scheduled work requires:
 
-Before fan-out, the controller re-checks local prerequisites. GitHub must still be connected. If Google Drive is selected, Drive must still be authorized. If a document-tree destination is selected, that tree must still be configured.
+- a valid GitHub connection;
+- a configured local document-tree backup folder;
+- active-job notifications to be visible.
 
-A missing prerequisite does not create a wave of repository failures. The controller finishes that cycle cleanly and checks again on the next scheduled cycle because reconnecting GitHub, Drive, or a document tree generally requires user action.
+If any prerequisite is missing, the scheduled cycle records a blocked/skipped status and does not start repository backup work.
 
-## One-current-mirror rule
+Repository work also requires network connectivity. Scheduled repository jobs currently retain conservative WorkManager battery/storage/network constraints.
 
-Repository jobs always use `GIT_MIRROR`. The old scheduled backup-format preference is removed when settings are saved and is no longer exposed in the UI.
+## One mirror per repository
 
-The mirror archive uses a stable repository-specific name. Storage providers are given the previously verified remote object when available:
+Every repository job updates the same logical artifact:
 
-- Google Drive updates that file through a resumable update session;
-- document-tree storage overwrites the current document and migrates an old timestamped filename when possible.
+```text
+GitHub Backups/<repository-id>/mirror.tar.gz
+```
 
-After the replacement is uploaded and verified, older distinct artifacts left by previous versions are removed on a best-effort basis. Their history rows remain available but are marked as no longer owning a current remote artifact. A cleanup failure is recorded as a warning and does not invalidate the newly verified mirror.
+No scheduled run intentionally creates a historical generation.
 
-## Last scheduled-run status
+## Unchanged repositories
 
-Each completed controller cycle persists a timestamp and one of these outcomes:
+The worker reads `manifest.json` directly from the current archive and compares its refs digest with `ls-remote`.
 
-- `QUEUED` — repository jobs were enqueued successfully. This does **not** mean every repository update has completed yet.
-- `SKIPPED_NO_REPOSITORIES` — there were no selected, currently available repositories to enqueue.
-- `SKIPPED_NOT_READY` — local prerequisites were not ready. The block reason distinguishes GitHub disconnected, Drive disconnected, and missing document-tree configuration.
+When the repository is unchanged:
 
-The Automatic backups card observes this state while the app is open. When a queued run has a correlation ID, the UI also observes its child backup rows and reports progress.
+- the check is recorded as successful;
+- `lastCheckedAt` advances;
+- `lastChangedAt` does not;
+- the archive is not extracted;
+- the archive is not recompressed.
 
-## Repository availability and health
+## Health
 
-Repository selection is reconciled after each successful GitHub refresh. Cached repositories that disappear from the returned inventory are retained for history but marked unavailable and excluded from scheduled fan-out. If a repository later reappears, its previous selection is restored.
+A selected mirror is stale after two cadence windows without a successful check:
 
-Repository health is based on the latest attempt and latest current verified backup for each selected repository, not on the limited recent-activity list.
+- Daily: 48 hours
+- Weekly: 14 days
 
-When automatic backups are enabled, a verified backup is stale after two cadence windows: 48 hours for daily schedules and 14 days for weekly schedules. The extra window allows for WorkManager's opportunistic execution and temporary device/network constraints.
+This tolerance accommodates WorkManager's opportunistic execution.
 
-A failed attempt after the latest verified backup takes priority over staleness. A later successful update clears the earlier failure state.
+A changed archive can therefore be old while the repository remains healthy if recent scheduled checks prove that the remote repository has not changed.
 
 ## Notifications
 
-A repository worker emits a failure notification only after `BackupCoordinator` has persisted the attempt as `FAILED`. Repeated failure alerts for the same repository are rate-limited to one notification per six hours and use a stable per-repository ID.
+Every repository job is foreground work with one ongoing notification.
 
-When automatic backups are enabled, `BackupScheduler` also maintains a lightweight local health-check worker. It runs daily and groups newly overdue repositories into one notification. A repository that remains overdue does not generate a fresh alert every day; it can alert again after recovering and later becoming overdue again.
+If Android notification permission, app notification settings, or the active-backup notification channel prevents visibility, the repository job is blocked before mirror work starts.
 
-Disabling automatic backups cancels the scheduled controller and health-check worker and clears overdue-notification state.
-
-On Android 13 and newer the app requests `POST_NOTIFICATIONS` once. If permission is unavailable, backup execution and health evaluation continue normally; only notifications are suppressed.
+The notification includes a Cancel action tied to WorkManager cancellation.
