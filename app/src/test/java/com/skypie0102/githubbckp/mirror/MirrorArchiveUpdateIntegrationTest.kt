@@ -5,9 +5,11 @@ import java.nio.file.Files
 import org.eclipse.jgit.api.Git
 import org.eclipse.jgit.storage.file.FileRepositoryBuilder
 import org.eclipse.jgit.transport.RefSpec
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
 import org.junit.Test
 
 class MirrorArchiveUpdateIntegrationTest {
@@ -119,6 +121,125 @@ class MirrorArchiveUpdateIntegrationTest {
                 assertNotNull(repository.findRef("refs/heads/main"))
                 assertNull(repository.findRef("refs/heads/feature"))
             }
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun failedFetchLeavesCurrentArchiveByteForByteUntouched() {
+        val root = Files.createTempDirectory("mirror-fetch-failure").toFile()
+        try {
+            val remote = File(root, "remote.git")
+            Git.init()
+                .setBare(true)
+                .setInitialBranch("main")
+                .setDirectory(remote)
+                .call()
+                .close()
+            val remoteUri = remote.toURI().toString()
+
+            val working = File(root, "working")
+            Git.init()
+                .setInitialBranch("main")
+                .setDirectory(working)
+                .call()
+                .use { git ->
+                    File(working, "README.md").writeText("stable")
+                    git.add().addFilepattern("README.md").call()
+                    git.commit()
+                        .setMessage("initial")
+                        .setAuthor("Test", "test@example.com")
+                        .setCommitter("Test", "test@example.com")
+                        .call()
+                    git.push().setRemote(remoteUri).setPushAll().call()
+                }
+
+            val staging = File(root, "first").apply { mkdirs() }
+            val repository = File(staging, MirrorVerifier.REPOSITORY_DIRECTORY)
+            GitMirrorOperations.cloneMirror(remoteUri, repository)
+            writeManifest(staging, remoteUri, repository, 100L, 100L)
+            val currentArchive = File(root, "mirror.tar.gz")
+            TarGzArchive.create(staging, currentArchive)
+            val stableBytes = currentArchive.readBytes()
+
+            val updateStaging = File(root, "update")
+            TarGzArchive.extract(currentArchive, updateStaging)
+            remote.deleteRecursively()
+
+            assertThrows(Exception::class.java) {
+                GitMirrorOperations.fetchAndPrune(
+                    remoteUri = remoteUri,
+                    repositoryDirectory = File(updateStaging, MirrorVerifier.REPOSITORY_DIRECTORY),
+                    defaultBranch = "main",
+                )
+            }
+
+            assertArrayEquals(stableBytes, currentArchive.readBytes())
+            MirrorVerifier.verify(
+                currentArchive,
+                File(root, "verify-stable"),
+                expectedRepositoryId = REPOSITORY_ID,
+            )
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun interruptedReplacementArchiveCannotDamageCurrentArchive() {
+        val root = Files.createTempDirectory("mirror-compression-failure").toFile()
+        try {
+            val remote = File(root, "remote.git")
+            Git.init()
+                .setBare(true)
+                .setInitialBranch("main")
+                .setDirectory(remote)
+                .call()
+                .close()
+            val remoteUri = remote.toURI().toString()
+
+            val working = File(root, "working")
+            Git.init()
+                .setInitialBranch("main")
+                .setDirectory(working)
+                .call()
+                .use { git ->
+                    File(working, "README.md").writeText("stable")
+                    git.add().addFilepattern("README.md").call()
+                    git.commit()
+                        .setMessage("initial")
+                        .setAuthor("Test", "test@example.com")
+                        .setCommitter("Test", "test@example.com")
+                        .call()
+                    git.push().setRemote(remoteUri).setPushAll().call()
+                }
+
+            val staging = File(root, "first").apply { mkdirs() }
+            val repository = File(staging, MirrorVerifier.REPOSITORY_DIRECTORY)
+            GitMirrorOperations.cloneMirror(remoteUri, repository)
+            writeManifest(staging, remoteUri, repository, 100L, 100L)
+            val currentArchive = File(root, "mirror.tar.gz")
+            TarGzArchive.create(staging, currentArchive)
+            val stableBytes = currentArchive.readBytes()
+
+            val interruptedCandidate = File(root, "mirror.pending.tar.gz")
+            interruptedCandidate.writeBytes(stableBytes.copyOf(stableBytes.size / 2))
+
+            assertThrows(Exception::class.java) {
+                MirrorVerifier.verify(
+                    interruptedCandidate,
+                    File(root, "verify-candidate"),
+                    expectedRepositoryId = REPOSITORY_ID,
+                )
+            }
+
+            assertArrayEquals(stableBytes, currentArchive.readBytes())
+            MirrorVerifier.verify(
+                currentArchive,
+                File(root, "verify-stable"),
+                expectedRepositoryId = REPOSITORY_ID,
+            )
         } finally {
             root.deleteRecursively()
         }
