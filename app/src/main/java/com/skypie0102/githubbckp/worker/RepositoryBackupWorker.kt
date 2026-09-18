@@ -51,17 +51,32 @@ class RepositoryBackupWorker(
             ),
         )
 
-        val success = dependencies.mirrorSyncCoordinator().sync(repository) { stage ->
-            setForeground(
-                notifications.foregroundInfo(
-                    workId = id,
-                    repositoryId = repositoryId,
-                    owner = repository.owner,
-                    name = repository.name,
-                    stage = stage,
-                ),
-            )
-        }
+        val success = dependencies.mirrorSyncCoordinator().sync(
+            repository = repository,
+            onStage = { stage ->
+                setForeground(
+                    notifications.foregroundInfo(
+                        workId = id,
+                        repositoryId = repositoryId,
+                        owner = repository.owner,
+                        name = repository.name,
+                        stage = stage,
+                    ),
+                )
+            },
+            onByteProgress = { stage, completedBytes, totalBytes ->
+                setForeground(
+                    notifications.foregroundInfo(
+                        workId = id,
+                        repositoryId = repositoryId,
+                        owner = repository.owner,
+                        name = repository.name,
+                        stage = stage,
+                        progressPercent = backupProgressPercent(completedBytes, totalBytes),
+                    ),
+                )
+            },
+        )
 
         if (!success) {
             val currentRepository = dependencies.repositoryDao().getRepository(repositoryId)
