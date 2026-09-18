@@ -84,7 +84,7 @@ Uninstalling clears app data, including the encrypted GitHub token and local app
 
 These checks intentionally remain manual because unit/CI tests cannot reproduce Android process death, Storage Access Framework provider behavior, or organization approval controls faithfully.
 
-Before merging the refactor PR and publishing 0.3.0:
+Before merging the refactor PR and publishing 0.3.0, complete GitHub issue #53 (`0.3.0 manual device release gates`):
 
 1. **Upgrade migration:** using the same signing key (or the same local debug key), install a pre-refactor build with an app-owned local `.mirror.zip`, then upgrade to the 0.3.0 candidate. Confirm the ZIP remains untouched until a verified `mirror.tar.gz` is committed, then confirm only the exact app-owned legacy ZIP is removed.
 2. **Organization approval:** use a fine-grained token whose organization approval/repository access is pending or revoked. Confirm repository refresh/scheduled preflight marks that repository blocked and does not start its backup worker.
