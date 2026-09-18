@@ -323,7 +323,16 @@ class LocalMirrorStore @Inject constructor(
         )
     }
 
-    internal fun isLegacyMirrorFileName(owner: String, name: String, fileName: String): Boolean {
+    private companion object {
+        const val ROOT_DIRECTORY = "GitHub Backups"
+        const val STABLE_NAME = "mirror.tar.gz"
+        const val PENDING_NAME = "mirror.pending.tar.gz"
+        const val MIME_TYPE = "application/gzip"
+        const val BUFFER_SIZE = 256 * 1024
+    }
+}
+
+internal fun isLegacyMirrorFileName(owner: String, name: String, fileName: String): Boolean {
     val safeName = "$owner-$name".replace(Regex("[^A-Za-z0-9._-]"), "_")
     val stable = "$safeName.mirror.zip"
     if (fileName == stable) return true
@@ -347,12 +356,3 @@ internal fun requiredUpdateWorkspaceBytes(compressedBytes: Long, expandedBytes: 
 }
 
 private const val MIN_UPDATE_HEADROOM_BYTES = 64L * 1024L * 1024L
-
-private companion object {
-        const val ROOT_DIRECTORY = "GitHub Backups"
-        const val STABLE_NAME = "mirror.tar.gz"
-        const val PENDING_NAME = "mirror.pending.tar.gz"
-        const val MIME_TYPE = "application/gzip"
-        const val BUFFER_SIZE = 256 * 1024
-    }
-}
