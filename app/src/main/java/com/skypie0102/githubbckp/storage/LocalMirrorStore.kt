@@ -226,14 +226,24 @@ class LocalMirrorStore @Inject constructor(
 
     private fun reconcileFolder(repositoryId: Long, folder: DocumentFile): Boolean {
         val stable = folder.findFile(STABLE_NAME)
-        val pending = folder.findFile(PENDING_NAME) ?: return false
-
-        if (stable != null) {
-            // A crash before commit left a candidate behind. The stable mirror
-            // is authoritative, so discard the candidate.
-            pending.delete()
-            return false
+        val pending = folder.findFile(PENDING_NAME)
+        when (
+            pendingMirrorRecoveryAction(
+                stableExists = stable != null,
+                pendingExists = pending != null,
+            )
+        ) {
+            PendingMirrorRecoveryAction.NONE -> return false
+            PendingMirrorRecoveryAction.DISCARD_PENDING -> {
+                // A crash before retiring the stable mirror left a candidate
+                // behind. The previous stable mirror is authoritative.
+                pending?.delete()
+                return false
+            }
+            PendingMirrorRecoveryAction.VERIFY_AND_PROMOTE -> Unit
         }
+
+        checkNotNull(pending)
 
         // No stable archive means the process may have died between retiring
         // the old file and renaming the already-verified pending file, or during
@@ -356,3 +366,19 @@ internal fun requiredUpdateWorkspaceBytes(compressedBytes: Long, expandedBytes: 
 }
 
 private const val MIN_UPDATE_HEADROOM_BYTES = 64L * 1024L * 1024L
+
+
+internal enum class PendingMirrorRecoveryAction {
+    NONE,
+    DISCARD_PENDING,
+    VERIFY_AND_PROMOTE,
+}
+
+internal fun pendingMirrorRecoveryAction(
+    stableExists: Boolean,
+    pendingExists: Boolean,
+): PendingMirrorRecoveryAction = when {
+    !pendingExists -> PendingMirrorRecoveryAction.NONE
+    stableExists -> PendingMirrorRecoveryAction.DISCARD_PENDING
+    else -> PendingMirrorRecoveryAction.VERIFY_AND_PROMOTE
+}
