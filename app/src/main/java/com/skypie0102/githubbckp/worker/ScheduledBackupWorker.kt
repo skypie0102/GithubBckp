@@ -6,7 +6,6 @@ import androidx.work.WorkerParameters
 import com.skypie0102.githubbckp.data.local.BackupDao
 import com.skypie0102.githubbckp.github.GithubAuthManager
 import com.skypie0102.githubbckp.storage.StoragePreferences
-import com.skypie0102.githubbckp.storage.drive.GoogleDriveAuthManager
 import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
 import dagger.hilt.android.EntryPointAccessors
@@ -33,6 +32,7 @@ class ScheduledBackupWorker(
             .filter { it.selectedForBackup }
             .map { it.githubId }
             .toList()
+
         if (repositoryIds.isEmpty()) {
             schedulePreferences.saveRunStatus(
                 scheduledBackupRunStatus(
@@ -44,12 +44,10 @@ class ScheduledBackupWorker(
             return Result.success()
         }
 
-        val storagePreferences = dependencies.storagePreferences()
         val readiness = evaluateScheduledBackupReadiness(
             githubAuthenticated = dependencies.githubAuthManager().isAuthenticated(),
-            destination = storagePreferences.destination(),
-            driveAuthenticated = dependencies.googleDriveAuthManager().isAuthenticated(),
-            documentTreeConfigured = storagePreferences.isDocumentTreeConfigured(),
+            documentTreeConfigured = dependencies.storagePreferences().isDocumentTreeConfigured(),
+            notificationsReady = dependencies.activeBackupNotificationManager().isReady(),
         )
         if (!readiness.ready) {
             schedulePreferences.saveRunStatus(
@@ -87,5 +85,5 @@ interface ScheduledBackupWorkerDependencies {
     fun schedulePreferences(): BackupSchedulePreferences
     fun githubAuthManager(): GithubAuthManager
     fun storagePreferences(): StoragePreferences
-    fun googleDriveAuthManager(): GoogleDriveAuthManager
+    fun activeBackupNotificationManager(): ActiveBackupNotificationManager
 }
