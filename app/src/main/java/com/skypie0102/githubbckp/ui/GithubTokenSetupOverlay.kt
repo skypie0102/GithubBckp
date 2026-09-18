@@ -56,7 +56,7 @@ fun GithubTokenSetupOverlay(
                     style = MaterialTheme.typography.bodyMedium,
                 )
                 Text(
-                    "Fine-grained PAT (recommended): select every repository you want backed up. Repository permissions: Contents = Read-only and Metadata = Read-only. No write, administration, issues, pull requests, actions, or package permissions are needed.",
+                    "Fine-grained PAT (recommended): select every repository you want backed up. Repository permissions: Contents = Read-only. Metadata = Read-only is also required for repository discovery and is included automatically by GitHub. No write, administration, issues, pull requests, actions, or package permissions are needed.",
                     style = MaterialTheme.typography.bodySmall,
                 )
                 Text(
