@@ -60,6 +60,7 @@ class HomeViewModel @Inject constructor(
 ) : ViewModel() {
     private val initialSchedule = backupScheduler.scheduleSettings()
     private var mirrorHealthState: List<MirrorEntity> = emptyList()
+    private var remoteRefsDigests: Map<Long, String> = emptyMap()
 
     private val _state = MutableStateFlow(
         HomeUiState(
@@ -90,6 +91,7 @@ class HomeViewModel @Inject constructor(
                             cadence = current.scheduleCadence,
                             nowEpochMs = System.currentTimeMillis(),
                             globalBlockMessage = current.globalBackupBlockMessage(),
+                            remoteRefsDigests = remoteRefsDigests,
                         ),
                     )
                 }
@@ -108,6 +110,7 @@ class HomeViewModel @Inject constructor(
                             cadence = current.scheduleCadence,
                             nowEpochMs = System.currentTimeMillis(),
                             globalBlockMessage = current.globalBackupBlockMessage(),
+                            remoteRefsDigests = remoteRefsDigests,
                         ),
                     )
                 }
@@ -137,6 +140,7 @@ class HomeViewModel @Inject constructor(
                     cadence = refreshed.scheduleCadence,
                     nowEpochMs = System.currentTimeMillis(),
                     globalBlockMessage = refreshed.globalBackupBlockMessage(),
+                    remoteRefsDigests = remoteRefsDigests,
                 ),
             )
         }
@@ -149,26 +153,40 @@ class HomeViewModel @Inject constructor(
                 val existing = repositoryDao.getRepositories().associateBy { it.githubId }
                 val remote = githubGateway.listRepositories()
                 val limiter = Semaphore(REPOSITORY_ACCESS_CHECK_CONCURRENCY)
-                val verified = coroutineScope {
+                val inspected = coroutineScope {
                     remote.map { repository ->
                         async(Dispatchers.IO) {
                             limiter.withPermit {
+                                val remoteState = githubRepositoryAccessVerifier.inspect(repository)
                                 repository.toEntity(
                                     selectedForBackup = existing[repository.id]?.selectedForBackup ?: true,
-                                    isAvailable = githubRepositoryAccessVerifier.canRead(repository),
-                                )
+                                    isAvailable = remoteState.readable,
+                                ) to remoteState.refsDigest
                             }
                         }
                     }.awaitAll()
                 }
+                val verified = inspected.map { it.first }
+                remoteRefsDigests = inspected.mapNotNull { (repository, digest) ->
+                    digest?.let { repository.githubId to it }
+                }.toMap()
                 repositoryDao.upsertRepositories(verified)
 
                 val unavailableCount = verified.count { !it.isAvailable }
-                _state.update {
-                    it.copy(
+                _state.update { current ->
+                    current.copy(
                         githubConnected = true,
+                        backupHealth = summarizeBackupHealth(
+                            repositories = verified,
+                            mirrors = mirrorHealthState,
+                            scheduleEnabled = current.scheduleEnabled,
+                            cadence = current.scheduleCadence,
+                            nowEpochMs = System.currentTimeMillis(),
+                            globalBlockMessage = current.globalBackupBlockMessage(),
+                            remoteRefsDigests = remoteRefsDigests,
+                        ),
                         message = buildString {
-                            append("Found ${remote.size} repositories")
+                            append("Checked ${remote.size} repositories")
                             if (unavailableCount > 0) {
                                 append("; ")
                                 append(unavailableCount)
@@ -218,6 +236,7 @@ class HomeViewModel @Inject constructor(
                             cadence = refreshed.scheduleCadence,
                             nowEpochMs = System.currentTimeMillis(),
                             globalBlockMessage = refreshed.globalBackupBlockMessage(),
+                            remoteRefsDigests = remoteRefsDigests,
                         ),
                     )
                 }
@@ -321,6 +340,7 @@ class HomeViewModel @Inject constructor(
                     cadence = settings.cadence,
                     nowEpochMs = System.currentTimeMillis(),
                     globalBlockMessage = current.globalBackupBlockMessage(),
+                    remoteRefsDigests = remoteRefsDigests,
                 ),
                 message = message,
             )
