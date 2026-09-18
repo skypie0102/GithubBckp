@@ -4,14 +4,11 @@ import com.skypie0102.githubbckp.backup.RepositoryRef
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
-import java.net.URLEncoder
-import java.nio.charset.StandardCharsets
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
-import org.json.JSONObject
 
 @Singleton
 class GithubRestGateway @Inject constructor(
@@ -42,14 +39,6 @@ class GithubRestGateway @Inject constructor(
         }
     }
 
-    override suspend fun repositoryHasWiki(repository: RepositoryRef): Boolean = withContext(Dispatchers.IO) {
-        val token = authManager.requireAccessToken()
-        val url = "$API_BASE/repos/${path(repository.owner)}/${path(repository.name)}"
-        getJsonObject(url, token).optBoolean("has_wiki", false)
-    }
-
-    private fun getJsonObject(url: String, token: String): JSONObject =
-        JSONObject(getJsonResponse(url, token).body)
 
     private fun getJsonResponse(url: String, token: String): GithubJsonResponse {
         val connection = openGet(url, token)
