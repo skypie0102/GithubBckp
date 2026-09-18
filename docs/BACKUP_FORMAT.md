@@ -25,7 +25,11 @@ The pending file is never an intentional historical generation.
 ## Archive layout
 
 ```text
-mirror.tar.gz
+<owner>--<repo>.tar.gz
+├── repository/
+│   ├── README.md
+│   ├── src/
+│   └── ... default-branch files ...
 ├── manifest.json
 └── repository.git/
     ├── HEAD
@@ -36,7 +40,13 @@ mirror.tar.gz
         └── objects/
 ```
 
-`repository.git` must be a bare Git repository.
+`repository/` is a human-readable snapshot of the configured default branch, similar to the files visible after a normal clone/checkout.
+
+`repository.git/` remains the authoritative bare Git mirror containing full reachable history, refs, and Git LFS object storage. Keeping the bare mirror is what makes incremental fetch/prune and full-history preservation reliable.
+
+For safety, Git symlink entries are materialized in `repository/` as regular files containing the link target text. Submodule entries are represented as empty directories, matching a clone before submodules are initialized.
+
+Git LFS paths in `repository/` remain their small pointer files so the archive does not duplicate potentially very large LFS payloads. The verified LFS object bytes remain under `repository.git/lfs/objects/`.
 
 ## Manifest
 
@@ -57,6 +67,7 @@ Current format version: **1**.
 - deterministic refs digest;
 - current default-branch commit when available;
 - whether reachable LFS objects are included;
+- whether the browsable default-branch working tree is included;
 - app version.
 
 The archive SHA-256 is stored outside the archive in Room because an archive cannot contain its own final digest.
@@ -84,9 +95,10 @@ Before a pending archive can be committed:
 5. manifest repository ID must match the expected GitHub repository;
 6. `repository.git` must exist;
 7. JGit must open it successfully as a bare repository;
-8. every reachable Git LFS pointer must have a corresponding object;
-9. every referenced LFS object must match its declared size and SHA-256;
-10. persisted pending bytes must match the expected archive SHA-256.
+8. when the manifest promises a browsable checkout, `repository/` must exist;
+9. every reachable Git LFS pointer must have a corresponding object;
+10. every referenced LFS object must match its declared size and SHA-256;
+11. persisted pending bytes must match the expected archive SHA-256.
 
 ## Update safety
 
@@ -114,3 +126,10 @@ For every reachable standard LFS pointer, the app:
 During later updates, already-present LFS objects are re-verified and reused; only missing referenced objects are downloaded.
 
 There is no Git LFS upload or restore path.
+
+
+## Compatibility upgrade
+
+Archives created before 0.3.3 do not contain `repository/`. They remain readable because the new manifest field is optional when parsing older archives.
+
+On the next successful mirror operation, an older archive is rebuilt once to add the browsable checkout even when Git refs themselves are unchanged. After that one-time upgrade, unchanged repositories return to the no-extraction/no-recompression fast path.
