@@ -1,11 +1,14 @@
 package com.skypie0102.githubbckp.mirror
 
+import com.skypie0102.githubbckp.backup.GitLfsObjectStore
+import com.skypie0102.githubbckp.backup.GitLfsPointerScanner
 import java.io.File
 import org.eclipse.jgit.storage.file.FileRepositoryBuilder
 
 data class MirrorVerificationResult(
     val manifest: MirrorManifest,
     val refCount: Int,
+    val lfsObjectCount: Int,
 )
 
 object MirrorVerifier {
@@ -35,17 +38,29 @@ object MirrorVerifier {
             val repositoryDirectory = File(verificationDirectory, REPOSITORY_DIRECTORY)
             check(repositoryDirectory.isDirectory) { "Bare Git repository is missing from mirror" }
 
-            FileRepositoryBuilder()
+            val refCount = FileRepositoryBuilder()
                 .setGitDir(repositoryDirectory)
                 .setMustExist(true)
                 .build()
                 .use { repository ->
                     check(repository.isBare) { "Mirror repository is not bare" }
-                    MirrorVerificationResult(
-                        manifest = manifest,
-                        refCount = repository.refDatabase.getRefsByPrefix("refs/").size,
-                    )
+                    repository.refDatabase.getRefsByPrefix("refs/").size
                 }
+
+            val pointers = GitLfsPointerScanner().scan(repositoryDirectory)
+            check(manifest.lfsIncluded == pointers.isNotEmpty()) {
+                "Mirror manifest LFS state does not match reachable repository pointers"
+            }
+            val objectStore = GitLfsObjectStore()
+            pointers.forEach { pointer ->
+                objectStore.requireVerifiedObject(repositoryDirectory, pointer)
+            }
+
+            MirrorVerificationResult(
+                manifest = manifest,
+                refCount = refCount,
+                lfsObjectCount = pointers.size,
+            )
         } finally {
             verificationDirectory.deleteRecursively()
         }
