@@ -5,6 +5,7 @@ import com.skypie0102.githubbckp.data.local.MirrorDao
 import com.skypie0102.githubbckp.data.local.MirrorEntity
 import com.skypie0102.githubbckp.data.local.RepositoryEntity
 import com.skypie0102.githubbckp.storage.LocalMirrorStore
+import com.skypie0102.githubbckp.storage.StoredMirror
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
 import javax.inject.Inject
@@ -42,26 +43,47 @@ class MirrorSyncCoordinator @Inject constructor(
                 lastAttemptAtEpochMs = attemptAt,
                 lastAttemptStatus = MirrorAttemptStatus.CHECKING.name,
                 lastError = null,
+                lastWarning = null,
             ),
         )
 
         return try {
-            val existingArchive = File(session, "existing.tar.gz")
-            val stored = mirrorStore.copyCurrentTo(repository.githubId, existingArchive)
+            val storedManifest = mirrorStore.readManifest(repository.githubId)
+            if (storedManifest != null) {
+                val needsRebuild = mirrorEngine.remoteRequiresRebuild(
+                    repository = mirrorRepository,
+                    manifest = storedManifest,
+                    onProgress = onStage,
+                )
+                if (!needsRebuild) {
+                    recordUnchanged(
+                        repositoryId = repository.githubId,
+                        manifest = storedManifest,
+                        completedAt = System.currentTimeMillis(),
+                        previousState = previousState,
+                    )
+                    return true
+                }
+            }
 
             mirrorDao.upsert(
                 (mirrorDao.get(repository.githubId) ?: MirrorEntity(repository.githubId)).copy(
                     lastAttemptStatus = MirrorAttemptStatus.UPDATING.name,
+                    lastWarning = null,
                 ),
             )
 
-            val result = if (stored == null) {
+            val existingArchive = File(session, "existing.tar.gz")
+            var copiedMirror: StoredMirror? = null
+            val result = if (storedManifest == null) {
                 mirrorEngine.create(
                     repository = mirrorRepository,
                     workingDirectory = session,
                     onProgress = onStage,
                 )
             } else {
+                copiedMirror = mirrorStore.copyCurrentTo(repository.githubId, existingArchive)
+                    ?: error("Stored mirror disappeared before update")
                 mirrorEngine.update(
                     repository = mirrorRepository,
                     existingArchive = existingArchive,
@@ -73,21 +95,12 @@ class MirrorSyncCoordinator @Inject constructor(
             val completedAt = System.currentTimeMillis()
             when (result) {
                 is MirrorSyncResult.Unchanged -> {
-                    val current = mirrorStore.currentMirror(repository.githubId)
-                        ?: error("Stored mirror disappeared after successful check")
-                    mirrorDao.upsert(
-                        (mirrorDao.get(repository.githubId) ?: MirrorEntity(repository.githubId)).copy(
-                            archiveUri = current.uri.toString(),
-                            archiveSizeBytes = current.sizeBytes,
-                            archiveSha256 = current.sha256,
-                            formatVersion = result.manifest.formatVersion,
-                            lastCheckedAtEpochMs = completedAt,
-                            lastSuccessfulSyncAtEpochMs = completedAt,
-                            lastAttemptStatus = MirrorAttemptStatus.COMPLETED.name,
-                            lastSourceHead = result.manifest.headCommit,
-                            lastRefsDigest = result.manifest.refsDigest,
-                            lastError = null,
-                        ),
+                    recordUnchanged(
+                        repositoryId = repository.githubId,
+                        manifest = result.manifest,
+                        completedAt = completedAt,
+                        previousState = mirrorDao.get(repository.githubId),
+                        copiedMirror = copiedMirror,
                     )
                 }
 
@@ -110,6 +123,7 @@ class MirrorSyncCoordinator @Inject constructor(
                             lastSourceHead = result.manifest.headCommit,
                             lastRefsDigest = result.manifest.refsDigest,
                             lastError = null,
+                            lastWarning = null,
                         ),
                     )
                 }
@@ -128,6 +142,42 @@ class MirrorSyncCoordinator @Inject constructor(
         } finally {
             session.deleteRecursively()
         }
+    }
+
+    private suspend fun recordUnchanged(
+        repositoryId: Long,
+        manifest: MirrorManifest,
+        completedAt: Long,
+        previousState: MirrorEntity?,
+        copiedMirror: StoredMirror? = null,
+    ) {
+        val currentState = mirrorDao.get(repositoryId) ?: previousState
+        val needsStorageMetadata =
+            currentState?.archiveUri.isNullOrBlank() ||
+                currentState?.archiveSha256.isNullOrBlank() ||
+                (currentState?.archiveSizeBytes ?: 0L) <= 0L
+
+        val storage = when {
+            copiedMirror != null -> copiedMirror
+            needsStorageMetadata -> mirrorStore.currentMirror(repositoryId)
+            else -> null
+        }
+
+        mirrorDao.upsert(
+            (currentState ?: MirrorEntity(repositoryId)).copy(
+                archiveUri = storage?.uri?.toString() ?: currentState?.archiveUri,
+                archiveSizeBytes = storage?.sizeBytes ?: currentState?.archiveSizeBytes,
+                archiveSha256 = storage?.sha256 ?: currentState?.archiveSha256,
+                formatVersion = manifest.formatVersion,
+                lastCheckedAtEpochMs = completedAt,
+                lastSuccessfulSyncAtEpochMs = completedAt,
+                lastAttemptStatus = MirrorAttemptStatus.COMPLETED.name,
+                lastSourceHead = manifest.headCommit,
+                lastRefsDigest = manifest.refsDigest,
+                lastError = null,
+                lastWarning = null,
+            ),
+        )
     }
 
     private fun RepositoryEntity.toMirrorRepository() = MirrorRepository(
