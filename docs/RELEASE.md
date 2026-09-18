@@ -80,6 +80,22 @@ If a persistent release key is configured, future versions signed with that key 
 
 Uninstalling clears app data, including the encrypted GitHub token and local app settings. The mirror archives in the user-selected document tree are external to app-private data and should remain in that selected storage location.
 
+## 0.3.0 manual release gates
+
+These checks intentionally remain manual because unit/CI tests cannot reproduce Android process death, Storage Access Framework provider behavior, or organization approval controls faithfully.
+
+Before merging the refactor PR and publishing 0.3.0:
+
+1. **Upgrade migration:** using the same signing key (or the same local debug key), install a pre-refactor build with an app-owned local `.mirror.zip`, then upgrade to the 0.3.0 candidate. Confirm the ZIP remains untouched until a verified `mirror.tar.gz` is committed, then confirm only the exact app-owned legacy ZIP is removed.
+2. **Organization approval:** use a fine-grained token whose organization approval/repository access is pending or revoked. Confirm repository refresh/scheduled preflight marks that repository blocked and does not start its backup worker.
+3. **Real large repository:** mirror a repository materially larger than the CI synthetic stress fixture and confirm temporary-space preflight, extraction, fetch, compression, and final commit complete without excessive memory use.
+4. **Kill during fetch:** terminate the app/process while an existing mirror is fetching. Relaunch and confirm the previous `mirror.tar.gz` still verifies.
+5. **Kill during compression:** terminate during candidate tar.gz creation. Relaunch and confirm the previous stable archive still verifies and loose cache state is cleaned.
+6. **Kill around promotion:** terminate once with both stable+pending present and once after stable retirement with pending-only. Relaunch and confirm stable wins in the first case and verified pending recovery works in the second.
+7. **SAF failure:** move the selected folder or revoke its persisted permission. Confirm health becomes BLOCKED and no backup starts; restore access and confirm reconciliation clears the storage block.
+8. **Notification failure:** disable app notifications and then disable only the active-backup channel. Confirm jobs do not start in either case.
+9. **Concurrent mirrors:** start several selected repositories together and confirm each has independent cancellable foreground work under the grouped notification surface.
+
 ## Verification
 
 Before treating a release as known-good:
