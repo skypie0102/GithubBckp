@@ -10,6 +10,7 @@ import com.skypie0102.githubbckp.data.local.RepositoryEntity
 import com.skypie0102.githubbckp.data.local.toEntity
 import com.skypie0102.githubbckp.github.GithubAuthManager
 import com.skypie0102.githubbckp.github.GithubGateway
+import com.skypie0102.githubbckp.github.GithubRepositoryAccessVerifier
 import com.skypie0102.githubbckp.storage.StoragePreferences
 import com.skypie0102.githubbckp.worker.ActiveBackupNotificationManager
 import com.skypie0102.githubbckp.worker.BackupCadence
@@ -18,11 +19,17 @@ import com.skypie0102.githubbckp.worker.BackupScheduler
 import com.skypie0102.githubbckp.worker.ScheduledBackupRunStatus
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 
 data class HomeUiState(
     val githubConnected: Boolean = false,
@@ -44,6 +51,7 @@ class HomeViewModel @Inject constructor(
     private val mirrorDao: MirrorDao,
     private val githubAuthManager: GithubAuthManager,
     private val githubGateway: GithubGateway,
+    private val githubRepositoryAccessVerifier: GithubRepositoryAccessVerifier,
     private val storagePreferences: StoragePreferences,
     private val backupScheduler: BackupScheduler,
     private val activeBackupNotificationManager: ActiveBackupNotificationManager,
@@ -124,17 +132,33 @@ class HomeViewModel @Inject constructor(
             runBusy {
                 val existing = repositoryDao.getRepositories().associateBy { it.githubId }
                 val remote = githubGateway.listRepositories()
-                repositoryDao.upsertRepositories(
+                val limiter = Semaphore(REPOSITORY_ACCESS_CHECK_CONCURRENCY)
+                val verified = coroutineScope {
                     remote.map { repository ->
-                        repository.toEntity(
-                            selectedForBackup = existing[repository.id]?.selectedForBackup ?: true,
-                        )
-                    },
-                )
+                        async(Dispatchers.IO) {
+                            limiter.withPermit {
+                                repository.toEntity(
+                                    selectedForBackup = existing[repository.id]?.selectedForBackup ?: true,
+                                    isAvailable = githubRepositoryAccessVerifier.canRead(repository),
+                                )
+                            }
+                        }
+                    }.awaitAll()
+                }
+                repositoryDao.upsertRepositories(verified)
+
+                val unavailableCount = verified.count { !it.isAvailable }
                 _state.update {
                     it.copy(
                         githubConnected = true,
-                        message = "Found ${remote.size} repositories",
+                        message = buildString {
+                            append("Found ${remote.size} repositories")
+                            if (unavailableCount > 0) {
+                                append("; ")
+                                append(unavailableCount)
+                                append(" cannot be read with this token")
+                            }
+                        },
                     )
                 }
             }
@@ -288,6 +312,8 @@ class HomeViewModel @Inject constructor(
         }
     }
 }
+
+private const val REPOSITORY_ACCESS_CHECK_CONCURRENCY = 4
 
 private fun BackupCadence.displayName(): String = when (this) {
     BackupCadence.DAILY -> "daily"
