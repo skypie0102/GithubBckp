@@ -28,8 +28,8 @@ android {
         applicationId = "com.skypie0102.githubbckp"
         minSdk = 24
         targetSdk = 36
-        versionCode = 3
-        versionName = "0.2.2"
+        versionCode = 4
+        versionName = "0.3.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -80,7 +80,6 @@ dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.runtime.ktx)
-    implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.work.runtime.ktx)
     implementation(libs.androidx.documentfile)
 
@@ -90,11 +89,10 @@ dependencies {
 
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)
-    implementation(libs.androidx.hilt.navigation.compose)
 
     implementation(libs.kotlinx.coroutines.android)
-    implementation(libs.google.play.services.auth)
     implementation(libs.jgit)
+    implementation(libs.commons.compress)
 
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.ui)
@@ -102,5 +100,4 @@ dependencies {
     implementation(libs.androidx.compose.material3)
 
     testImplementation(libs.junit)
-    testImplementation(libs.json)
 }
