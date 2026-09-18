@@ -51,6 +51,31 @@ class TarGzArchiveTest {
     }
 
     @Test
+    fun createAndExtract_preservesUnicodePaths() {
+        val root = Files.createTempDirectory("tar-gz-unicode").toFile()
+        try {
+            val source = File(root, "source").apply { mkdirs() }
+            val unicode = File(source, "repository.git/对象/こんにちは-🙂.txt").apply {
+                parentFile?.mkdirs()
+                writeText("unicode-content")
+            }
+
+            val archive = File(root, "mirror.tar.gz")
+            TarGzArchive.create(source, archive)
+
+            val extracted = File(root, "extracted")
+            TarGzArchive.extract(archive, extracted)
+
+            assertEquals(
+                unicode.readText(),
+                File(extracted, "repository.git/对象/こんにちは-🙂.txt").readText(),
+            )
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
     fun extract_rejectsTruncatedArchive() {
         val root = Files.createTempDirectory("tar-gz-truncated").toFile()
         try {
