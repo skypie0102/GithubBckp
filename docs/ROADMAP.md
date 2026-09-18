@@ -196,7 +196,7 @@ Exit criteria:
 
 ## Phase 3 — Local-only transactional storage
 
-Status: **hardening**
+Status: **complete; interruption hardening continues in Phase 11**
 
 - [x] Add `LocalMirrorStore`.
 - [x] Use GitHub repository ID as the storage directory key.
@@ -205,8 +205,8 @@ Status: **hardening**
 - [x] Reconcile a pending archive after interruption.
 - [x] Keep the stable archive untouched when candidate writing/verification fails.
 - [x] Estimate expanded archive size and fail early when app-private temporary space is insufficient.
-- [ ] Add explicit SAF permission-loss diagnostics.
-- [ ] Add startup reconciliation across all selected repositories.
+- [x] Detect unavailable/revoked SAF folder access and surface blocked health.
+- [x] Reconcile pending/missing mirrors on startup.
 
 Exit criteria:
 
@@ -317,7 +317,7 @@ Exit criteria:
 
 ## Phase 7 — Authentication and onboarding
 
-Status: **in progress**
+Status: **substantially complete**
 
 - [x] Replace recovery/write permission wording.
 - [x] State exact recommended fine-grained PAT permissions:
@@ -325,7 +325,7 @@ Status: **in progress**
   - Metadata: Read-only
 - [x] State that no write/admin permission is required.
 - [x] Explain classic `repo` scope only as a broader compatibility fallback.
-- [ ] validate that accessible repositories can actually be read with Git operations;
+- [x] validate repository Git readability with bounded-concurrency `ls-remote` checks during refresh;
 - [ ] move notification permission request into explained onboarding;
 - [ ] enforce onboarding order: token → folder → notifications → repository selection.
 
@@ -374,7 +374,7 @@ Exit criteria:
 
 ## Phase 9 — UI and health dashboard rebuild
 
-Status: **substantially complete**
+Status: **complete for the refactor scope**
 
 Target Home screen:
 
@@ -399,10 +399,10 @@ Repository health states:
 Tasks:
 
 - [x] distinguish last successful check from last archive change;
-- [ ] show archive size;
-- [ ] show source HEAD;
-- [ ] show last failure;
-- [ ] show schedule;
+- [x] show archive size;
+- [x] show source HEAD;
+- [x] show last failure;
+- [x] show schedule;
 - [x] remove restore/import/reverify/audit/provider controls;
 - [x] reduce `HomeViewModel` and `HomeScreen` rather than layering more state onto them.
 
@@ -419,7 +419,7 @@ Exit criteria:
 
 ## Phase 10 — Legacy archive migration
 
-Status: **not started**
+Status: **implemented for app-owned local ZIP mirrors**
 
 Existing `.mirror.zip` backups must not be silently destroyed.
 
@@ -429,7 +429,7 @@ Policy:
 2. do not mutate them in place;
 3. create a new vNext `.tar.gz` mirror;
 4. fully verify the new mirror;
-5. only then remove an app-owned legacy ZIP for that repository.
+5. only then remove app-owned legacy ZIPs matching the old exact naming convention for that repository.
 
 Google-Drive-only installations must select a local folder before any new work starts.
 
@@ -441,7 +441,7 @@ Exit criteria:
 
 ## Phase 11 — Hardening matrix
 
-Status: **in progress**
+Status: **in progress; core archive/Git/LFS cases covered**
 
 Required tests include:
 
@@ -452,19 +452,19 @@ Required tests include:
 - repository renamed;
 - repository made private;
 - default branch changed;
-- branch force-pushed;
-- branch deleted;
-- tag deleted;
-- empty repository;
+- [x] branch force-pushed;
+- [x] branch deleted;
+- [x] tag deleted;
+- [x] empty repository;
 - large repository;
 - Unicode paths;
-- Git LFS pointers and corrupted LFS object;
-- corrupt/truncated tar.gz;
+- [x] Git LFS pointers and missing/corrupt LFS object;
+- [x] corrupt/truncated tar.gz;
 - archive manually deleted;
 - selected folder moved;
 - SAF permission revoked;
 - notification permission/channel unavailable;
-- storage exhaustion during extraction;
+- [x] preflight temporary-space estimate before extraction;
 - storage exhaustion during compression;
 - process death during fetch;
 - process death during compression;
