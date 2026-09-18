@@ -129,7 +129,7 @@ Deleted branches and tags are pruned. Files removed from the latest repository s
 
 ## Phase 0 — Refactor branch and CI
 
-Status: **in progress**
+Status: **complete except final merge**
 
 - [x] Create `refactor/simple-local-mirrors`.
 - [x] Open draft PR #52.
@@ -145,7 +145,7 @@ Exit criteria:
 
 ## Phase 1 — New mirror archive foundation
 
-Status: **in progress**
+Status: **complete**
 
 - [x] Add Apache Commons Compress.
 - [x] Add `TarGzArchive`.
@@ -156,7 +156,7 @@ Status: **in progress**
 - [x] Add `MirrorVerifier`.
 - [x] Reopen extracted `repository.git` with JGit and require a bare repository.
 - [x] Add archive and manifest unit tests.
-- [ ] Validate LFS objects during full mirror verification.
+- [x] Validate every reachable LFS object during full mirror verification.
 - [ ] Add corruption/truncation tests.
 
 Exit criteria:
@@ -168,7 +168,7 @@ Exit criteria:
 
 ## Phase 2 — Incremental Git mirror engine
 
-Status: **in progress**
+Status: **hardening**
 
 - [x] Add pure `GitMirrorOperations`.
 - [x] Mirror clone semantics.
@@ -183,8 +183,8 @@ Status: **in progress**
 - [x] Skip extraction/rebuild when refs and repository metadata are unchanged.
 - [x] Reuse read-side Git LFS scanning/download.
 - [ ] Add end-to-end create/update tests around an archived mirror.
-- [ ] Test force-updated branches and deleted tags.
-- [ ] Test empty repositories.
+- [x] Test force-updated branches and deleted tags.
+- [x] Test empty repositories.
 
 Exit criteria:
 
@@ -196,7 +196,7 @@ Exit criteria:
 
 ## Phase 3 — Local-only transactional storage
 
-Status: **in progress**
+Status: **hardening**
 
 - [x] Add `LocalMirrorStore`.
 - [x] Use GitHub repository ID as the storage directory key.
@@ -204,7 +204,7 @@ Status: **in progress**
 - [x] Re-hash persisted bytes before promotion.
 - [x] Reconcile a pending archive after interruption.
 - [x] Keep the stable archive untouched when candidate writing/verification fails.
-- [ ] Add storage-space readiness checks.
+- [x] Estimate expanded archive size and fail early when app-private temporary space is insufficient.
 - [ ] Add explicit SAF permission-loss diagnostics.
 - [ ] Add startup reconciliation across all selected repositories.
 
@@ -289,7 +289,7 @@ Exit criteria:
 
 ## Phase 6 — Scheduling and mandatory active-job notifications
 
-Status: **not started**
+Status: **substantially complete**
 
 Keep WorkManager with only:
 
@@ -374,7 +374,7 @@ Exit criteria:
 
 ## Phase 9 — UI and health dashboard rebuild
 
-Status: **in progress**
+Status: **substantially complete**
 
 Target Home screen:
 
@@ -441,7 +441,7 @@ Exit criteria:
 
 ## Phase 11 — Hardening matrix
 
-Status: **not started**
+Status: **in progress**
 
 Required tests include:
 
@@ -480,7 +480,7 @@ Exit criteria:
 
 ## Phase 12 — Documentation and release cutover
 
-Status: **in progress**
+Status: **in progress; product docs now reflect the new architecture**
 
 Keep only documentation that serves the new product:
 
