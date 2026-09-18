@@ -58,6 +58,7 @@ class ActiveBackupNotificationManager @Inject constructor(
             MirrorStage.OPTIMIZING -> "Optimizing repository…"
             MirrorStage.PACKAGING -> "Compressing backup…"
             MirrorStage.VERIFYING -> "Verifying backup…"
+            MirrorStage.COMMITTING -> "Saving backup…"
         }
 
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
