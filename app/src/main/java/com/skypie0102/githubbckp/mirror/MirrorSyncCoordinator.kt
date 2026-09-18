@@ -15,6 +15,7 @@ enum class MirrorAttemptStatus {
     UPDATING,
     COMPLETED,
     FAILED,
+    BLOCKED,
 }
 
 @Singleton
