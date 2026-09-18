@@ -41,6 +41,7 @@ enum class GithubRestoreTargetMode {
 data class HomeUiState(
     val githubConnected: Boolean = false,
     val driveConnected: Boolean = false,
+    val driveOauthConfigurationHint: String = "",
     val storageDestination: StorageDestination = StorageDestination.GOOGLE_DRIVE,
     val documentTreeConfigured: Boolean = false,
     val documentTreeName: String? = null,
@@ -79,6 +80,7 @@ class HomeViewModel @Inject constructor(
         HomeUiState(
             githubConnected = githubAuthManager.isAuthenticated(),
             driveConnected = driveAuthManager.isAuthenticated(),
+            driveOauthConfigurationHint = driveAuthManager.oauthConfigurationHint(),
             storageDestination = storagePreferences.destination(),
             documentTreeConfigured = storagePreferences.isDocumentTreeConfigured(),
             documentTreeName = storagePreferences.documentTreeDisplayName(),
@@ -282,7 +284,7 @@ class HomeViewModel @Inject constructor(
     fun driveAuthorizationCancelled() {
         _state.update {
             it.copy(
-                message = "Google Drive authorization was cancelled. If account selection closes unexpectedly, verify ${driveAuthManager.oauthConfigurationHint()}.",
+                message = "Google Drive authorization did not complete. The Android OAuth client must match ${driveAuthManager.oauthConfigurationHint()}.",
             )
         }
     }
@@ -338,7 +340,7 @@ class HomeViewModel @Inject constructor(
             else -> {
                 backupScheduler.enqueue(repositoryIds = selected.map { it.githubId })
                 _state.update {
-                    it.copy(message = "Queued ${selected.size} Git mirror update${if (selected.size == 1) "" else "s"}")
+                    it.copy(message = "Queued ${selected.size} repository backup${if (selected.size == 1) "" else "s"}")
                 }
             }
         }

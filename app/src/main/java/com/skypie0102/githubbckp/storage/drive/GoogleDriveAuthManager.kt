@@ -26,11 +26,17 @@ class GoogleDriveAuthManager @Inject constructor(
     @ApplicationContext private val context: Context,
     private val secureStore: SecureStore,
 ) {
-    private val client: AuthorizationClient = Identity.getAuthorizationClient(context)
-    private val request: AuthorizationRequest = AuthorizationRequest.builder()
-        .setRequestedScopes(listOf(Scope(DRIVE_FILE_SCOPE)))
-        .setOptOutIncludingGrantedScopes(true)
-        .build()
+    // Do not initialize Google Play services unless Drive is actually used. This
+    // keeps document-tree backups independent from the optional Drive connector.
+    private val client: AuthorizationClient by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+        Identity.getAuthorizationClient(context)
+    }
+    private val request: AuthorizationRequest by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+        AuthorizationRequest.builder()
+            .setRequestedScopes(listOf(Scope(DRIVE_FILE_SCOPE)))
+            .setOptOutIncludingGrantedScopes(true)
+            .build()
+    }
 
     fun isAuthenticated(): Boolean = secureStore.get(KEY_CONNECTED) == "true"
 
