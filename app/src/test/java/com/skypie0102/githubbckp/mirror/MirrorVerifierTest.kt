@@ -41,6 +41,49 @@ class MirrorVerifierTest {
     }
 
     @Test
+    fun verify_requiresBrowsableCheckoutWhenManifestPromisesIt() {
+        val root = Files.createTempDirectory("mirror-verifier-working-tree").toFile()
+        try {
+            val staging = File(root, "staging").apply { mkdirs() }
+            val repositoryDirectory = File(staging, MirrorVerifier.REPOSITORY_DIRECTORY)
+            Git.init()
+                .setBare(true)
+                .setDirectory(repositoryDirectory)
+                .call()
+                .close()
+
+            MirrorManifest(
+                repositoryId = 42L,
+                repositoryOwner = "owner",
+                repositoryName = "repo",
+                remoteUrl = "https://github.com/owner/repo.git",
+                defaultBranch = "main",
+                isPrivate = false,
+                createdAtEpochMs = 1L,
+                updatedAtEpochMs = 2L,
+                lastSuccessfulFetchAtEpochMs = 2L,
+                refsDigest = "test",
+                lfsIncluded = false,
+                workingTreeIncluded = true,
+                appVersion = "test",
+            ).writeTo(File(staging, MirrorManifest.FILE_NAME))
+
+            val archive = File(root, "mirror.tar.gz")
+            TarGzArchive.create(staging, archive)
+
+            assertThrows(IllegalStateException::class.java) {
+                MirrorVerifier.verify(
+                    archive = archive,
+                    verificationDirectory = File(root, "verify"),
+                    expectedRepositoryId = 42L,
+                )
+            }
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
     fun verify_rejectsMirrorWithMissingReachableLfsObject() {
         val root = Files.createTempDirectory("mirror-verifier-lfs").toFile()
         try {
@@ -138,6 +181,7 @@ class MirrorVerifierTest {
             lastSuccessfulFetchAtEpochMs = 2L,
             refsDigest = "test",
             lfsIncluded = lfsIncluded,
+            workingTreeIncluded = false,
             appVersion = "test",
         ).writeTo(File(staging, MirrorManifest.FILE_NAME))
     }
