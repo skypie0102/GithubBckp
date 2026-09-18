@@ -3,7 +3,7 @@ package com.skypie0102.githubbckp.worker
 import android.content.Context
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
-import com.skypie0102.githubbckp.data.local.BackupDao
+import com.skypie0102.githubbckp.data.local.RepositoryDao
 import com.skypie0102.githubbckp.github.GithubAuthManager
 import com.skypie0102.githubbckp.storage.StoragePreferences
 import dagger.hilt.EntryPoint
@@ -26,7 +26,7 @@ class ScheduledBackupWorker(
         if (!settings.enabled) return Result.success()
         val scheduledRunId = UUID.randomUUID().toString()
 
-        val repositoryIds = dependencies.backupDao()
+        val repositoryIds = dependencies.repositoryDao()
             .getAvailableRepositories()
             .asSequence()
             .filter { it.selectedForBackup }
@@ -80,7 +80,7 @@ class ScheduledBackupWorker(
 @EntryPoint
 @InstallIn(SingletonComponent::class)
 interface ScheduledBackupWorkerDependencies {
-    fun backupDao(): BackupDao
+    fun repositoryDao(): RepositoryDao
     fun backupScheduler(): BackupScheduler
     fun schedulePreferences(): BackupSchedulePreferences
     fun githubAuthManager(): GithubAuthManager
