@@ -95,6 +95,7 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.google.play.services.auth)
     implementation(libs.jgit)
+    implementation(libs.commons.compress)
 
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.ui)
