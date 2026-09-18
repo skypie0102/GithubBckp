@@ -11,6 +11,7 @@ import com.skypie0102.githubbckp.data.local.toEntity
 import com.skypie0102.githubbckp.github.GithubAuthManager
 import com.skypie0102.githubbckp.github.GithubGateway
 import com.skypie0102.githubbckp.github.GithubRepositoryAccessVerifier
+import com.skypie0102.githubbckp.mirror.MirrorStorageReconciler
 import com.skypie0102.githubbckp.storage.StoragePreferences
 import com.skypie0102.githubbckp.worker.ActiveBackupNotificationManager
 import com.skypie0102.githubbckp.worker.BackupCadence
@@ -52,6 +53,7 @@ class HomeViewModel @Inject constructor(
     private val githubAuthManager: GithubAuthManager,
     private val githubGateway: GithubGateway,
     private val githubRepositoryAccessVerifier: GithubRepositoryAccessVerifier,
+    private val mirrorStorageReconciler: MirrorStorageReconciler,
     private val storagePreferences: StoragePreferences,
     private val backupScheduler: BackupScheduler,
     private val activeBackupNotificationManager: ActiveBackupNotificationManager,
@@ -74,6 +76,7 @@ class HomeViewModel @Inject constructor(
 
     init {
         backupScheduler.reconcileSchedule()
+        viewModelScope.launch { mirrorStorageReconciler.reconcileAll() }
 
         viewModelScope.launch {
             repositoryDao.observeRepositories().collect { repositories ->
@@ -86,6 +89,7 @@ class HomeViewModel @Inject constructor(
                             scheduleEnabled = current.scheduleEnabled,
                             cadence = current.scheduleCadence,
                             nowEpochMs = System.currentTimeMillis(),
+                            globalBlockMessage = current.globalBackupBlockMessage(),
                         ),
                     )
                 }
@@ -103,6 +107,7 @@ class HomeViewModel @Inject constructor(
                             scheduleEnabled = current.scheduleEnabled,
                             cadence = current.scheduleCadence,
                             nowEpochMs = System.currentTimeMillis(),
+                            globalBlockMessage = current.globalBackupBlockMessage(),
                         ),
                     )
                 }
@@ -125,6 +130,7 @@ class HomeViewModel @Inject constructor(
                 notificationsReady = activeBackupNotificationManager.isReady(),
             )
         }
+        viewModelScope.launch { mirrorStorageReconciler.reconcileAll() }
     }
 
     fun refreshRepositories() {
@@ -195,6 +201,7 @@ class HomeViewModel @Inject constructor(
                         message = "Local backup folder selected",
                     )
                 }
+                mirrorStorageReconciler.reconcileAll()
             }
         }
     }
@@ -293,6 +300,7 @@ class HomeViewModel @Inject constructor(
                     scheduleEnabled = settings.enabled,
                     cadence = settings.cadence,
                     nowEpochMs = System.currentTimeMillis(),
+                    globalBlockMessage = current.globalBackupBlockMessage(),
                 ),
                 message = message,
             )
@@ -311,6 +319,13 @@ class HomeViewModel @Inject constructor(
             _state.update { it.copy(busy = false) }
         }
     }
+}
+
+private fun HomeUiState.globalBackupBlockMessage(): String? = when {
+    !githubConnected -> "GitHub is not connected."
+    !documentTreeConfigured -> "The local backup folder is unavailable."
+    !notificationsReady -> "Notifications must be enabled so running backups remain visible."
+    else -> null
 }
 
 private const val REPOSITORY_ACCESS_CHECK_CONCURRENCY = 4
