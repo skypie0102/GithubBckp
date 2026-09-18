@@ -12,10 +12,13 @@ import org.eclipse.jgit.transport.UsernamePasswordCredentialsProvider
 class GithubRepositoryAccessVerifier @Inject constructor(
     private val authManager: GithubAuthManager,
 ) {
-    suspend fun canRead(repository: GithubRepository): Boolean = withContext(Dispatchers.IO) {
+    suspend fun canRead(repository: GithubRepository): Boolean =
+        canReadRemote(repository.remoteUrl)
+
+    suspend fun canReadRemote(remoteUrl: String): Boolean = withContext(Dispatchers.IO) {
         val token = authManager.requireAccessToken()
         gitRemoteReadable(
-            remoteUrl = repository.remoteUrl,
+            remoteUrl = remoteUrl,
             credentialsProvider = UsernamePasswordCredentialsProvider("x-access-token", token),
         )
     }
