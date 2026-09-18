@@ -88,6 +88,8 @@ fun summarizeBackupHealth(
                     RepositoryBackupHealthState.UPDATING
                 !hasPersistedMirror && hasPreviouslySucceeded ->
                     RepositoryBackupHealthState.MISSING
+                attemptStatus == MirrorAttemptStatus.BLOCKED.name ->
+                    RepositoryBackupHealthState.BLOCKED
                 attemptStatus == MirrorAttemptStatus.FAILED.name ->
                     RepositoryBackupHealthState.FAILED
                 !mirror.lastWarning.isNullOrBlank() ->
