@@ -137,22 +137,26 @@ class LocalMirrorStore @Inject constructor(
         if (sourceFolder.uri == targetFolder.uri) {
             if (sourceDocument.name != names.stableFileName) {
                 val existingReadable = targetFolder.findFile(names.stableFileName)
-                if (existingReadable != null) return@withContext storedMirror(existingReadable)
+                if (existingReadable != null) {
+                    cleanupOtherRepositoryFolders(repositoryId, targetFolder)
+                    return@withContext storedMirror(existingReadable)
+                }
                 check(sourceDocument.renameTo(names.stableFileName)) {
                     "Could not rename mirror archive to a readable filename"
                 }
                 val renamed = targetFolder.findFile(names.stableFileName)
                     ?: throw IOException("Renamed mirror archive could not be found")
+                cleanupOtherRepositoryFolders(repositoryId, targetFolder)
                 return@withContext storedMirror(renamed)
             }
+            cleanupOtherRepositoryFolders(repositoryId, targetFolder)
             return@withContext source
         }
 
         stableMirrorDocument(targetFolder)?.let { readable ->
             val readableMirror = storedMirror(readable)
             if (readableMirror.sha256.equals(source.sha256, ignoreCase = true)) {
-                deleteMirrorFiles(sourceFolder)
-                if (sourceFolder.listFiles().isEmpty()) sourceFolder.delete()
+                cleanupOtherRepositoryFolders(repositoryId, targetFolder)
                 return@withContext readableMirror
             }
             readable.delete()
@@ -195,8 +199,7 @@ class LocalMirrorStore @Inject constructor(
                 ?: throw IOException("Readable mirror archive could not be found")
             val result = storedMirror(migrated)
 
-            deleteMirrorFiles(sourceFolder)
-            if (sourceFolder.listFiles().isEmpty()) sourceFolder.delete()
+            cleanupOtherRepositoryFolders(repositoryId, targetFolder)
             result
         } catch (throwable: Throwable) {
             runCatching { pending.delete() }
@@ -437,6 +440,18 @@ class LocalMirrorStore @Inject constructor(
                     )
             }
             .forEach { it.delete() }
+    }
+
+    private fun cleanupOtherRepositoryFolders(
+        repositoryId: Long,
+        keep: DocumentFile,
+    ) {
+        repositoryFolders(repositoryId)
+            .filter { it.uri != keep.uri }
+            .forEach { folder ->
+                deleteMirrorFiles(folder)
+                if (folder.listFiles().isEmpty()) folder.delete()
+            }
     }
 
     private fun storedMirror(document: DocumentFile): StoredMirror {
