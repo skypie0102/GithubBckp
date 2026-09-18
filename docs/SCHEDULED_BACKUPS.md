@@ -12,7 +12,8 @@ The periodic worker is a lightweight controller. It finds selected, currently av
 
 Before fan-out, scheduled work requires:
 
-- a valid GitHub connection;
+- the stored GitHub token to still validate;
+- each selected repository to remain readable over Git;
 - a configured local document-tree backup folder;
 - active-job notifications to be visible.
 
@@ -55,7 +56,7 @@ A changed archive can therefore be old while the repository remains healthy if r
 
 ## Notifications
 
-Every repository job is foreground work with one ongoing notification.
+Every repository job is foreground work with one ongoing notification. Simultaneous repository notifications share the same Android notification group. The final local commit reports exact bytes-written progress; stages whose total work is not knowable stay indeterminate.
 
 If Android notification permission, app notification settings, or the active-backup notification channel prevents visibility, the repository job is blocked before mirror work starts.
 
