@@ -64,13 +64,13 @@ The engine never modifies the durable archive directly. It only emits a verified
 
 ### LocalMirrorStore
 
-Uses Android's Storage Access Framework and one directory per GitHub repository ID:
+Uses Android's Storage Access Framework and one human-readable directory per repository while retaining the immutable GitHub repository ID as the stable identity suffix:
 
 ```text
-GitHub Backups/<repository-id>/mirror.tar.gz
+GitHub Backups/<owner>--<repo>--<repository-id>/<owner>--<repo>.tar.gz
 ```
 
-Replacement writes use `mirror.pending.tar.gz`. Persisted bytes are hashed before the previous stable mirror is retired. Startup reconciliation can promote a verified pending archive after interruption.
+Replacement writes use `<owner>--<repo>.pending.tar.gz`. Persisted bytes are hashed before the previous stable mirror is retired. Startup reconciliation can promote a verified pending archive after interruption. Numeric-only folders from early refactor test builds are migrated only after a readable replacement copy is checksum-verified.
 
 ### MirrorEntity
 
