@@ -11,3 +11,8 @@
 # producing NoSuchMethodException for the obfuscated com.google.android.gms.signin.zaa.
 # Keep this small internal package intact for release builds.
 -keep class com.google.android.gms.signin.** { *; }
+
+# v0.2.0 also failed while initializing JGit's FileSnapshot after R8
+# optimization. JGit is the core backup engine, so favor runtime correctness
+# over squeezing a few more bytes from this library.
+-keep class org.eclipse.jgit.** { *; }
