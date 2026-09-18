@@ -86,4 +86,10 @@ object DatabaseMigrations {
             )
         }
     }
+
+    val MIGRATION_10_11 = object : Migration(10, 11) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("DROP TABLE IF EXISTS backups")
+        }
+    }
 }
