@@ -92,4 +92,30 @@ object DatabaseMigrations {
             db.execSQL("DROP TABLE IF EXISTS backups")
         }
     }
+
+    val MIGRATION_11_12 = object : Migration(11, 12) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                """
+                CREATE TABLE IF NOT EXISTS latest_releases (
+                    repositoryId INTEGER NOT NULL,
+                    releaseId INTEGER,
+                    tagName TEXT,
+                    releaseName TEXT,
+                    releaseUpdatedAt TEXT,
+                    archiveUri TEXT,
+                    archiveName TEXT,
+                    archiveSizeBytes INTEGER,
+                    archiveSha256 TEXT,
+                    lastCheckedAtEpochMs INTEGER,
+                    lastChangedAtEpochMs INTEGER,
+                    lastAttemptAtEpochMs INTEGER,
+                    lastAttemptStatus TEXT,
+                    lastError TEXT,
+                    PRIMARY KEY(repositoryId)
+                )
+                """.trimIndent(),
+            )
+        }
+    }
 }
