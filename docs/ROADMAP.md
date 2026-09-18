@@ -43,8 +43,8 @@ Each GitHub repository ID maps to one logical archive:
 ```text
 <selected root>/
 └── GitHub Backups/
-    └── <github-repository-id>/
-        └── mirror.tar.gz
+    └── <owner>--<repo>--<github-repository-id>/
+        └── <owner>--<repo>.tar.gz
 ```
 
 A transactional update may temporarily create:
@@ -199,7 +199,7 @@ Exit criteria:
 Status: **complete; interruption hardening continues in Phase 11**
 
 - [x] Add `LocalMirrorStore`.
-- [x] Use GitHub repository ID as the storage directory key.
+- [x] Keep GitHub repository ID as the stable storage identity while using owner/repository names for human-readable folders/files.
 - [x] Write `mirror.pending.tar.gz` before touching the stable mirror.
 - [x] Re-hash persisted bytes before promotion.
 - [x] Reconcile a pending archive after interruption.
@@ -374,7 +374,7 @@ Exit criteria:
 
 ## Phase 9 — UI and health dashboard rebuild
 
-Status: **complete for the refactor scope**
+Status: **complete, with device-feedback UX polish applied**
 
 Target Home screen:
 
@@ -404,7 +404,13 @@ Tasks:
 - [x] show last failure;
 - [x] show schedule;
 - [x] remove restore/import/reverify/audit/provider controls;
-- [x] reduce `HomeViewModel` and `HomeScreen` rather than layering more state onto them.
+- [x] reduce `HomeViewModel` and `HomeScreen` rather than layering more state onto them;
+- [x] paint a consistent app background matching the active Material theme;
+- [x] consume system-bar insets through Scaffold/TopAppBar so content does not collide with the status bar;
+- [x] collapse completed setup into a compact summary;
+- [x] make repository rows and scheduling controls materially more compact;
+- [x] keep the primary backup action reachable in a persistent bottom action area;
+- [x] use human-readable backup folder/archive names while preserving repository-ID identity.
 
 Freshness tolerance:
 
