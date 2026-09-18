@@ -4,6 +4,7 @@ import java.io.BufferedOutputStream
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
+import java.io.OutputStream
 import java.nio.file.Files
 import org.apache.commons.compress.archivers.tar.TarArchiveEntry
 import org.apache.commons.compress.archivers.tar.TarArchiveOutputStream
@@ -76,6 +77,27 @@ class TarGzArchiveTest {
     }
 
     @Test
+    fun create_propagatesWriteFailureDuringCompression() {
+        val root = Files.createTempDirectory("tar-gz-write-failure").toFile()
+        try {
+            val source = File(root, "source").apply { mkdirs() }
+            File(source, "repository.git/objects/large").apply {
+                parentFile?.mkdirs()
+                writeBytes(ByteArray(256 * 1024) { index -> ((index * 31) % 251).toByte() })
+            }
+
+            assertThrows(IOException::class.java) {
+                TarGzArchive.create(
+                    sourceDirectory = source,
+                    output = FailingOutputStream(maxBytes = 128),
+                )
+            }
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
     fun extract_rejectsTruncatedArchive() {
         val root = Files.createTempDirectory("tar-gz-truncated").toFile()
         try {
@@ -124,6 +146,28 @@ class TarGzArchiveTest {
             assertFalse(File(root, "escape.txt").exists())
         } finally {
             root.deleteRecursively()
+        }
+    }
+
+    private class FailingOutputStream(
+        private val maxBytes: Int,
+    ) : OutputStream() {
+        private var written = 0
+
+        override fun write(value: Int) {
+            requireCapacity(1)
+            written += 1
+        }
+
+        override fun write(buffer: ByteArray, offset: Int, length: Int) {
+            requireCapacity(length)
+            written += length
+        }
+
+        private fun requireCapacity(nextBytes: Int) {
+            if (written + nextBytes > maxBytes) {
+                throw IOException("Simulated storage exhaustion")
+            }
         }
     }
 }
