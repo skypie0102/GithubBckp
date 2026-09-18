@@ -4,6 +4,10 @@ GithubBckp publishes a versioned signed **release APK** through GitHub Actions.
 
 Persistent signing secrets are optional. When they are absent, the workflow generates a one-off release key for that release.
 
+## Refactor release
+
+The local-mirror refactor is versioned as **0.3.0** with Android version code **4**. The release is published only after the refactor branch is merged to `main`.
+
 ## Release artifact
 
 For app version `<version>`, the release workflow produces:
