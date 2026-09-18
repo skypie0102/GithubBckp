@@ -25,9 +25,13 @@ object DatabaseModule {
                 DatabaseMigrations.MIGRATION_6_7,
                 DatabaseMigrations.MIGRATION_7_8,
                 DatabaseMigrations.MIGRATION_8_9,
+                DatabaseMigrations.MIGRATION_9_10,
             )
             .build()
 
     @Provides
     fun provideBackupDao(database: AppDatabase): BackupDao = database.backupDao()
+
+    @Provides
+    fun provideMirrorDao(database: AppDatabase): MirrorDao = database.mirrorDao()
 }
