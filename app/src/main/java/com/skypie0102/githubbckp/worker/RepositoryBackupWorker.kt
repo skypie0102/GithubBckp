@@ -8,6 +8,7 @@ import com.skypie0102.githubbckp.data.local.MirrorDao
 import com.skypie0102.githubbckp.data.local.MirrorEntity
 import com.skypie0102.githubbckp.mirror.MirrorAttemptStatus
 import com.skypie0102.githubbckp.mirror.MirrorSyncCoordinator
+import com.skypie0102.githubbckp.release.LatestReleaseSyncCoordinator
 import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
 import dagger.hilt.android.EntryPointAccessors
@@ -51,7 +52,7 @@ class RepositoryBackupWorker(
             ),
         )
 
-        val success = dependencies.mirrorSyncCoordinator().sync(
+        val mirrorSuccess = dependencies.mirrorSyncCoordinator().sync(
             repository = repository,
             onStage = { stage ->
                 setForeground(
@@ -78,16 +79,51 @@ class RepositoryBackupWorker(
             },
         )
 
+        val releaseSuccess = if (mirrorSuccess) {
+            dependencies.latestReleaseSyncCoordinator().sync(
+                repository = repository,
+                onStage = { stage ->
+                    setForeground(
+                        notifications.foregroundInfo(
+                            workId = id,
+                            repositoryId = repositoryId,
+                            owner = repository.owner,
+                            name = repository.name,
+                            stage = stage,
+                        ),
+                    )
+                },
+                onByteProgress = { stage, completedBytes, totalBytes ->
+                    setForeground(
+                        notifications.foregroundInfo(
+                            workId = id,
+                            repositoryId = repositoryId,
+                            owner = repository.owner,
+                            name = repository.name,
+                            stage = stage,
+                            progressPercent = backupProgressPercent(completedBytes, totalBytes),
+                        ),
+                    )
+                },
+            )
+        } else {
+            false
+        }
+
+        val success = mirrorSuccess && releaseSuccess
+
         return when (mirrorWorkDisposition(success, runAttemptCount)) {
             MirrorWorkDisposition.SUCCESS -> Result.success()
             MirrorWorkDisposition.RETRY -> Result.retry()
             MirrorWorkDisposition.FAILURE -> {
                 val currentRepository = dependencies.repositoryDao().getRepository(repositoryId)
                 if (currentRepository?.selectedForBackup == true) {
-                    val state = dependencies.mirrorDao().get(repositoryId)
+                    val mirrorState = dependencies.mirrorDao().get(repositoryId)
+                    val releaseState = dependencies.latestReleaseDao().get(repositoryId)
                     dependencies.backupProblemNotifier().notifyBackupFailure(
                         repository = currentRepository,
-                        errorMessage = state?.lastError,
+                        errorMessage = mirrorState?.lastError
+                            ?: releaseState?.lastError?.let { "Latest release: $it" },
                     )
                 }
                 Result.failure()
@@ -125,7 +161,9 @@ private const val MAX_MIRROR_RETRY_ATTEMPTS = 2
 interface BackupWorkerDependencies {
     fun repositoryDao(): RepositoryDao
     fun mirrorDao(): MirrorDao
+    fun latestReleaseDao(): com.skypie0102.githubbckp.data.local.LatestReleaseDao
     fun mirrorSyncCoordinator(): MirrorSyncCoordinator
+    fun latestReleaseSyncCoordinator(): LatestReleaseSyncCoordinator
     fun activeBackupNotificationManager(): ActiveBackupNotificationManager
     fun backupProblemNotifier(): BackupProblemNotifier
 }
