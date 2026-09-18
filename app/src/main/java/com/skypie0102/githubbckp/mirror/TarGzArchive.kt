@@ -8,6 +8,7 @@ import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.IOException
 import java.io.InputStream
+import java.io.OutputStream
 import java.nio.file.Files
 import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
 import org.apache.commons.compress.archivers.tar.TarArchiveOutputStream
@@ -28,41 +29,49 @@ object TarGzArchive {
         }
         destination.parentFile?.mkdirs()
 
-        FileOutputStream(destination).use { fileOutput ->
-            BufferedOutputStream(fileOutput).use { bufferedOutput ->
-                GzipCompressorOutputStream(bufferedOutput).use { gzipOutput ->
-                    TarArchiveOutputStream(gzipOutput).use { tarOutput ->
-                        tarOutput.setLongFileMode(TarArchiveOutputStream.LONGFILE_POSIX)
-                        tarOutput.setBigNumberMode(TarArchiveOutputStream.BIGNUMBER_POSIX)
-
-                        sourceDirectory.walkTopDown()
-                            .drop(1)
-                            .sortedBy { it.relativeTo(sourceDirectory).invariantSeparatorsPath }
-                            .forEach { file ->
-                                require(!Files.isSymbolicLink(file.toPath())) {
-                                    "Symbolic links are not supported in mirror archives: ${file.absolutePath}"
-                                }
-
-                                val relativePath = file.relativeTo(sourceDirectory).invariantSeparatorsPath
-                                val entryName = if (file.isDirectory) "$relativePath/" else relativePath
-                                val entry = tarOutput.createArchiveEntry(file, entryName)
-                                tarOutput.putArchiveEntry(entry)
-                                if (file.isFile) {
-                                    FileInputStream(file).use { input ->
-                                        input.copyTo(tarOutput, bufferSize = BUFFER_SIZE)
-                                    }
-                                }
-                                tarOutput.closeArchiveEntry()
-                            }
-
-                        tarOutput.finish()
-                    }
-                }
-            }
+        FileOutputStream(destination).use { output ->
+            create(sourceDirectory, output)
         }
 
         check(destination.isFile && destination.length() > 0L) {
             "Mirror archive was not created"
+        }
+    }
+
+    internal fun create(sourceDirectory: File, output: OutputStream) {
+        require(sourceDirectory.isDirectory) {
+            "Archive source directory does not exist: ${sourceDirectory.absolutePath}"
+        }
+
+        BufferedOutputStream(output).use { bufferedOutput ->
+            GzipCompressorOutputStream(bufferedOutput).use { gzipOutput ->
+                TarArchiveOutputStream(gzipOutput).use { tarOutput ->
+                    tarOutput.setLongFileMode(TarArchiveOutputStream.LONGFILE_POSIX)
+                    tarOutput.setBigNumberMode(TarArchiveOutputStream.BIGNUMBER_POSIX)
+
+                    sourceDirectory.walkTopDown()
+                        .drop(1)
+                        .sortedBy { it.relativeTo(sourceDirectory).invariantSeparatorsPath }
+                        .forEach { file ->
+                            require(!Files.isSymbolicLink(file.toPath())) {
+                                "Symbolic links are not supported in mirror archives: ${file.absolutePath}"
+                            }
+
+                            val relativePath = file.relativeTo(sourceDirectory).invariantSeparatorsPath
+                            val entryName = if (file.isDirectory) "$relativePath/" else relativePath
+                            val entry = tarOutput.createArchiveEntry(file, entryName)
+                            tarOutput.putArchiveEntry(entry)
+                            if (file.isFile) {
+                                FileInputStream(file).use { input ->
+                                    input.copyTo(tarOutput, bufferSize = BUFFER_SIZE)
+                                }
+                            }
+                            tarOutput.closeArchiveEntry()
+                        }
+
+                    tarOutput.finish()
+                }
+            }
         }
     }
 
