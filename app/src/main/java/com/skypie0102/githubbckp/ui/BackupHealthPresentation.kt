@@ -7,6 +7,7 @@ import com.skypie0102.githubbckp.worker.BackupCadence
 
 enum class RepositoryBackupHealthState {
     HEALTHY,
+    UPDATE_AVAILABLE,
     UPDATING,
     FAILED,
     STALE,
@@ -20,6 +21,7 @@ data class RepositoryBackupHealth(
     val owner: String,
     val name: String,
     val state: RepositoryBackupHealthState,
+    val hasMirror: Boolean = false,
     val latestCheckedAtEpochMs: Long? = null,
     val latestChangedAtEpochMs: Long? = null,
     val latestAttemptAtEpochMs: Long? = null,
@@ -35,8 +37,9 @@ data class BackupHealthSummary(
     val repositories: List<RepositoryBackupHealth> = emptyList(),
 ) {
     val selectedCount: Int = repositories.size
-    val verifiedCount: Int = repositories.count {
-        (it.archiveSizeBytes ?: 0L) > 0L
+    val verifiedCount: Int = repositories.count { it.hasMirror }
+    val updateAvailableCount: Int = repositories.count {
+        it.state == RepositoryBackupHealthState.UPDATE_AVAILABLE
     }
     val protectedCount: Int = repositories.count {
         it.state == RepositoryBackupHealthState.HEALTHY ||
@@ -48,9 +51,13 @@ data class BackupHealthSummary(
             RepositoryBackupHealthState.UPDATING,
         )
     }
+    val updateAvailableRepositories: List<RepositoryBackupHealth> = repositories.filter {
+        it.state == RepositoryBackupHealthState.UPDATE_AVAILABLE
+    }
     val problemRepositories: List<RepositoryBackupHealth> = repositories.filter {
         it.state !in setOf(
             RepositoryBackupHealthState.HEALTHY,
+            RepositoryBackupHealthState.UPDATE_AVAILABLE,
             RepositoryBackupHealthState.UPDATING,
         )
     }
@@ -63,6 +70,7 @@ fun summarizeBackupHealth(
     cadence: BackupCadence,
     nowEpochMs: Long,
     globalBlockMessage: String? = null,
+    remoteRefsDigests: Map<Long, String> = emptyMap(),
 ): BackupHealthSummary {
     val selectedRepositories = repositories
         .filter { it.selectedForBackup }
@@ -80,6 +88,7 @@ fun summarizeBackupHealth(
                 !mirror?.archiveSha256.isNullOrBlank() &&
                 (mirror?.archiveSizeBytes ?: 0L) > 0L
             val hasPreviouslySucceeded = mirror?.lastSuccessfulSyncAtEpochMs != null
+            val remoteRefsDigest = remoteRefsDigests[repository.githubId]
 
             val repositoryBlockMessage = if (!repository.isAvailable) {
                 "Repository cannot be read with the current GitHub token."
@@ -105,6 +114,10 @@ fun summarizeBackupHealth(
                     RepositoryBackupHealthState.BLOCKED
                 !hasPersistedMirror ->
                     RepositoryBackupHealthState.NEVER_BACKED_UP
+                remoteRefsDigest != null &&
+                    mirror.lastRefsDigest != null &&
+                    remoteRefsDigest != mirror.lastRefsDigest ->
+                    RepositoryBackupHealthState.UPDATE_AVAILABLE
                 scheduleEnabled &&
                     mirror.lastCheckedAtEpochMs != null &&
                     nowEpochMs - mirror.lastCheckedAtEpochMs > freshnessWindowMs ->
@@ -117,6 +130,7 @@ fun summarizeBackupHealth(
                 owner = repository.owner,
                 name = repository.name,
                 state = state,
+                hasMirror = hasPersistedMirror,
                 latestCheckedAtEpochMs = mirror?.lastCheckedAtEpochMs,
                 latestChangedAtEpochMs = mirror?.lastChangedAtEpochMs,
                 latestAttemptAtEpochMs = mirror?.lastAttemptAtEpochMs,
