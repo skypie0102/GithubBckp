@@ -40,6 +40,7 @@ First backup:
 clone mirror
 → scan LFS pointers
 → download LFS objects
+→ export default-branch repository/
 → write manifest
 → tar.gz
 → verify
@@ -54,7 +55,7 @@ read manifest
 → extract
 → fetch + prune
 → LFS delta
-→ GC
+→ regenerate default-branch repository/
 → rewrite manifest
 → tar.gz
 → verify
@@ -123,3 +124,10 @@ The architecture intentionally excludes:
 - wiki backup;
 - Git LFS upload;
 - arbitrary destructive Git operations.
+
+
+### Browsable checkout
+
+Every 0.3.3+ archive contains `repository/`, a materialized snapshot of the repository's configured default branch. This is for human inspection.
+
+The authoritative backup remains `repository.git/`, a bare mirror. The working-tree snapshot is regenerated from that mirror after every changed update, so deleted/changed source files are reflected without changing the full-history backup model.

@@ -54,6 +54,12 @@ class LargeMirrorStressTest {
             val mirror = File(staging, MirrorVerifier.REPOSITORY_DIRECTORY)
             GitMirrorOperations.cloneMirror(remoteUri, mirror)
 
+            RepositoryCheckoutExporter.export(
+                repositoryDirectory = mirror,
+                defaultBranch = "main",
+                destinationDirectory = File(staging, MirrorVerifier.WORKING_TREE_DIRECTORY),
+            )
+
             MirrorManifest(
                 repositoryId = REPOSITORY_ID,
                 repositoryOwner = "stress",
@@ -67,6 +73,7 @@ class LargeMirrorStressTest {
                 refsDigest = GitMirrorOperations.localRefsDigest(mirror),
                 headCommit = GitMirrorOperations.headCommit(mirror, "main"),
                 lfsIncluded = false,
+                workingTreeIncluded = true,
                 appVersion = "test",
             ).writeTo(File(staging, MirrorManifest.FILE_NAME))
 

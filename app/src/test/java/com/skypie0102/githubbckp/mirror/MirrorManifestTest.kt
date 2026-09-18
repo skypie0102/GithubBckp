@@ -7,6 +7,32 @@ import org.junit.Test
 
 class MirrorManifestTest {
     @Test
+    fun legacyManifestWithoutWorkingTreeFieldRemainsReadable() {
+        val manifest = MirrorManifest.fromJson(
+            """
+            {
+              "formatVersion": 1,
+              "repositoryId": 1234,
+              "repositoryOwner": "octocat",
+              "repositoryName": "hello-world",
+              "remoteUrl": "https://github.com/octocat/hello-world.git",
+              "defaultBranch": "main",
+              "private": false,
+              "createdAtEpochMs": 1,
+              "updatedAtEpochMs": 2,
+              "lastSuccessfulFetchAtEpochMs": 2,
+              "refsDigest": "abc",
+              "headCommit": null,
+              "lfsIncluded": false,
+              "appVersion": "0.3.2"
+            }
+            """.trimIndent(),
+        )
+
+        assertEquals(false, manifest.workingTreeIncluded)
+    }
+
+    @Test
     fun manifestRoundTrip_preservesIdentityAndSyncMetadata() {
         val root = Files.createTempDirectory("mirror-manifest").toFile()
         try {
@@ -24,6 +50,7 @@ class MirrorManifestTest {
                 refsDigest = "abc123",
                 headCommit = "deadbeef",
                 lfsIncluded = true,
+                workingTreeIncluded = true,
                 appVersion = "test",
             )
 

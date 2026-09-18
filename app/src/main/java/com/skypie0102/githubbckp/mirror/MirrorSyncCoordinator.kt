@@ -75,7 +75,10 @@ class MirrorSyncCoordinator @Inject constructor(
             }
 
             val requiredBytes = if (storedManifest != null) {
-                mirrorStore.estimateUpdateWorkingBytes(repository.githubId)
+                mirrorStore.estimateUpdateWorkingBytes(
+                    repositoryId = repository.githubId,
+                    reserveBrowsableCheckoutUpgrade = !storedManifest.workingTreeIncluded,
+                )
             } else {
                 MIN_INITIAL_WORKSPACE_BYTES
             }

@@ -45,14 +45,15 @@ GitHub Backups/
 
 Older numeric-only folders created by early 0.3.0 test builds are migrated to the readable layout on the next successful mirror check/update without recompressing an unchanged archive.
 
-The archive contains:
+The archive contains both a human-readable checkout and the full Git mirror:
 
 ```text
+repository/       # default-branch files you can browse directly
 manifest.json
-repository.git/
+repository.git/   # full Git history/refs/object database
 ```
 
-Git LFS objects live in `repository.git/lfs/objects/`.
+Git LFS objects live in `repository.git/lfs/objects/`. LFS paths inside `repository/` stay as pointer files so large LFS payloads are not duplicated inside the same backup.
 
 Updates are transactional. A temporary `<owner>--<repo>.pending.tar.gz` may exist while a replacement is being written and verified, but it is not retained as another backup generation.
 
@@ -70,11 +71,11 @@ If the repository changed:
 2. fetch missing Git objects;
 3. prune refs deleted upstream;
 4. download newly referenced Git LFS objects;
-5. run Git cleanup;
+5. regenerate the browsable default-branch `repository/` checkout;
 6. update the manifest;
-7. build and verify a new `mirror.pending.tar.gz`;
+7. build and verify a new pending tar.gz;
 8. persist and hash the pending file;
-9. replace the stable `mirror.tar.gz`;
+9. replace the stable archive;
 10. delete loose temporary files.
 
 ## GitHub token permissions

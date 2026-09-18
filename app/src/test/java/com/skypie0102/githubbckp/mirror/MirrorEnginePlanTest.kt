@@ -14,6 +14,16 @@ class MirrorEnginePlanTest {
     }
 
     @Test
+    fun requiresRebuild_returnsTrueForLegacyArchiveWithoutWorkingTree() {
+        val repository = repository()
+        val manifest = manifest(repository, refsDigest = "same").copy(
+            workingTreeIncluded = false,
+        )
+
+        assertTrue(mirrorRequiresRebuild(manifest, repository, "same"))
+    }
+
+    @Test
     fun requiresRebuild_returnsTrueWhenRemoteRefsChanged() {
         val repository = repository()
         val manifest = manifest(repository, refsDigest = "before")
