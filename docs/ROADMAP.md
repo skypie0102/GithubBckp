@@ -217,15 +217,15 @@ Exit criteria:
 
 ## Phase 4 — One-row-per-repository data model
 
-Status: **in progress**
+Status: **complete**
 
 - [x] Add `MirrorEntity` keyed by `repositoryId`.
 - [x] Add `MirrorDao`.
 - [x] Add Room migration 9 → 10.
 - [x] Register the mirror table in `AppDatabase`.
-- [ ] Move health/state reads to `MirrorEntity`.
-- [ ] Stop writing new rows to the historical `backups` table.
-- [ ] Remove the historical backup model after migration is complete.
+- [x] Move health/state reads to `MirrorEntity`.
+- [x] Stop writing new rows to the historical `backups` table.
+- [x] Remove the historical backup model after migration is complete (v10 → v11 drops `backups`).
 
 Target mirror state:
 
@@ -254,7 +254,7 @@ Exit criteria:
 
 ## Phase 5 — Cut over worker/coordinator
 
-Status: **not started**
+Status: **complete**
 
 Replace the current coordinator path with one repository sync operation:
 
@@ -272,14 +272,14 @@ MirrorDao
 
 Tasks:
 
-- [ ] add `MirrorSyncCoordinator`;
-- [ ] copy an existing stored mirror to app-private working storage;
-- [ ] create when no mirror exists;
-- [ ] update when a mirror exists;
-- [ ] persist successful no-change checks without rewriting archive;
-- [ ] persist success/failure directly to `MirrorEntity`;
-- [ ] always clean app-private loose files in `finally`;
-- [ ] make repository work unique by GitHub repository ID.
+- [x] add `MirrorSyncCoordinator`;
+- [x] copy an existing stored mirror to app-private working storage;
+- [x] create when no mirror exists;
+- [x] update when a mirror exists;
+- [x] persist successful no-change checks without rewriting archive;
+- [x] persist success/failure directly to `MirrorEntity`;
+- [x] always clean app-private loose files in `finally`;
+- [x] make repository work unique by GitHub repository ID.
 
 Exit criteria:
 
@@ -299,15 +299,15 @@ Keep WorkManager with only:
 
 Tasks:
 
-- [ ] remove obsolete backup-format preferences;
-- [ ] retain unique repository work;
-- [ ] foreground every active repository job;
-- [ ] expose stages: checking, extracting, fetching, LFS, optimizing, compressing, verifying, committing;
+- [x] remove obsolete backup-format preferences;
+- [x] retain unique repository work;
+- [x] foreground every active repository job;
+- [x] expose stages: checking, extracting, fetching, LFS, optimizing, compressing, verifying;
 - [ ] add progress where measurable;
-- [ ] add cancel action;
+- [x] add cancel action;
 - [ ] group simultaneous repository notifications;
-- [ ] block job start when Android notification visibility is unavailable;
-- [ ] show notification-disabled state as a readiness/health problem.
+- [x] block job start when Android notification visibility is unavailable;
+- [x] show notification-disabled state as a readiness/health problem.
 
 Exit criteria:
 
@@ -338,30 +338,30 @@ Exit criteria:
 
 ## Phase 8 — Delete legacy product code
 
-Status: **not started**
+Status: **complete**
 
 Delete after the new worker path is operational so the branch stays buildable during migration.
 
 Remove:
 
-- [ ] `GoogleDriveAuthManager`;
-- [ ] `GoogleDriveStorageProvider`;
-- [ ] `StorageRouter`;
-- [ ] Google Play Services Auth dependency;
-- [ ] storage destination selector/state;
-- [ ] `GitMirrorRestoreService`;
-- [ ] `MirrorRestoreCoordinator`;
-- [ ] `GithubMirrorRestorePublisher`;
-- [ ] `GithubRepositoryRestoreGateway`;
-- [ ] `GitMirrorPushService`;
-- [ ] `GithubReleaseRestoreService`;
-- [ ] `RecoveryTransactionStore`;
-- [ ] `RestoreAuditReport`;
-- [ ] `GitLfsUploadService`;
-- [ ] `GithubReleaseBackupService`;
-- [ ] `GithubDiscussionBackupService`;
-- [ ] `GithubWikiBackupService`;
-- [ ] related UI, tests, Room fields, and documentation.
+- [x] `GoogleDriveAuthManager`;
+- [x] `GoogleDriveStorageProvider`;
+- [x] `StorageRouter`;
+- [x] Google Play Services Auth dependency;
+- [x] storage destination selector/state;
+- [x] `GitMirrorRestoreService`;
+- [x] `MirrorRestoreCoordinator`;
+- [x] `GithubMirrorRestorePublisher`;
+- [x] `GithubRepositoryRestoreGateway`;
+- [x] `GitMirrorPushService`;
+- [x] `GithubReleaseRestoreService`;
+- [x] `RecoveryTransactionStore`;
+- [x] `RestoreAuditReport`;
+- [x] `GitLfsUploadService`;
+- [x] `GithubReleaseBackupService`;
+- [x] `GithubDiscussionBackupService`;
+- [x] `GithubWikiBackupService`;
+- [x] related UI, tests, Room history table, and obsolete documentation.
 
 Exit criteria:
 
@@ -374,7 +374,7 @@ Exit criteria:
 
 ## Phase 9 — UI and health dashboard rebuild
 
-Status: **not started**
+Status: **in progress**
 
 Target Home screen:
 
@@ -398,13 +398,13 @@ Repository health states:
 
 Tasks:
 
-- [ ] distinguish last successful check from last archive change;
+- [x] distinguish last successful check from last archive change;
 - [ ] show archive size;
 - [ ] show source HEAD;
 - [ ] show last failure;
 - [ ] show schedule;
-- [ ] remove restore/import/reverify/audit/provider controls;
-- [ ] reduce `HomeViewModel` and `HomeScreen` rather than layering more state onto them.
+- [x] remove restore/import/reverify/audit/provider controls;
+- [x] reduce `HomeViewModel` and `HomeScreen` rather than layering more state onto them.
 
 Freshness tolerance:
 
@@ -480,7 +480,7 @@ Exit criteria:
 
 ## Phase 12 — Documentation and release cutover
 
-Status: **not started**
+Status: **in progress**
 
 Keep only documentation that serves the new product:
 
