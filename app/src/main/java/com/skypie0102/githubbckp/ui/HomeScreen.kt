@@ -348,20 +348,3 @@ internal fun selectedRepositoryActionLabel(
         else -> "Back up & update $selectedCount selected $noun"
     }
 }
-
-internal fun filterRepositories(
-    repositories: List<RepositoryEntity>,
-    query: String,
-): List<RepositoryEntity> {
-    val normalized = query.trim().lowercase()
-    if (normalized.isBlank()) return repositories
-    return repositories.filter { repository ->
-        repository.owner.lowercase().contains(normalized) ||
-            repository.name.lowercase().contains(normalized) ||
-            repository.fullNameForSearch().contains(normalized) ||
-            repository.defaultBranch.lowercase().contains(normalized)
-    }
-}
-
-private fun RepositoryEntity.fullNameForSearch(): String =
-    "$owner/$name".lowercase()
