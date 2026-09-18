@@ -8,6 +8,7 @@ data class GithubRepository(
     val isPrivate: Boolean,
 ) {
     val fullName: String = "$owner/$name"
+    val remoteUrl: String = "https://github.com/$fullName.git"
 }
 
 interface GithubGateway {
