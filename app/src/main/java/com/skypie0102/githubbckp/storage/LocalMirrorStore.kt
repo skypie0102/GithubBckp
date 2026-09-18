@@ -3,6 +3,7 @@ package com.skypie0102.githubbckp.storage
 import android.content.Context
 import android.net.Uri
 import androidx.documentfile.provider.DocumentFile
+import com.skypie0102.githubbckp.mirror.MirrorManifest
 import com.skypie0102.githubbckp.mirror.MirrorVerifier
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
@@ -46,6 +47,17 @@ class LocalMirrorStore @Inject constructor(
         storedMirror(document)
     }
 
+    suspend fun readManifest(repositoryId: Long): MirrorManifest? = withContext(Dispatchers.IO) {
+        val folder = repositoryFolder(repositoryId, create = false) ?: return@withContext null
+        reconcileFolder(repositoryId, folder)
+        val document = folder.findFile(STABLE_NAME)
+            ?: folder.findFile(PENDING_NAME)
+            ?: return@withContext null
+        val input = context.contentResolver.openInputStream(document.uri)
+            ?: throw IOException("Stored mirror can no longer be opened")
+        input.use(MirrorManifest::readFromArchive)
+    }
+
     suspend fun copyCurrentTo(repositoryId: Long, destination: File): StoredMirror? =
         withContext(Dispatchers.IO) {
             val folder = repositoryFolder(repositoryId, create = false) ?: return@withContext null
@@ -55,13 +67,33 @@ class LocalMirrorStore @Inject constructor(
                 ?: return@withContext null
 
             destination.parentFile?.mkdirs()
-            context.contentResolver.openInputStream(document.uri)?.use { input ->
+            val digest = MessageDigest.getInstance("SHA-256")
+            var size = 0L
+            val input = context.contentResolver.openInputStream(document.uri)
+                ?: throw IOException("Stored mirror can no longer be opened")
+            input.buffered(BUFFER_SIZE).use { source ->
                 FileOutputStream(destination).buffered(BUFFER_SIZE).use { output ->
-                    input.buffered(BUFFER_SIZE).copyTo(output, BUFFER_SIZE)
+                    val buffer = ByteArray(BUFFER_SIZE)
+                    while (true) {
+                        val count = source.read(buffer)
+                        if (count < 0) break
+                        if (count > 0) {
+                            output.write(buffer, 0, count)
+                            digest.update(buffer, 0, count)
+                            size += count
+                        }
+                    }
                 }
-            } ?: throw IOException("Stored mirror can no longer be opened")
+            }
 
-            storedMirror(document)
+            StoredMirror(
+                uri = document.uri,
+                name = document.name ?: STABLE_NAME,
+                sizeBytes = size,
+                sha256 = digest.digest().joinToString("") { byte ->
+                    "%02x".format(byte.toInt() and 0xff)
+                },
+            )
         }
 
     suspend fun commit(
