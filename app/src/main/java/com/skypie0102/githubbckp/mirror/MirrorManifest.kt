@@ -18,6 +18,7 @@ data class MirrorManifest(
     val refsDigest: String,
     val headCommit: String? = null,
     val lfsIncluded: Boolean,
+    val workingTreeIncluded: Boolean = true,
     val appVersion: String,
 ) {
     val repositoryFullName: String = "$repositoryOwner/$repositoryName"
@@ -42,6 +43,7 @@ data class MirrorManifest(
         .put("refsDigest", refsDigest)
         .put("headCommit", headCommit ?: JSONObject.NULL)
         .put("lfsIncluded", lfsIncluded)
+        .put("workingTreeIncluded", workingTreeIncluded)
         .put("appVersion", appVersion)
 
     companion object {
@@ -77,6 +79,7 @@ data class MirrorManifest(
                 refsDigest = json.getString("refsDigest"),
                 headCommit = json.optNullableString("headCommit"),
                 lfsIncluded = json.getBoolean("lfsIncluded"),
+                workingTreeIncluded = json.optBoolean("workingTreeIncluded", false),
                 appVersion = json.getString("appVersion"),
             )
         }
