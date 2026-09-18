@@ -14,6 +14,7 @@ coroutines = "1.10.2"
 playServicesAuth = "21.6.0"
 documentFile = "1.1.0"
 jgit = "6.10.1.202505221210-r"
+commonsCompress = "1.28.0"
 desugarJdkLibsNio = "2.1.5"
 junit = "4.13.2"
 json = "20260814"
@@ -40,6 +41,7 @@ androidx-hilt-navigation-compose = { module = "androidx.hilt:hilt-navigation-com
 kotlinx-coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "coroutines" }
 google-play-services-auth = { module = "com.google.android.gms:play-services-auth", version.ref = "playServicesAuth" }
 jgit = { module = "org.eclipse.jgit:org.eclipse.jgit", version.ref = "jgit" }
+commons-compress = { module = "org.apache.commons:commons-compress", version.ref = "commonsCompress" }
 desugar-jdk-libs-nio = { module = "com.android.tools:desugar_jdk_libs_nio", version.ref = "desugarJdkLibsNio" }
 junit = { module = "junit:junit", version.ref = "junit" }
 json = { module = "org.json:json", version.ref = "json" }
