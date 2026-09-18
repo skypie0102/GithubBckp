@@ -1,23 +1,19 @@
 package com.skypie0102.githubbckp.github
 
-import com.skypie0102.githubbckp.backup.RepositoryRef
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
-import java.net.URLEncoder
-import java.nio.charset.StandardCharsets
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
-import org.json.JSONObject
 
 @Singleton
 class GithubRestGateway @Inject constructor(
     private val authManager: GithubAuthManager,
 ) : GithubGateway {
-    override suspend fun listRepositories(): List<RepositoryRef> = withContext(Dispatchers.IO) {
+    override suspend fun listRepositories(): List<GithubRepository> = withContext(Dispatchers.IO) {
         val token = authManager.requireAccessToken()
         buildList {
             var nextUrl: String? =
@@ -28,7 +24,7 @@ class GithubRestGateway @Inject constructor(
                 for (index in 0 until repositories.length()) {
                     val item = repositories.getJSONObject(index)
                     add(
-                        RepositoryRef(
+                        GithubRepository(
                             id = item.getLong("id"),
                             owner = item.getJSONObject("owner").getString("login"),
                             name = item.getString("name"),
@@ -42,14 +38,6 @@ class GithubRestGateway @Inject constructor(
         }
     }
 
-    override suspend fun repositoryHasWiki(repository: RepositoryRef): Boolean = withContext(Dispatchers.IO) {
-        val token = authManager.requireAccessToken()
-        val url = "$API_BASE/repos/${path(repository.owner)}/${path(repository.name)}"
-        getJsonObject(url, token).optBoolean("has_wiki", false)
-    }
-
-    private fun getJsonObject(url: String, token: String): JSONObject =
-        JSONObject(getJsonResponse(url, token).body)
 
     private fun getJsonResponse(url: String, token: String): GithubJsonResponse {
         val connection = openGet(url, token)
@@ -80,9 +68,6 @@ class GithubRestGateway @Inject constructor(
             setRequestProperty("X-GitHub-Api-Version", "2022-11-28")
             setRequestProperty("Authorization", "Bearer $token")
         }
-
-    private fun path(value: String): String =
-        URLEncoder.encode(value, StandardCharsets.UTF_8.name()).replace("+", "%20")
 
     private companion object {
         const val API_BASE = "https://api.github.com"

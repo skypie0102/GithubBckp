@@ -1,6 +1,5 @@
 package com.skypie0102.githubbckp.worker
 
-import com.skypie0102.githubbckp.storage.StorageDestination
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -9,12 +8,11 @@ import org.junit.Test
 
 class ScheduledBackupReadinessTest {
     @Test
-    fun blocksWhenGithubIsDisconnectedBeforeCheckingDestination() {
+    fun blocksWhenGithubIsDisconnectedFirst() {
         val readiness = evaluateScheduledBackupReadiness(
             githubAuthenticated = false,
-            destination = StorageDestination.GOOGLE_DRIVE,
-            driveAuthenticated = false,
             documentTreeConfigured = false,
+            notificationsReady = false,
         )
 
         assertFalse(readiness.ready)
@@ -22,45 +20,39 @@ class ScheduledBackupReadinessTest {
     }
 
     @Test
-    fun driveDestinationRequiresDriveConnection() {
-        val blocked = evaluateScheduledBackupReadiness(
+    fun localFolderIsRequired() {
+        val readiness = evaluateScheduledBackupReadiness(
             githubAuthenticated = true,
-            destination = StorageDestination.GOOGLE_DRIVE,
-            driveAuthenticated = false,
-            documentTreeConfigured = true,
-        )
-        val ready = evaluateScheduledBackupReadiness(
-            githubAuthenticated = true,
-            destination = StorageDestination.GOOGLE_DRIVE,
-            driveAuthenticated = true,
             documentTreeConfigured = false,
+            notificationsReady = true,
         )
 
-        assertFalse(blocked.ready)
-        assertEquals(ScheduledBackupBlockReason.DRIVE_DISCONNECTED, blocked.blockReason)
-        assertTrue(ready.ready)
-        assertNull(ready.blockReason)
+        assertFalse(readiness.ready)
+        assertEquals(ScheduledBackupBlockReason.DOCUMENT_TREE_MISSING, readiness.blockReason)
     }
 
     @Test
-    fun documentTreeDestinationRequiresConfiguredTreeButNotDrive() {
-        val blocked = evaluateScheduledBackupReadiness(
+    fun visibleNotificationsAreRequired() {
+        val readiness = evaluateScheduledBackupReadiness(
             githubAuthenticated = true,
-            destination = StorageDestination.DOCUMENT_TREE,
-            driveAuthenticated = true,
-            documentTreeConfigured = false,
-        )
-        val ready = evaluateScheduledBackupReadiness(
-            githubAuthenticated = true,
-            destination = StorageDestination.DOCUMENT_TREE,
-            driveAuthenticated = false,
             documentTreeConfigured = true,
+            notificationsReady = false,
         )
 
-        assertFalse(blocked.ready)
-        assertEquals(ScheduledBackupBlockReason.DOCUMENT_TREE_MISSING, blocked.blockReason)
-        assertTrue(ready.ready)
-        assertNull(ready.blockReason)
+        assertFalse(readiness.ready)
+        assertEquals(ScheduledBackupBlockReason.NOTIFICATIONS_DISABLED, readiness.blockReason)
+    }
+
+    @Test
+    fun readyWhenGithubFolderAndNotificationsAreAvailable() {
+        val readiness = evaluateScheduledBackupReadiness(
+            githubAuthenticated = true,
+            documentTreeConfigured = true,
+            notificationsReady = true,
+        )
+
+        assertTrue(readiness.ready)
+        assertNull(readiness.blockReason)
     }
 
     @Test
@@ -76,7 +68,7 @@ class ScheduledBackupReadinessTest {
             scheduledRunId = "run-blocked",
             readiness = ScheduledBackupReadiness(
                 ready = false,
-                blockReason = ScheduledBackupBlockReason.DRIVE_DISCONNECTED,
+                blockReason = ScheduledBackupBlockReason.NOTIFICATIONS_DISABLED,
             ),
         )
         val queued = scheduledBackupRunStatus(
@@ -87,19 +79,29 @@ class ScheduledBackupReadinessTest {
         )
 
         assertEquals(ScheduledBackupRunOutcome.SKIPPED_NO_REPOSITORIES, noRepositories.outcome)
-        assertEquals(0, noRepositories.repositoryCount)
-        assertEquals("run-empty", noRepositories.scheduledRunId)
-        assertNull(noRepositories.blockReason)
-
         assertEquals(ScheduledBackupRunOutcome.SKIPPED_NOT_READY, blocked.outcome)
-        assertEquals(4, blocked.repositoryCount)
-        assertEquals("run-blocked", blocked.scheduledRunId)
-        assertEquals(ScheduledBackupBlockReason.DRIVE_DISCONNECTED, blocked.blockReason)
-
+        assertEquals(ScheduledBackupBlockReason.NOTIFICATIONS_DISABLED, blocked.blockReason)
         assertEquals(ScheduledBackupRunOutcome.QUEUED, queued.outcome)
-        assertEquals(3, queued.repositoryCount)
         assertEquals("run-queued", queued.scheduledRunId)
-        assertNull(queued.blockReason)
+    }
+
+    @Test
+    fun repositoryAccessCanBlockScheduledRunBeforeFanOut() {
+        val status = scheduledBackupRunStatus(
+            completedAtEpochMs = 350L,
+            repositoryCount = 2,
+            scheduledRunId = "run-access-blocked",
+            readiness = ScheduledBackupReadiness(
+                ready = false,
+                blockReason = ScheduledBackupBlockReason.REPOSITORY_ACCESS_UNAVAILABLE,
+            ),
+        )
+
+        assertEquals(ScheduledBackupRunOutcome.SKIPPED_NOT_READY, status.outcome)
+        assertEquals(
+            ScheduledBackupBlockReason.REPOSITORY_ACCESS_UNAVAILABLE,
+            status.blockReason,
+        )
     }
 
     @Test

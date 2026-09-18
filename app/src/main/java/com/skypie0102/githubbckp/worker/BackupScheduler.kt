@@ -9,7 +9,6 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.workDataOf
-import com.skypie0102.githubbckp.backup.BackupOrigin
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
@@ -27,21 +26,14 @@ class BackupScheduler @Inject constructor(
     fun enqueue(repositoryIds: List<Long>) {
         enqueueWithConstraints(
             repositoryIds = repositoryIds,
-            origin = BackupOrigin.MANUAL,
-            scheduledRunId = null,
             constraints = manualConstraints(),
             originTag = TAG_MANUAL,
         )
     }
 
-    fun enqueueScheduled(
-        repositoryIds: List<Long>,
-        scheduledRunId: String,
-    ) {
+    fun enqueueScheduled(repositoryIds: List<Long>) {
         enqueueWithConstraints(
             repositoryIds = repositoryIds,
-            origin = BackupOrigin.SCHEDULED,
-            scheduledRunId = scheduledRunId,
             constraints = scheduledConstraints(),
             originTag = TAG_SCHEDULED,
         )
@@ -103,27 +95,23 @@ class BackupScheduler @Inject constructor(
 
     private fun enqueueWithConstraints(
         repositoryIds: List<Long>,
-        origin: BackupOrigin,
-        scheduledRunId: String?,
         constraints: Constraints,
         originTag: String,
     ) {
-        repositoryIds.forEach { repositoryId ->
+        repositoryWorkPlans(repositoryIds).forEach { plan ->
             val request = OneTimeWorkRequestBuilder<RepositoryBackupWorker>()
                 .setConstraints(constraints)
                 .setInputData(
                     workDataOf(
-                        RepositoryBackupWorker.KEY_REPOSITORY_ID to repositoryId,
-                        RepositoryBackupWorker.KEY_BACKUP_ORIGIN to origin.name,
-                        RepositoryBackupWorker.KEY_SCHEDULED_RUN_ID to scheduledRunId,
+                        RepositoryBackupWorker.KEY_REPOSITORY_ID to plan.repositoryId,
                     ),
                 )
-                .addTag("backup-$repositoryId")
+                .addTag(plan.tag)
                 .addTag(originTag)
                 .build()
 
             workManager.enqueueUniqueWork(
-                "backup-$repositoryId-mirror",
+                plan.uniqueWorkName,
                 ExistingWorkPolicy.KEEP,
                 request,
             )
@@ -155,3 +143,24 @@ class BackupScheduler @Inject constructor(
             .build()
     }
 }
+
+
+internal data class RepositoryWorkPlan(
+    val repositoryId: Long,
+    val uniqueWorkName: String,
+    val tag: String,
+)
+
+internal fun repositoryWorkPlans(repositoryIds: List<Long>): List<RepositoryWorkPlan> =
+    repositoryIds
+        .asSequence()
+        .filter { it >= 0L }
+        .distinct()
+        .map { repositoryId ->
+            RepositoryWorkPlan(
+                repositoryId = repositoryId,
+                uniqueWorkName = "backup-$repositoryId-mirror",
+                tag = "backup-$repositoryId",
+            )
+        }
+        .toList()

@@ -1,110 +1,78 @@
 # Android release APK
 
-GithubBckp publishes a versioned signed **release APK** through GitHub Actions, following the same overall release shape as Intake Edit.
+GithubBckp publishes a versioned installable **release APK** through GitHub Actions.
 
-Signing now mirrors Intake Edit: persistent signing secrets are optional, and when they are absent the workflow generates a one-off release key.
+## Release model
 
-## Release artifact
+The release flow intentionally uses **no persistent signing secrets or stored keystore**.
 
-For app version `0.2.0`, the release workflow produces:
+Android requires an APK to contain a signature before it can be installed, so the workflow follows the same model used by the Intake Edit releases:
 
-```text
-githubbckp-v0.2.0.apk
-githubbckp-v0.2.0.apk.sha256
-```
+1. create a disposable one-off key inside the GitHub Actions runner;
+2. build the minified/resource-shrunk release APK with that temporary key;
+3. verify it with `apksigner`;
+4. publish the APK and SHA-256 checksum;
+5. allow the runner and temporary key to disappear.
 
-The APK is a minified/resource-shrunk release build, not a debug APK.
+Nothing needs to be configured in GitHub Secrets.
 
-The files are attached both to the workflow run and to a GitHub Release tagged with the app `versionName`.
+Because every release can use a different disposable key, a future release may require uninstall/reinstall rather than update-in-place. The user-selected repository mirrors live outside app-private storage and are not embedded in the APK.
 
-## Signing modes
+## 0.3.0
 
-Without any signing secrets, the workflow generates a one-off key for that release, exactly like Intake Edit. This requires uninstall/reinstall when the next APK is signed by a different key.
-
-For stable update-in-place installs and a stable Google Drive OAuth SHA-1, you may optionally configure one persistent signing keystore. Do not commit it to the repository.
-
-Example:
-
-```bash
-keytool -genkeypair \
-  -keystore githubbckp-release.jks \
-  -alias githubbckp \
-  -keyalg RSA \
-  -keysize 2048 \
-  -validity 10000
-```
-
-Record the keystore password, alias, and key password securely.
-
-Encode the keystore as one base64 string and add it to the GithubBckp repository's Actions secrets as `ANDROID_KEYSTORE_BASE64`. Also add:
+The local-mirror refactor is versioned as:
 
 ```text
-ANDROID_KEYSTORE_PASSWORD
-ANDROID_KEY_ALIAS
-ANDROID_KEY_PASSWORD
+versionName: 0.3.0
+versionCode: 4
+package: com.skypie0102.githubbckp
 ```
 
-On Linux, for example:
+The release is published from `main` as tag `v0.3.0`.
 
-```bash
-base64 -w0 githubbckp-release.jks
-```
+## Release assets
 
-On systems whose `base64` does not support `-w0`, encode the file and remove line breaks before saving the secret.
-
-## Google Drive OAuth SHA-1
-
-Get the release-key fingerprint locally with:
-
-```bash
-keytool -list -v \
-  -keystore githubbckp-release.jks \
-  -alias githubbckp
-```
-
-Register that SHA-1 in the Google Android OAuth client for:
+The workflow publishes:
 
 ```text
-com.skypie0102.githubbckp
+githubbckp-v0.3.0.apk
+githubbckp-v0.3.0.apk.sha256
 ```
 
-The release workflow also writes the signing SHA-1 into the GitHub Release body after it decodes the configured keystore.
+The APK is the optimized release build, not the much larger debug/testing APK.
 
-When signing secrets are missing, the workflow generates a one-off fallback key and prints that release's SHA-1. Because Google Drive Android OAuth is certificate-bound, that SHA-1 must be registered for the installed release before Drive authorization will work. With persistent signing secrets, the SHA-1 stays stable across releases.
+## Publishing
 
-## Publishing a release
+A push/merge to `main` triggers the release workflow. It:
 
-Update both `versionName` and `versionCode` in `app/build.gradle.kts`, then merge/push that version to `main`.
-
-The release workflow:
-
-1. validates the version;
-2. skips publishing if the matching `v<version>` tag already exists;
-3. restores the persistent release keystore from Actions secrets, or generates a one-off fallback key when they are absent;
+1. reads `versionName` and `versionCode` from `app/build.gradle.kts`;
+2. skips publishing when `v<version>` already exists;
+3. generates the one-off Android key;
 4. runs unit tests and lint;
-5. builds the signed release APK;
-6. verifies the APK signature with `apksigner`;
-7. renames the APK to `githubbckp-v<version>.apk`;
+5. builds the minified/resource-shrunk release APK;
+6. verifies the APK signature;
+7. renames it to `githubbckp-v<version>.apk`;
 8. creates a SHA-256 sidecar;
-9. publishes both files to a GitHub Release.
+9. uploads both as workflow artifacts;
+10. publishes both to the matching GitHub Release.
 
-The workflow can also be started manually and given a tag, but the tag must match the app's `versionName`.
+The workflow may also be started manually with a tag, but the requested tag must match the app's `versionName`.
 
-## Installing and updating
+## Device gate
 
-If releases use the one-off fallback key, expect to uninstall before installing a later release because the signing certificate changes. If a persistent release key is configured, future versions signed with that same key can update in place as long as `versionCode` increases.
+Repository owner **skypie0102** tested the refactored app on a real Android device, confirmed repository backup worked successfully, and explicitly accepted that testing as sufficient for the 0.3.0 device gate.
 
-Because uninstalling clears app data, export or note any settings you need before reinstalling.
+Issue #53 is closed as completed by owner attestation.
 
 ## Verification
 
-Before treating a release as known-good:
+Before treating a later release as known-good:
 
-1. confirm GitHub PAT setup and repository discovery;
-2. confirm Google Drive authorization using the release certificate SHA-1, if Drive is used;
-3. run a manual mirror backup;
-4. run a second backup and confirm the current mirror is replaced rather than intentionally versioned;
-5. interrupt a replacement and confirm the previous verified mirror remains usable;
-6. confirm automatic backup updates the same logical mirror;
-7. re-verify the stored current mirror;
-8. restore a representative mirror and validate its Git/LFS/module data.
+1. confirm PAT setup and repository discovery;
+2. choose a local backup folder;
+3. confirm active-job notifications are visible;
+4. create a first mirror;
+5. run an unchanged update and confirm the archive is not rebuilt;
+6. change the source repository and confirm the same logical mirror is updated;
+7. confirm deleted refs are pruned;
+8. confirm health distinguishes last checked from last changed.

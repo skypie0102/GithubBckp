@@ -5,6 +5,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -20,6 +22,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.skypie0102.githubbckp.github.GithubAuthManager
@@ -41,6 +44,7 @@ fun GithubTokenSetupOverlay(
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .verticalScroll(rememberScrollState())
                 .padding(24.dp),
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -54,13 +58,38 @@ fun GithubTokenSetupOverlay(
                     style = MaterialTheme.typography.headlineSmall,
                 )
                 Text(
-                    "Enter a GitHub personal access token. It is validated first, then encrypted locally with Android Keystore. Nothing is baked into the APK.",
+                    "GithubBckp only reads repositories. The token is validated first, then encrypted locally with Android Keystore.",
                     style = MaterialTheme.typography.bodyMedium,
                 )
+
                 Text(
-                    "The token needs access to every private repository you want to back up. Recovery also requires permission to create/update the target repository and its supported Git/LFS/release surfaces.",
+                    "Recommended: fine-grained personal access token",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    "Repository access: select every repository you want to back up.\n" +
+                        "Repository permissions:\n" +
+                        "• Contents — Read-only\n" +
+                        "• Metadata — Read-only",
                     style = MaterialTheme.typography.bodySmall,
                 )
+                Text(
+                    "No write, administration, Actions, issues, pull requests, or release permissions are required.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+
+                Text(
+                    "Classic-token fallback",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    "If a fine-grained token cannot cover the repositories you need, a classic PAT can use the repo scope. " +
+                        "That scope is broader than this app needs, so fine-grained read-only access is preferred.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+
                 OutlinedTextField(
                     value = token,
                     onValueChange = {

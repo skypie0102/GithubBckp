@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Optional release tag override (for example v0.2.1)
+        description: Optional release tag override (for example v0.3.0)
         required: false
         type: string
 
@@ -39,18 +39,6 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
-
-      - name: Accept Android SDK licenses
-        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
-
-      - name: Install Android SDK
-        run: |
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
-            "platforms;android-37.0" \
-            "build-tools;36.0.0"
 
       - name: Resolve and validate release version
         id: release_version
@@ -88,55 +76,38 @@ jobs:
             echo "Preparing $RELEASE_TAG from $GITHUB_SHA."
           fi
 
-      - name: Prepare release signing
+      - name: Prepare one-off Android signing key
         if: steps.release_version.outputs.release_needed == 'true'
         shell: bash
-        env:
-          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          SECRET_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          SECRET_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          SECRET_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           set -euo pipefail
+          TEMP_PASSWORD='githubbckp-oneoff'
+          TEMP_ALIAS='githubbckp-oneoff'
 
-          if [ -n "$KEYSTORE_BASE64" ] && [ -n "$SECRET_KEYSTORE_PASSWORD" ] && [ -n "$SECRET_KEY_ALIAS" ] && [ -n "$SECRET_KEY_PASSWORD" ]; then
-            printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$GITHUBBCKP_KEYSTORE_PATH"
-            echo "GITHUBBCKP_KEYSTORE_PASSWORD=$SECRET_KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
-            echo "GITHUBBCKP_KEY_ALIAS=$SECRET_KEY_ALIAS" >> "$GITHUB_ENV"
-            echo "GITHUBBCKP_KEY_PASSWORD=$SECRET_KEY_PASSWORD" >> "$GITHUB_ENV"
-            echo "SIGNING_MODE=persistent release key" >> "$GITHUB_ENV"
-            ACTIVE_STORE_PASSWORD="$SECRET_KEYSTORE_PASSWORD"
-            ACTIVE_ALIAS="$SECRET_KEY_ALIAS"
-          else
-            TEMP_PASSWORD='githubbckp-oneoff'
-            TEMP_ALIAS='githubbckp-oneoff'
-            keytool -genkeypair \
-              -keystore "$GITHUBBCKP_KEYSTORE_PATH" \
-              -storepass "$TEMP_PASSWORD" \
-              -keypass "$TEMP_PASSWORD" \
-              -alias "$TEMP_ALIAS" \
-              -keyalg RSA \
-              -keysize 2048 \
-              -validity 3650 \
-              -dname "CN=GithubBckp ${RELEASE_TAG} One-Off Release, O=GithubBckp, C=PH"
-            echo "GITHUBBCKP_KEYSTORE_PASSWORD=$TEMP_PASSWORD" >> "$GITHUB_ENV"
-            echo "GITHUBBCKP_KEY_ALIAS=$TEMP_ALIAS" >> "$GITHUB_ENV"
-            echo "GITHUBBCKP_KEY_PASSWORD=$TEMP_PASSWORD" >> "$GITHUB_ENV"
-            echo "SIGNING_MODE=one-off fallback key (persistent release secrets not configured)" >> "$GITHUB_ENV"
-            ACTIVE_STORE_PASSWORD="$TEMP_PASSWORD"
-            ACTIVE_ALIAS="$TEMP_ALIAS"
-          fi
+          keytool -genkeypair             -keystore "$GITHUBBCKP_KEYSTORE_PATH"             -storepass "$TEMP_PASSWORD"             -keypass "$TEMP_PASSWORD"             -alias "$TEMP_ALIAS"             -keyalg RSA             -keysize 2048             -validity 3650             -dname "CN=GitHub Backup ${RELEASE_TAG} One-Off Release, O=GithubBckp, C=PH"
 
-          SIGNING_SHA1="$(keytool -list -v \
-            -keystore "$GITHUBBCKP_KEYSTORE_PATH" \
-            -storepass "$ACTIVE_STORE_PASSWORD" \
-            -alias "$ACTIVE_ALIAS" | sed -n 's/^[[:space:]]*SHA1: //p' | head -n 1)"
-          test -n "$SIGNING_SHA1"
-          echo "SIGNING_SHA1=$SIGNING_SHA1" >> "$GITHUB_ENV"
+          echo "GITHUBBCKP_KEYSTORE_PASSWORD=$TEMP_PASSWORD" >> "$GITHUB_ENV"
+          echo "GITHUBBCKP_KEY_ALIAS=$TEMP_ALIAS" >> "$GITHUB_ENV"
+          echo "GITHUBBCKP_KEY_PASSWORD=$TEMP_PASSWORD" >> "$GITHUB_ENV"
 
-      - name: Test and build signed release APK
+      - name: Set up Gradle 9.6
         if: steps.release_version.outputs.release_needed == 'true'
-        run: ./gradlew --no-daemon :app:testDebugUnitTest :app:lintDebug :app:assembleRelease
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.6.0'
+
+      - name: Accept Android SDK licenses
+        if: steps.release_version.outputs.release_needed == 'true'
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+
+      - name: Install Android SDK
+        if: steps.release_version.outputs.release_needed == 'true'
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"             "platforms;android-37.0"             "build-tools;36.0.0"
+
+      - name: Test and build release APK
+        if: steps.release_version.outputs.release_needed == 'true'
+        run: gradle --no-daemon :app:testDebugUnitTest :app:lintDebug :app:assembleRelease
 
       - name: Verify, name, and checksum APK
         if: steps.release_version.outputs.release_needed == 'true'
@@ -170,16 +141,15 @@ jobs:
         with:
           tag_name: ${{ env.RELEASE_TAG }}
           target_commitish: ${{ github.sha }}
-          name: GithubBckp ${{ env.RELEASE_TAG }}
+          name: GitHub Backup ${{ env.RELEASE_TAG }}
           generate_release_notes: true
           body: |
-            Android release for GithubBckp ${{ env.RELEASE_TAG }}.
+            Android release for GitHub Backup ${{ env.RELEASE_TAG }}.
 
             Version code: ${{ env.APP_VERSION_CODE }}
             Version name: ${{ env.RELEASE_VERSION }}
             Package: com.skypie0102.githubbckp
-            Signing mode: ${{ env.SIGNING_MODE }}
-            Signing SHA-1: ${{ env.SIGNING_SHA1 }}
+            Signing mode: disposable one-off Android key generated only for this release run
           files: |
             githubbckp-${{ env.RELEASE_TAG }}.apk
             githubbckp-${{ env.RELEASE_TAG }}.apk.sha256

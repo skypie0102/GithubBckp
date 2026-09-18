@@ -1,9 +1,16 @@
 package com.skypie0102.githubbckp.github
 
-import com.skypie0102.githubbckp.backup.RepositoryRef
+data class GithubRepository(
+    val id: Long,
+    val owner: String,
+    val name: String,
+    val defaultBranch: String,
+    val isPrivate: Boolean,
+) {
+    val fullName: String = "$owner/$name"
+    val remoteUrl: String = "https://github.com/$fullName.git"
+}
 
 interface GithubGateway {
-    suspend fun listRepositories(): List<RepositoryRef>
-
-    suspend fun repositoryHasWiki(repository: RepositoryRef): Boolean
+    suspend fun listRepositories(): List<GithubRepository>
 }

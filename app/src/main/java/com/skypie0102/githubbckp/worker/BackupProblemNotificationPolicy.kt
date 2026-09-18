@@ -1,8 +1,6 @@
 package com.skypie0102.githubbckp.worker
 
-import com.skypie0102.githubbckp.backup.BackupStatus
-import com.skypie0102.githubbckp.backup.BackupType
-import com.skypie0102.githubbckp.data.local.BackupEntity
+import com.skypie0102.githubbckp.data.local.MirrorEntity
 import com.skypie0102.githubbckp.data.local.RepositoryEntity
 
 data class OverdueBackupRepository(
@@ -15,7 +13,7 @@ data class OverdueBackupRepository(
 
 fun findOverdueBackupRepositories(
     repositories: List<RepositoryEntity>,
-    backups: List<BackupEntity>,
+    mirrors: List<MirrorEntity>,
     settings: BackupScheduleSettings,
     scheduleEnabledAtEpochMs: Long?,
     nowEpochMs: Long,
@@ -23,24 +21,14 @@ fun findOverdueBackupRepositories(
     if (!settings.enabled) return emptyList()
 
     val freshnessWindowMs = settings.cadence.repeatHours * 2L * MILLIS_PER_HOUR
-    val backupsByRepository = backups.groupBy { it.repositoryId }
+    val mirrorsByRepository = mirrors.associateBy { it.repositoryId }
 
     return repositories
         .asSequence()
         .filter { it.isAvailable && it.selectedForBackup }
         .filter { repository ->
-            val latestVerifiedAt = backupsByRepository[repository.githubId]
-                .orEmpty()
-                .asSequence()
-                .filter { backup ->
-                    backup.type == BackupType.GIT_MIRROR &&
-                        backup.status == BackupStatus.COMPLETED &&
-                        backup.remoteDeletedAtEpochMs == null
-                }
-                .map { backup -> backup.completedAtEpochMs ?: backup.startedAtEpochMs }
-                .maxOrNull()
-
-            val baseline = latestVerifiedAt ?: scheduleEnabledAtEpochMs
+            val mirror = mirrorsByRepository[repository.githubId]
+            val baseline = mirror?.lastCheckedAtEpochMs ?: scheduleEnabledAtEpochMs
             baseline != null && nowEpochMs - baseline > freshnessWindowMs
         }
         .sortedWith(compareBy<RepositoryEntity> { it.owner.lowercase() }.thenBy { it.name.lowercase() })

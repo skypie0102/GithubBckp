@@ -60,4 +60,36 @@ object DatabaseMigrations {
             db.execSQL("ALTER TABLE backups ADD COLUMN lastReverificationMessage TEXT")
         }
     }
+
+    val MIGRATION_9_10 = object : Migration(9, 10) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                """
+                CREATE TABLE IF NOT EXISTS mirrors (
+                    repositoryId INTEGER NOT NULL,
+                    archiveUri TEXT,
+                    archiveSizeBytes INTEGER,
+                    archiveSha256 TEXT,
+                    formatVersion INTEGER NOT NULL DEFAULT 1,
+                    lastCheckedAtEpochMs INTEGER,
+                    lastSuccessfulSyncAtEpochMs INTEGER,
+                    lastChangedAtEpochMs INTEGER,
+                    lastAttemptAtEpochMs INTEGER,
+                    lastAttemptStatus TEXT,
+                    lastSourceHead TEXT,
+                    lastRefsDigest TEXT,
+                    lastError TEXT,
+                    lastWarning TEXT,
+                    PRIMARY KEY(repositoryId)
+                )
+                """.trimIndent(),
+            )
+        }
+    }
+
+    val MIGRATION_10_11 = object : Migration(10, 11) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("DROP TABLE IF EXISTS backups")
+        }
+    }
 }

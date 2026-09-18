@@ -1,19 +1,13 @@
 package com.skypie0102.githubbckp.worker
 
-import android.app.NotificationChannel
-import android.app.NotificationManager
 import android.content.Context
-import android.content.pm.ServiceInfo
-import android.os.Build
-import androidx.core.app.NotificationCompat
 import androidx.work.CoroutineWorker
-import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
-import com.skypie0102.githubbckp.backup.BackupCoordinator
-import com.skypie0102.githubbckp.backup.BackupOrigin
-import com.skypie0102.githubbckp.backup.BackupRequest
-import com.skypie0102.githubbckp.data.local.BackupDao
-import com.skypie0102.githubbckp.data.local.toRepositoryRef
+import com.skypie0102.githubbckp.data.local.RepositoryDao
+import com.skypie0102.githubbckp.data.local.MirrorDao
+import com.skypie0102.githubbckp.data.local.MirrorEntity
+import com.skypie0102.githubbckp.mirror.MirrorAttemptStatus
+import com.skypie0102.githubbckp.mirror.MirrorSyncCoordinator
 import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
 import dagger.hilt.android.EntryPointAccessors
@@ -26,94 +20,112 @@ class RepositoryBackupWorker(
     override suspend fun doWork(): Result {
         val repositoryId = inputData.getLong(KEY_REPOSITORY_ID, -1L)
         if (repositoryId < 0) return Result.failure()
-        val origin = inputData.getString(KEY_BACKUP_ORIGIN)
-            ?.let { value -> runCatching { BackupOrigin.valueOf(value) }.getOrNull() }
-        val scheduledRunId = inputData.getString(KEY_SCHEDULED_RUN_ID)
-            ?.trim()
-            ?.takeIf { it.isNotEmpty() }
 
         val dependencies = EntryPointAccessors.fromApplication(
             applicationContext,
             BackupWorkerDependencies::class.java,
         )
-        val repository = dependencies.backupDao().getRepository(repositoryId)
+        val repository = dependencies.repositoryDao().getRepository(repositoryId)
             ?: return Result.success()
 
-        setForeground(createForegroundInfo(repositoryId, repository.owner, repository.name))
+        val notifications = dependencies.activeBackupNotificationManager()
+        if (!notifications.isReady()) {
+            val previous = dependencies.mirrorDao().get(repositoryId)
+            dependencies.mirrorDao().upsert(
+                (previous ?: MirrorEntity(repositoryId = repositoryId)).copy(
+                    lastAttemptAtEpochMs = System.currentTimeMillis(),
+                    lastAttemptStatus = MirrorAttemptStatus.BLOCKED.name,
+                    lastWarning = NOTIFICATIONS_REQUIRED_MESSAGE,
+                    lastError = null,
+                ),
+            )
+            return Result.failure()
+        }
 
-        val success = dependencies.backupCoordinator().run(
-            BackupRequest(
-                repository = repository.toRepositoryRef(),
-                origin = origin,
-                scheduledRunId = scheduledRunId,
+        setForeground(
+            notifications.foregroundInfo(
+                workId = id,
+                repositoryId = repositoryId,
+                owner = repository.owner,
+                name = repository.name,
             ),
         )
-        if (!success) {
-            val currentRepository = dependencies.backupDao().getRepository(repositoryId)
-            if (currentRepository?.selectedForBackup == true) {
-                val latestAttempt = dependencies.backupDao().getLatestBackup(repositoryId)
-                dependencies.backupProblemNotifier().notifyBackupFailure(
-                    repository = currentRepository,
-                    errorMessage = latestAttempt?.errorMessage,
+
+        val success = dependencies.mirrorSyncCoordinator().sync(
+            repository = repository,
+            onStage = { stage ->
+                setForeground(
+                    notifications.foregroundInfo(
+                        workId = id,
+                        repositoryId = repositoryId,
+                        owner = repository.owner,
+                        name = repository.name,
+                        stage = stage,
+                    ),
                 )
+            },
+            onByteProgress = { stage, completedBytes, totalBytes ->
+                setForeground(
+                    notifications.foregroundInfo(
+                        workId = id,
+                        repositoryId = repositoryId,
+                        owner = repository.owner,
+                        name = repository.name,
+                        stage = stage,
+                        progressPercent = backupProgressPercent(completedBytes, totalBytes),
+                    ),
+                )
+            },
+        )
+
+        return when (mirrorWorkDisposition(success, runAttemptCount)) {
+            MirrorWorkDisposition.SUCCESS -> Result.success()
+            MirrorWorkDisposition.RETRY -> Result.retry()
+            MirrorWorkDisposition.FAILURE -> {
+                val currentRepository = dependencies.repositoryDao().getRepository(repositoryId)
+                if (currentRepository?.selectedForBackup == true) {
+                    val state = dependencies.mirrorDao().get(repositoryId)
+                    dependencies.backupProblemNotifier().notifyBackupFailure(
+                        repository = currentRepository,
+                        errorMessage = state?.lastError,
+                    )
+                }
+                Result.failure()
             }
-        }
-        return if (success) Result.success() else Result.failure()
-    }
-
-    private fun createForegroundInfo(repositoryId: Long, owner: String, name: String): ForegroundInfo {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val notificationManager = applicationContext.getSystemService(NotificationManager::class.java)
-            notificationManager.createNotificationChannel(
-                NotificationChannel(
-                    CHANNEL_ID,
-                    "Active backups",
-                    NotificationManager.IMPORTANCE_LOW,
-                ).apply {
-                    description = "Long-running GitHub mirror backups"
-                },
-            )
-        }
-
-        val notification = NotificationCompat.Builder(applicationContext, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.stat_sys_upload)
-            .setContentTitle("Backing up GitHub repository")
-            .setContentText("$owner/$name")
-            .setOngoing(true)
-            .setOnlyAlertOnce(true)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
-            .build()
-
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            ForegroundInfo(
-                foregroundNotificationId(repositoryId),
-                notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
-            )
-        } else {
-            ForegroundInfo(
-                foregroundNotificationId(repositoryId),
-                notification,
-            )
         }
     }
 
     companion object {
         const val KEY_REPOSITORY_ID = "repository_id"
-        const val KEY_BACKUP_ORIGIN = "backup_origin"
-        const val KEY_SCHEDULED_RUN_ID = "scheduled_run_id"
-        private const val CHANNEL_ID = "active-backups"
-        private const val FOREGROUND_NOTIFICATION_BASE = 0x4A000000
 
-        private fun foregroundNotificationId(repositoryId: Long): Int =
-            FOREGROUND_NOTIFICATION_BASE xor repositoryId.hashCode()
+        const val NOTIFICATIONS_REQUIRED_MESSAGE =
+            "Notifications must be enabled so every running backup remains visible."
     }
 }
+
+internal enum class MirrorWorkDisposition {
+    SUCCESS,
+    RETRY,
+    FAILURE,
+}
+
+internal fun mirrorWorkDisposition(
+    success: Boolean,
+    runAttemptCount: Int,
+): MirrorWorkDisposition = when {
+    success -> MirrorWorkDisposition.SUCCESS
+    runAttemptCount < MAX_MIRROR_RETRY_ATTEMPTS -> MirrorWorkDisposition.RETRY
+    else -> MirrorWorkDisposition.FAILURE
+}
+
+private const val MAX_MIRROR_RETRY_ATTEMPTS = 2
 
 @EntryPoint
 @InstallIn(SingletonComponent::class)
 interface BackupWorkerDependencies {
-    fun backupDao(): BackupDao
-    fun backupCoordinator(): BackupCoordinator
+    fun repositoryDao(): RepositoryDao
+    fun mirrorDao(): MirrorDao
+    fun mirrorSyncCoordinator(): MirrorSyncCoordinator
+    fun activeBackupNotificationManager(): ActiveBackupNotificationManager
     fun backupProblemNotifier(): BackupProblemNotifier
 }

@@ -46,26 +46,49 @@ fun BackupHealthCard(
 
 private fun BackupHealthSummary.headlineText(): String = when {
     selectedCount == 0 -> "No repositories are currently selected for backup."
-    attentionCount == 0 -> "$verifiedCount of $selectedCount selected repositories have a current verified backup."
-    else -> "$verifiedCount of $selectedCount selected repositories have a current verified backup; $attentionCount need attention."
+    attentionCount == 0 -> "$verifiedCount of $selectedCount selected repositories have a healthy local mirror."
+    else -> "$verifiedCount of $selectedCount selected repositories have a local mirror; $attentionCount need attention."
 }
 
-private fun RepositoryBackupHealth.detailText(): String = when (state) {
-    RepositoryBackupHealthState.PROTECTED -> latestVerifiedAtEpochMs
-        ?.let { "protected • last verified ${formatTimestamp(it)}" }
-        ?: "protected"
-    RepositoryBackupHealthState.WARNING -> warningMessage
-        ?.takeIf { it.isNotBlank() }
-        ?.let { "verified with warning: $it" }
-        ?: "latest attempt was cancelled"
+private fun RepositoryBackupHealth.detailText(): String {
+    val status = when (state) {
+    RepositoryBackupHealthState.HEALTHY -> buildString {
+        append("healthy")
+        latestCheckedAtEpochMs?.let { append(" • checked ${formatTimestamp(it)}") }
+        latestChangedAtEpochMs?.let { append(" • changed ${formatTimestamp(it)}") }
+    }
+    RepositoryBackupHealthState.UPDATING -> "update in progress"
     RepositoryBackupHealthState.FAILED -> errorMessage
         ?.takeIf { it.isNotBlank() }
-        ?.let { "latest attempt failed: $it" }
-        ?: "latest attempt failed after the last verified backup"
-    RepositoryBackupHealthState.STALE -> latestVerifiedAtEpochMs
-        ?.let { "last verified ${formatTimestamp(it)}; scheduled backup is overdue" }
-        ?: "scheduled backup is overdue"
-    RepositoryBackupHealthState.NEVER_BACKED_UP -> "no current verified backup"
+        ?.let { "latest update failed: $it" }
+        ?: "latest update failed"
+    RepositoryBackupHealthState.STALE -> latestCheckedAtEpochMs
+        ?.let { "last checked ${formatTimestamp(it)}; scheduled check is overdue" }
+        ?: "scheduled check is overdue"
+    RepositoryBackupHealthState.MISSING -> "mirror metadata exists but mirror.tar.gz is missing"
+    RepositoryBackupHealthState.BLOCKED -> warningMessage
+        ?.takeIf { it.isNotBlank() }
+        ?.let { "blocked: $it" }
+        ?: "backup is blocked"
+    RepositoryBackupHealthState.NEVER_BACKED_UP -> "no verified local mirror yet"
+    }
+    return buildString {
+        append(status)
+        archiveSizeBytes?.takeIf { it > 0L }?.let {
+            append(" • ")
+            append(formatBytes(it))
+        }
+        sourceHead?.takeIf { it.isNotBlank() }?.let {
+            append(" • HEAD ")
+            append(it.take(10))
+        }
+    }
+}
+
+private fun formatBytes(bytes: Long): String {
+    val mib = bytes / (1024.0 * 1024.0)
+    val gib = bytes / (1024.0 * 1024.0 * 1024.0)
+    return if (gib >= 1.0) "%.2f GiB".format(gib) else "%.1f MiB".format(mib)
 }
 
 private fun formatTimestamp(epochMs: Long): String =

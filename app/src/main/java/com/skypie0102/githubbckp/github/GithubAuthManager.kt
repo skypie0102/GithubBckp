@@ -33,7 +33,13 @@ class GithubAuthManager @Inject constructor(
             ?: throw IOException("GitHub is not connected; enter a personal access token")
     }
 
-    suspend fun requireRecoveryAccessToken(): String = requireAccessToken()
+    suspend fun hasValidAccessToken(): Boolean = withContext(Dispatchers.IO) {
+        val token = secureStore.get(KEY_ACCESS_TOKEN)
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+            ?: return@withContext false
+        runCatching { validateToken(token) }.isSuccess
+    }
 
     fun disconnect() {
         secureStore.remove(KEY_ACCESS_TOKEN)
@@ -58,7 +64,7 @@ class GithubAuthManager @Inject constructor(
         }
         return try {
             val code = connection.responseCode
-            if (code !in 200..299) {
+            if (!githubTokenStatusAccepted(code)) {
                 val error = connection.errorStream?.bufferedReader()?.use { it.readText() }.orEmpty()
                 throw IOException(
                     "GitHub rejected the personal access token (HTTP $code)" +
@@ -87,3 +93,7 @@ class GithubAuthManager @Inject constructor(
 }
 
 internal fun normalizePersonalAccessToken(value: String): String = value.trim()
+
+
+internal fun githubTokenStatusAccepted(statusCode: Int): Boolean =
+    statusCode in 200..299
