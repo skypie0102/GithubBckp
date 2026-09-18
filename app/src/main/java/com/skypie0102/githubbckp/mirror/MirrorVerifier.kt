@@ -38,6 +38,13 @@ object MirrorVerifier {
             val repositoryDirectory = File(verificationDirectory, REPOSITORY_DIRECTORY)
             check(repositoryDirectory.isDirectory) { "Bare Git repository is missing from mirror" }
 
+            if (manifest.workingTreeIncluded) {
+                val workingTree = File(verificationDirectory, WORKING_TREE_DIRECTORY)
+                check(workingTree.isDirectory) {
+                    "Browsable repository checkout is missing from mirror"
+                }
+            }
+
             val refCount = FileRepositoryBuilder()
                 .setGitDir(repositoryDirectory)
                 .setMustExist(true)
@@ -67,4 +74,5 @@ object MirrorVerifier {
     }
 
     const val REPOSITORY_DIRECTORY = "repository.git"
+    const val WORKING_TREE_DIRECTORY = "repository"
 }
