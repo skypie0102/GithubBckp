@@ -26,14 +26,24 @@ Git history is preserved. If a file disappears from the latest branch state, tha
 
 ## Backup format
 
-Each GitHub repository ID maps to one logical file:
+Each repository maps to one logical archive with a human-readable owner/repository name while retaining the immutable GitHub repository ID in the folder name:
 
 ```text
 <selected folder>/
 └── GitHub Backups/
-    └── <github-repository-id>/
-        └── mirror.tar.gz
+    └── <owner>--<repo>--<github-repository-id>/
+        └── <owner>--<repo>.tar.gz
 ```
+
+Example:
+
+```text
+GitHub Backups/
+└── skypie0102--intake-edit--1367381284/
+    └── skypie0102--intake-edit.tar.gz
+```
+
+Older numeric-only folders created by early 0.3.0 test builds are migrated to the readable layout on the next successful mirror check/update without recompressing an unchanged archive.
 
 The archive contains:
 
@@ -44,7 +54,7 @@ repository.git/
 
 Git LFS objects live in `repository.git/lfs/objects/`.
 
-Updates are transactional. A temporary `mirror.pending.tar.gz` may exist while a replacement is being written and verified, but it is not retained as another backup generation.
+Updates are transactional. A temporary `<owner>--<repo>.pending.tar.gz` may exist while a replacement is being written and verified, but it is not retained as another backup generation.
 
 See [docs/BACKUP_FORMAT.md](docs/BACKUP_FORMAT.md).
 
