@@ -70,9 +70,6 @@ class GithubRestGateway @Inject constructor(
             setRequestProperty("Authorization", "Bearer $token")
         }
 
-    private fun path(value: String): String =
-        URLEncoder.encode(value, StandardCharsets.UTF_8.name()).replace("+", "%20")
-
     private companion object {
         const val API_BASE = "https://api.github.com"
         const val PAGE_SIZE = 100
