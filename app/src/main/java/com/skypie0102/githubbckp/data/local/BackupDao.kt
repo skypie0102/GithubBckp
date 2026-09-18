@@ -23,6 +23,9 @@ interface BackupDao {
     @Query("SELECT * FROM repositories WHERE isAvailable = 1 ORDER BY owner, name")
     fun observeRepositories(): Flow<List<RepositoryEntity>>
 
+    @Query("SELECT * FROM repositories ORDER BY owner, name")
+    suspend fun getAllRepositories(): List<RepositoryEntity>
+
     @Query("SELECT * FROM repositories WHERE isAvailable = 1 ORDER BY owner, name")
     suspend fun getAvailableRepositories(): List<RepositoryEntity>
 
