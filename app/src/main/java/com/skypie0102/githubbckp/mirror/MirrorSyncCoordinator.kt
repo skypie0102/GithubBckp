@@ -30,6 +30,8 @@ class MirrorSyncCoordinator @Inject constructor(
     suspend fun sync(
         repository: RepositoryEntity,
         onStage: suspend (MirrorStage) -> Unit = {},
+        onByteProgress: suspend (stage: MirrorStage, completedBytes: Long, totalBytes: Long) -> Unit =
+            { _, _, _ -> },
     ): Boolean {
         val mirrorRepository = repository.toMirrorRepository()
         val session = File(context.cacheDir, "mirror-sync-${repository.githubId}")
@@ -122,6 +124,9 @@ class MirrorSyncCoordinator @Inject constructor(
                         repositoryId = repository.githubId,
                         verifiedArchive = result.archive,
                         expectedSha256 = result.sha256,
+                        onProgress = { writtenBytes, totalBytes ->
+                            onByteProgress(MirrorStage.COMMITTING, writtenBytes, totalBytes)
+                        },
                     )
                     val legacyCleanupFailures = mirrorStore.deleteLegacyMirrors(
                         owner = repository.owner,
