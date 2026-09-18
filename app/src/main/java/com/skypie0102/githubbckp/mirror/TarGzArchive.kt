@@ -7,6 +7,7 @@ import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.IOException
+import java.io.InputStream
 import java.nio.file.Files
 import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
 import org.apache.commons.compress.archivers.tar.TarArchiveOutputStream
@@ -113,10 +114,24 @@ object TarGzArchive {
         archive: File,
         entryName: String,
         maxBytes: Int = DEFAULT_TEXT_ENTRY_LIMIT,
+    ): String = FileInputStream(archive).use { input ->
+        readTextEntry(input, entryName, maxBytes)
+    }
+
+    /**
+     * Stream variant used by Storage Access Framework. It stops as soon as the
+     * requested entry is read, so reading manifest.json does not require copying
+     * or extracting the complete mirror archive.
+     */
+    @Throws(IOException::class)
+    fun readTextEntry(
+        input: InputStream,
+        entryName: String,
+        maxBytes: Int = DEFAULT_TEXT_ENTRY_LIMIT,
     ): String {
         require(maxBytes > 0) { "maxBytes must be positive" }
 
-        openArchive(archive) { tarInput ->
+        openArchive(input) { tarInput ->
             while (true) {
                 val entry = tarInput.nextTarEntry ?: break
                 if (entry.name != entryName) continue
@@ -149,13 +164,18 @@ object TarGzArchive {
     private inline fun <T> openArchive(
         archive: File,
         block: (TarArchiveInputStream) -> T,
+    ): T = FileInputStream(archive).use { input ->
+        openArchive(input, block)
+    }
+
+    private inline fun <T> openArchive(
+        input: InputStream,
+        block: (TarArchiveInputStream) -> T,
     ): T {
-        FileInputStream(archive).use { fileInput ->
-            BufferedInputStream(fileInput).use { bufferedInput ->
-                GzipCompressorInputStream(bufferedInput).use { gzipInput ->
-                    TarArchiveInputStream(gzipInput).use { tarInput ->
-                        return block(tarInput)
-                    }
+        BufferedInputStream(input).use { bufferedInput ->
+            GzipCompressorInputStream(bufferedInput).use { gzipInput ->
+                TarArchiveInputStream(gzipInput).use { tarInput ->
+                    return block(tarInput)
                 }
             }
         }
