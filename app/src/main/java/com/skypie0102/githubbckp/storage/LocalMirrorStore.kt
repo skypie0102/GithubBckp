@@ -5,6 +5,7 @@ import android.net.Uri
 import androidx.documentfile.provider.DocumentFile
 import com.skypie0102.githubbckp.mirror.MirrorManifest
 import com.skypie0102.githubbckp.mirror.MirrorVerifier
+import com.skypie0102.githubbckp.mirror.TarGzArchive
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
 import java.io.FileInputStream
@@ -23,15 +24,22 @@ data class StoredMirror(
     val sha256: String,
 )
 
+internal data class MirrorStorageNames(
+    val folderName: String,
+    val stableFileName: String,
+    val pendingFileName: String,
+)
+
 /**
- * The only durable storage implementation for the refactored product.
+ * Durable local mirror storage.
  *
- * Each GitHub repository ID owns one logical mirror:
+ * Human-readable layout:
  *
- *   GitHub Backups/<repository-id>/mirror.tar.gz
+ *   GitHub Backups/<owner>--<repo>--<repository-id>/<owner>--<repo>.tar.gz
  *
- * Writes always go to mirror.pending.tar.gz first. The old stable archive is
- * left untouched until the pending document has been fully written and hashed.
+ * The GitHub repository ID remains in the folder name so identity stays stable
+ * across duplicate names and repository renames. Repository name changes are
+ * migrated transactionally on the next successful mirror update.
  */
 @Singleton
 class LocalMirrorStore @Inject constructor(
@@ -39,93 +47,94 @@ class LocalMirrorStore @Inject constructor(
     private val preferences: StoragePreferences,
 ) {
     suspend fun currentMirror(repositoryId: Long): StoredMirror? = withContext(Dispatchers.IO) {
-        val folder = repositoryFolder(repositoryId, create = false) ?: return@withContext null
-        reconcileFolder(repositoryId, folder)
-        val document = folder.findFile(STABLE_NAME)
-            ?: folder.findFile(PENDING_NAME)
-            ?: return@withContext null
-        storedMirror(document)
+        for (folder in repositoryFolders(repositoryId)) {
+            reconcileFolder(repositoryId, folder)
+            currentMirrorDocument(folder)?.let { return@withContext storedMirror(it) }
+        }
+        null
     }
 
     suspend fun readManifest(repositoryId: Long): MirrorManifest? = withContext(Dispatchers.IO) {
-        val folder = repositoryFolder(repositoryId, create = false) ?: return@withContext null
-        reconcileFolder(repositoryId, folder)
-        val document = folder.findFile(STABLE_NAME)
-            ?: folder.findFile(PENDING_NAME)
-            ?: return@withContext null
-        val input = context.contentResolver.openInputStream(document.uri)
-            ?: throw IOException("Stored mirror can no longer be opened")
-        input.use(MirrorManifest::readFromArchive)
+        for (folder in repositoryFolders(repositoryId)) {
+            reconcileFolder(repositoryId, folder)
+            val document = currentMirrorDocument(folder) ?: continue
+            val input = context.contentResolver.openInputStream(document.uri)
+                ?: throw IOException("Stored mirror can no longer be opened")
+            return@withContext input.use(MirrorManifest::readFromArchive)
+        }
+        null
     }
 
     suspend fun estimateUpdateWorkingBytes(repositoryId: Long): Long? = withContext(Dispatchers.IO) {
-        val folder = repositoryFolder(repositoryId, create = false) ?: return@withContext null
-        reconcileFolder(repositoryId, folder)
-        val document = folder.findFile(STABLE_NAME)
-            ?: folder.findFile(PENDING_NAME)
-            ?: return@withContext null
-        val compressedBytes = document.length().takeIf { it > 0L } ?: storedMirror(document).sizeBytes
-        val input = context.contentResolver.openInputStream(document.uri)
-            ?: throw IOException("Stored mirror can no longer be opened")
-        val expandedBytes = input.use(com.skypie0102.githubbckp.mirror.TarGzArchive::expandedSizeBytes)
-        requiredUpdateWorkspaceBytes(compressedBytes, expandedBytes)
+        for (folder in repositoryFolders(repositoryId)) {
+            reconcileFolder(repositoryId, folder)
+            val document = currentMirrorDocument(folder) ?: continue
+            val compressedBytes =
+                document.length().takeIf { it > 0L } ?: storedMirror(document).sizeBytes
+            val input = context.contentResolver.openInputStream(document.uri)
+                ?: throw IOException("Stored mirror can no longer be opened")
+            val expandedBytes = input.use(TarGzArchive::expandedSizeBytes)
+            return@withContext requiredUpdateWorkspaceBytes(compressedBytes, expandedBytes)
+        }
+        null
     }
 
     suspend fun copyCurrentTo(repositoryId: Long, destination: File): StoredMirror? =
         withContext(Dispatchers.IO) {
-            val folder = repositoryFolder(repositoryId, create = false) ?: return@withContext null
-            reconcileFolder(repositoryId, folder)
-            val document = folder.findFile(STABLE_NAME)
-                ?: folder.findFile(PENDING_NAME)
-                ?: return@withContext null
+            for (folder in repositoryFolders(repositoryId)) {
+                reconcileFolder(repositoryId, folder)
+                val document = currentMirrorDocument(folder) ?: continue
 
-            destination.parentFile?.mkdirs()
-            val digest = MessageDigest.getInstance("SHA-256")
-            var size = 0L
-            val input = context.contentResolver.openInputStream(document.uri)
-                ?: throw IOException("Stored mirror can no longer be opened")
-            input.buffered(BUFFER_SIZE).use { source ->
-                FileOutputStream(destination).buffered(BUFFER_SIZE).use { output ->
-                    val buffer = ByteArray(BUFFER_SIZE)
-                    while (true) {
-                        val count = source.read(buffer)
-                        if (count < 0) break
-                        if (count > 0) {
-                            output.write(buffer, 0, count)
-                            digest.update(buffer, 0, count)
-                            size += count
+                destination.parentFile?.mkdirs()
+                val digest = MessageDigest.getInstance("SHA-256")
+                var size = 0L
+                val input = context.contentResolver.openInputStream(document.uri)
+                    ?: throw IOException("Stored mirror can no longer be opened")
+                input.buffered(BUFFER_SIZE).use { source ->
+                    FileOutputStream(destination).buffered(BUFFER_SIZE).use { output ->
+                        val buffer = ByteArray(BUFFER_SIZE)
+                        while (true) {
+                            val count = source.read(buffer)
+                            if (count < 0) break
+                            if (count > 0) {
+                                output.write(buffer, 0, count)
+                                digest.update(buffer, 0, count)
+                                size += count
+                            }
                         }
                     }
                 }
-            }
 
-            StoredMirror(
-                uri = document.uri,
-                name = document.name ?: STABLE_NAME,
-                sizeBytes = size,
-                sha256 = digest.digest().joinToString("") { byte ->
-                    "%02x".format(byte.toInt() and 0xff)
-                },
-            )
+                return@withContext StoredMirror(
+                    uri = document.uri,
+                    name = document.name ?: "mirror.tar.gz",
+                    sizeBytes = size,
+                    sha256 = digest.digest().joinToString("") { byte ->
+                        "%02x".format(byte.toInt() and 0xff)
+                    },
+                )
+            }
+            null
         }
 
     suspend fun commit(
         repositoryId: Long,
+        owner: String,
+        name: String,
         verifiedArchive: File,
         expectedSha256: String,
         onProgress: suspend (writtenBytes: Long, totalBytes: Long) -> Unit = { _, _ -> },
     ): StoredMirror = withContext(Dispatchers.IO) {
         require(verifiedArchive.isFile) { "Verified mirror archive is missing" }
 
-        val folder = repositoryFolder(repositoryId, create = true)
+        val names = mirrorStorageNames(repositoryId, owner, name)
+        val previousFolders = repositoryFolders(repositoryId)
+        val folder = namedRepositoryFolder(names, create = true)
             ?: throw IOException("Could not create repository backup folder")
         reconcileFolder(repositoryId, folder)
 
-        // A stable mirror exists at this point if a recoverable previous pending
-        // transaction was present. It remains untouched until the new pending
-        // document has been completely persisted and re-hashed.
-        folder.findFile(PENDING_NAME)?.delete()
-        val pending = folder.createFile(MIME_TYPE, PENDING_NAME)
+        pendingMirrorDocument(folder)?.delete()
+        val pending = folder.createFile(MIME_TYPE, names.pendingFileName)
             ?: throw IOException("Could not create pending mirror archive")
 
         try {
@@ -152,21 +161,33 @@ class LocalMirrorStore @Inject constructor(
                 "Pending mirror SHA-256 verification failed"
             }
 
-            folder.findFile(STABLE_NAME)?.let { stable ->
+            stableMirrorDocument(folder)?.let { stable ->
                 check(stable.delete()) { "Could not retire previous mirror archive" }
             }
 
-            if (pending.name != STABLE_NAME) {
-                pending.renameTo(STABLE_NAME)
+            check(pending.renameTo(names.stableFileName)) {
+                "Could not promote pending mirror archive"
             }
 
-            val committed = folder.findFile(STABLE_NAME) ?: pending
-            storedMirror(committed)
+            val committed = folder.findFile(names.stableFileName)
+                ?: stableMirrorDocument(folder)
+                ?: throw IOException("Committed mirror archive could not be found")
+            val result = storedMirror(committed)
+
+            // Only after the human-readable replacement is persisted, hashed,
+            // and promoted do we retire old numeric/renamed repository folders.
+            previousFolders
+                .filter { it.uri != folder.uri }
+                .forEach { previous ->
+                    deleteMirrorFiles(previous)
+                    if (previous.listFiles().isEmpty()) previous.delete()
+                }
+
+            result
         } catch (throwable: Throwable) {
-            // Only remove pending when the stable archive still exists. If a
-            // provider fails after stable deletion, retaining the verified
-            // pending document is safer and startup reconciliation can promote it.
-            if (folder.findFile(STABLE_NAME) != null) {
+            // If a prior stable copy still exists, discard the failed candidate.
+            // Otherwise keep a verified pending candidate for startup recovery.
+            if (stableMirrorDocument(folder) != null) {
                 runCatching { pending.delete() }
             }
             throw throwable
@@ -174,14 +195,16 @@ class LocalMirrorStore @Inject constructor(
     }
 
     suspend fun reconcile(repositoryId: Long): Boolean = withContext(Dispatchers.IO) {
-        val folder = repositoryFolder(repositoryId, create = false) ?: return@withContext false
-        reconcileFolder(repositoryId, folder)
+        repositoryFolders(repositoryId).any { folder ->
+            reconcileFolder(repositoryId, folder)
+        }
     }
 
     suspend fun hasCurrentMirror(repositoryId: Long): Boolean = withContext(Dispatchers.IO) {
-        val folder = repositoryFolder(repositoryId, create = false) ?: return@withContext false
-        reconcileFolder(repositoryId, folder)
-        folder.findFile(STABLE_NAME) != null || folder.findFile(PENDING_NAME) != null
+        repositoryFolders(repositoryId).any { folder ->
+            reconcileFolder(repositoryId, folder)
+            currentMirrorDocument(folder) != null
+        }
     }
 
     suspend fun deleteLegacyMirrors(owner: String, name: String): List<String> =
@@ -201,32 +224,24 @@ class LocalMirrorStore @Inject constructor(
                     document.isFile && isLegacyMirrorFileName(owner, name, document.name.orEmpty())
                 }
                 .forEach { document ->
-                    if (!document.delete()) {
-                        failures += document.name ?: "legacy mirror"
-                    }
+                    if (!document.delete()) failures += document.name ?: "legacy mirror"
                 }
 
-            if (repositoryFolder.listFiles().isEmpty()) {
-                repositoryFolder.delete()
-            }
-            if (ownerFolder.listFiles().isEmpty()) {
-                ownerFolder.delete()
-            }
+            if (repositoryFolder.listFiles().isEmpty()) repositoryFolder.delete()
+            if (ownerFolder.listFiles().isEmpty()) ownerFolder.delete()
             failures
         }
 
     suspend fun delete(repositoryId: Long) = withContext(Dispatchers.IO) {
-        val folder = repositoryFolder(repositoryId, create = false) ?: return@withContext
-        folder.findFile(PENDING_NAME)?.delete()
-        folder.findFile(STABLE_NAME)?.delete()
-        if (folder.listFiles().isEmpty()) {
-            folder.delete()
+        repositoryFolders(repositoryId).forEach { folder ->
+            deleteMirrorFiles(folder)
+            if (folder.listFiles().isEmpty()) folder.delete()
         }
     }
 
     private fun reconcileFolder(repositoryId: Long, folder: DocumentFile): Boolean {
-        val stable = folder.findFile(STABLE_NAME)
-        val pending = folder.findFile(PENDING_NAME)
+        val stable = stableMirrorDocument(folder)
+        val pending = pendingMirrorDocument(folder)
         when (
             pendingMirrorRecoveryAction(
                 stableExists = stable != null,
@@ -235,8 +250,6 @@ class LocalMirrorStore @Inject constructor(
         ) {
             PendingMirrorRecoveryAction.NONE -> return false
             PendingMirrorRecoveryAction.DISCARD_PENDING -> {
-                // A crash before retiring the stable mirror left a candidate
-                // behind. The previous stable mirror is authoritative.
                 pending?.delete()
                 return false
             }
@@ -245,14 +258,12 @@ class LocalMirrorStore @Inject constructor(
 
         checkNotNull(pending)
 
-        // No stable archive means the process may have died between retiring
-        // the old file and renaming the already-verified pending file, or during
-        // a first backup. Re-verify the pending archive before promoting it.
         val scratch = File(context.cacheDir, "mirror-reconcile-$repositoryId").apply {
             parentFile?.mkdirs()
             delete()
         }
-        val verifyDirectory = File(context.cacheDir, "mirror-reconcile-$repositoryId-verify")
+        val verifyDirectory =
+            File(context.cacheDir, "mirror-reconcile-$repositoryId-verify")
         var verified = false
         return try {
             context.contentResolver.openInputStream(pending.uri)?.use { input ->
@@ -268,14 +279,12 @@ class LocalMirrorStore @Inject constructor(
             )
             verified = true
 
-            check(pending.renameTo(STABLE_NAME)) {
+            val stableName = stableFileNameForPending(pending.name.orEmpty())
+            check(pending.renameTo(stableName)) {
                 "Verified pending mirror could not be promoted"
             }
             true
         } catch (_: Throwable) {
-            // Never destroy the only verified copy merely because the document
-            // provider refused a rename. The normal read path accepts a pending
-            // file when no stable mirror exists and can retry promotion later.
             if (!verified) pending.delete()
             false
         } finally {
@@ -284,28 +293,63 @@ class LocalMirrorStore @Inject constructor(
         }
     }
 
-    private fun repositoryFolder(repositoryId: Long, create: Boolean): DocumentFile? {
+    private fun repositoryFolders(repositoryId: Long): List<DocumentFile> {
+        val backups = backupRoot(create = false) ?: return emptyList()
+        return backups.listFiles()
+            .asSequence()
+            .filter { it.isDirectory }
+            .filter { repositoryFolderMatches(it.name.orEmpty(), repositoryId) }
+            .sortedBy { it.name == repositoryId.toString() }
+            .toList()
+    }
+
+    private fun namedRepositoryFolder(
+        names: MirrorStorageNames,
+        create: Boolean,
+    ): DocumentFile? {
+        val backups = backupRoot(create) ?: return null
+        backups.findFile(names.folderName)?.takeIf { it.isDirectory }?.let { return it }
+        return if (create) backups.createDirectory(names.folderName) else null
+    }
+
+    private fun backupRoot(create: Boolean): DocumentFile? {
         val rootUri = preferences.documentTreeUri() ?: return null
         val root = DocumentFile.fromTreeUri(context, rootUri)
             ?: throw IOException("The selected backup folder is no longer available")
         check(root.canWrite()) { "The selected backup folder is read-only" }
 
-        val backups = root.findFile(ROOT_DIRECTORY)?.takeIf { it.isDirectory }
+        return root.findFile(ROOT_DIRECTORY)?.takeIf { it.isDirectory }
             ?: if (create) {
                 root.createDirectory(ROOT_DIRECTORY)
                     ?: throw IOException("Could not create backup root directory")
             } else {
-                return null
+                null
             }
+    }
 
-        val id = repositoryId.toString()
-        backups.findFile(id)?.takeIf { it.isDirectory }?.let { return it }
-        return if (create) {
-            backups.createDirectory(id)
-                ?: throw IOException("Could not create repository backup directory")
-        } else {
-            null
-        }
+    private fun currentMirrorDocument(folder: DocumentFile): DocumentFile? =
+        stableMirrorDocument(folder) ?: pendingMirrorDocument(folder)
+
+    private fun stableMirrorDocument(folder: DocumentFile): DocumentFile? =
+        folder.listFiles()
+            .asSequence()
+            .filter { it.isFile && isStableMirrorArchiveName(it.name.orEmpty()) }
+            .sortedBy { it.name == LEGACY_STABLE_NAME }
+            .firstOrNull()
+
+    private fun pendingMirrorDocument(folder: DocumentFile): DocumentFile? =
+        folder.listFiles()
+            .firstOrNull { it.isFile && isPendingMirrorArchiveName(it.name.orEmpty()) }
+
+    private fun deleteMirrorFiles(folder: DocumentFile) {
+        folder.listFiles()
+            .filter { document ->
+                document.isFile && (
+                    isStableMirrorArchiveName(document.name.orEmpty()) ||
+                        isPendingMirrorArchiveName(document.name.orEmpty())
+                    )
+            }
+            .forEach { it.delete() }
     }
 
     private fun storedMirror(document: DocumentFile): StoredMirror {
@@ -325,7 +369,7 @@ class LocalMirrorStore @Inject constructor(
 
         return StoredMirror(
             uri = document.uri,
-            name = document.name ?: STABLE_NAME,
+            name = document.name ?: LEGACY_STABLE_NAME,
             sizeBytes = size,
             sha256 = digest.digest().joinToString("") { byte ->
                 "%02x".format(byte.toInt() and 0xff)
@@ -335,11 +379,48 @@ class LocalMirrorStore @Inject constructor(
 
     private companion object {
         const val ROOT_DIRECTORY = "GitHub Backups"
-        const val STABLE_NAME = "mirror.tar.gz"
-        const val PENDING_NAME = "mirror.pending.tar.gz"
+        const val LEGACY_STABLE_NAME = "mirror.tar.gz"
         const val MIME_TYPE = "application/gzip"
         const val BUFFER_SIZE = 256 * 1024
     }
+}
+
+internal fun mirrorStorageNames(
+    repositoryId: Long,
+    owner: String,
+    name: String,
+): MirrorStorageNames {
+    val label = readableRepositoryLabel(owner, name)
+    return MirrorStorageNames(
+        folderName = "$label--$repositoryId",
+        stableFileName = "$label.tar.gz",
+        pendingFileName = "$label.pending.tar.gz",
+    )
+}
+
+internal fun repositoryFolderMatches(folderName: String, repositoryId: Long): Boolean =
+    folderName == repositoryId.toString() || folderName.endsWith("--$repositoryId")
+
+internal fun isStableMirrorArchiveName(fileName: String): Boolean =
+    fileName.endsWith(".tar.gz") && !isPendingMirrorArchiveName(fileName)
+
+internal fun isPendingMirrorArchiveName(fileName: String): Boolean =
+    fileName.endsWith(".pending.tar.gz")
+
+internal fun stableFileNameForPending(fileName: String): String =
+    if (fileName.endsWith(".pending.tar.gz")) {
+        fileName.removeSuffix(".pending.tar.gz") + ".tar.gz"
+    } else {
+        "mirror.tar.gz"
+    }
+
+private fun readableRepositoryLabel(owner: String, name: String): String {
+    val raw = "$owner--$name"
+    return raw
+        .replace(Regex("[^A-Za-z0-9._-]"), "_")
+        .trim('_')
+        .ifBlank { "repository" }
+        .take(MAX_READABLE_LABEL_LENGTH)
 }
 
 internal fun isLegacyMirrorFileName(owner: String, name: String, fileName: String): Boolean {
@@ -366,7 +447,7 @@ internal fun requiredUpdateWorkspaceBytes(compressedBytes: Long, expandedBytes: 
 }
 
 private const val MIN_UPDATE_HEADROOM_BYTES = 64L * 1024L * 1024L
-
+private const val MAX_READABLE_LABEL_LENGTH = 180
 
 internal enum class PendingMirrorRecoveryAction {
     NONE,
