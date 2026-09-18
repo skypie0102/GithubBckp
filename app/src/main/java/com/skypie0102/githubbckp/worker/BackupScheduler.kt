@@ -98,20 +98,20 @@ class BackupScheduler @Inject constructor(
         constraints: Constraints,
         originTag: String,
     ) {
-        repositoryIds.forEach { repositoryId ->
+        repositoryWorkPlans(repositoryIds).forEach { plan ->
             val request = OneTimeWorkRequestBuilder<RepositoryBackupWorker>()
                 .setConstraints(constraints)
                 .setInputData(
                     workDataOf(
-                        RepositoryBackupWorker.KEY_REPOSITORY_ID to repositoryId,
+                        RepositoryBackupWorker.KEY_REPOSITORY_ID to plan.repositoryId,
                     ),
                 )
-                .addTag("backup-$repositoryId")
+                .addTag(plan.tag)
                 .addTag(originTag)
                 .build()
 
             workManager.enqueueUniqueWork(
-                "backup-$repositoryId-mirror",
+                plan.uniqueWorkName,
                 ExistingWorkPolicy.KEEP,
                 request,
             )
@@ -143,3 +143,24 @@ class BackupScheduler @Inject constructor(
             .build()
     }
 }
+
+
+internal data class RepositoryWorkPlan(
+    val repositoryId: Long,
+    val uniqueWorkName: String,
+    val tag: String,
+)
+
+internal fun repositoryWorkPlans(repositoryIds: List<Long>): List<RepositoryWorkPlan> =
+    repositoryIds
+        .asSequence()
+        .filter { it >= 0L }
+        .distinct()
+        .map { repositoryId ->
+            RepositoryWorkPlan(
+                repositoryId = repositoryId,
+                uniqueWorkName = "backup-$repositoryId-mirror",
+                tag = "backup-$repositoryId",
+            )
+        }
+        .toList()
