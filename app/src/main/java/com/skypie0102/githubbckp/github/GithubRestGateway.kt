@@ -1,6 +1,5 @@
 package com.skypie0102.githubbckp.github
 
-import com.skypie0102.githubbckp.backup.RepositoryRef
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
@@ -14,7 +13,7 @@ import org.json.JSONArray
 class GithubRestGateway @Inject constructor(
     private val authManager: GithubAuthManager,
 ) : GithubGateway {
-    override suspend fun listRepositories(): List<RepositoryRef> = withContext(Dispatchers.IO) {
+    override suspend fun listRepositories(): List<GithubRepository> = withContext(Dispatchers.IO) {
         val token = authManager.requireAccessToken()
         buildList {
             var nextUrl: String? =
@@ -25,7 +24,7 @@ class GithubRestGateway @Inject constructor(
                 for (index in 0 until repositories.length()) {
                     val item = repositories.getJSONObject(index)
                     add(
-                        RepositoryRef(
+                        GithubRepository(
                             id = item.getLong("id"),
                             owner = item.getJSONObject("owner").getString("login"),
                             name = item.getString("name"),
