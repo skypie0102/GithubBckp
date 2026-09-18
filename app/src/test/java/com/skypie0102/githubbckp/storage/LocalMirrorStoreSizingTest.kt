@@ -29,6 +29,32 @@ class LocalMirrorStoreSizingTest {
     }
 
     @Test
+    fun legacyCheckoutUpgradeAddsConservativeReserve() {
+        val mib = 1024L * 1024L
+        assertEquals(
+            2L * 100L * mib + 400L * mib + 100L * mib + 800L * mib,
+            requiredUpdateWorkspaceBytes(
+                compressedBytes = 100L * mib,
+                expandedBytes = 400L * mib,
+                reserveBrowsableCheckoutUpgrade = true,
+            ),
+        )
+    }
+
+    @Test
+    fun smallLegacyCheckoutUpgradeUsesMinimumReserve() {
+        val mib = 1024L * 1024L
+        assertEquals(
+            2L * 10L * mib + 20L * mib + 64L * mib + 128L * mib,
+            requiredUpdateWorkspaceBytes(
+                compressedBytes = 10L * mib,
+                expandedBytes = 20L * mib,
+                reserveBrowsableCheckoutUpgrade = true,
+            ),
+        )
+    }
+
+    @Test
     fun updateWorkspaceSaturatesInsteadOfOverflowing() {
         assertEquals(
             Long.MAX_VALUE,
