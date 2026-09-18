@@ -26,6 +26,15 @@ enum class BackupOrigin {
     SCHEDULED,
 }
 
+/**
+ * Legacy Room decoding only. vNext verifies every mirror during commit and no
+ * longer exposes a separate re-verification workflow.
+ */
+enum class BackupReverificationStatus {
+    VERIFIED,
+    FAILED,
+}
+
 enum class BackupStatus {
     QUEUED,
     DOWNLOADING,
