@@ -18,25 +18,25 @@ Nothing needs to be configured in GitHub Secrets.
 
 Because every release can use a different disposable key, a future release may require uninstall/reinstall rather than update-in-place. The user-selected repository mirrors live outside app-private storage and are not embedded in the APK.
 
-## 0.3.1
+## 0.3.2
 
 The local-mirror refactor is versioned as:
 
 ```text
-versionName: 0.3.1
-versionCode: 5
+versionName: 0.3.2
+versionCode: 6
 package: com.skypie0102.githubbckp
 ```
 
-The release is published from `main` as tag `v0.3.1`.
+The release is published from `main` as tag `v0.3.2`.
 
 ## Release assets
 
 The workflow publishes:
 
 ```text
-githubbckp-v0.3.1.apk
-githubbckp-v0.3.1.apk.sha256
+githubbckp-v0.3.2.apk
+githubbckp-v0.3.2.apk.sha256
 ```
 
 The APK is the optimized release build, not the much larger debug/testing APK.
@@ -60,7 +60,7 @@ The workflow may also be started manually with a tag, but the requested tag must
 
 ## Device gate
 
-Repository owner **skypie0102** tested the refactored app on a real Android device, confirmed repository backup worked successfully, and explicitly accepted that testing as sufficient for the 0.3.1 device gate.
+Repository owner **skypie0102** tested the refactored app on a real Android device, confirmed repository backup worked successfully, and explicitly accepted that testing as sufficient for the 0.3.2 device gate.
 
 Issue #53 is closed as completed by owner attestation.
 
@@ -78,9 +78,26 @@ Before treating a later release as known-good:
 8. confirm health distinguishes last checked from last changed.
 
 
-## 0.3.1 UX changes
+## 0.3.2 UX changes
 
 - setup and scheduling controls live on a dedicated Settings page;
 - Home is focused on mirror health and repository selection;
 - health identifies repositories whose current GitHub refs differ from the saved mirror;
 - the primary action says Back up, Update, or Back up & update based on whether selected mirrors already exist.
+
+
+## 0.3.2 Android update hotfix
+
+0.3.1 could create/read mirrors but a changed-repository update could fail on Android with:
+
+```text
+Failed resolution of: Ljava/lang/ProcessHandle;
+```
+
+The update path explicitly invoked JGit garbage collection after fetch/prune. The JGit version used by 0.3.1 referenced the JVM-only `java.lang.ProcessHandle`, which Android does not provide.
+
+0.3.2:
+- removes explicit JGit GC from the Android mirror update path;
+- keeps incremental fetch and deleted-ref pruning unchanged;
+- upgrades JGit to 7.8.0, which contains upstream Android handling for its PID lookup;
+- preserves the existing verified archive until the replacement archive is fully committed.
