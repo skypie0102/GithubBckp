@@ -8,7 +8,9 @@ GithubBckp stores one logical `.tar.gz` mirror per GitHub repository ID, using t
 <selected document tree>/
 └── GitHub Backups/
     └── <owner>--<repo>--<github-repository-id>/
-        └── <owner>--<repo>.tar.gz
+        ├── <owner>--<repo>.tar.gz
+        └── latest-release/
+            └── <owner>--<repo>--<tag>--release.tar.gz
 ```
 
 A transaction may temporarily contain:
@@ -133,3 +135,26 @@ There is no Git LFS upload or restore path.
 Archives created before 0.3.3 do not contain `repository/`. They remain readable because the new manifest field is optional when parsing older archives.
 
 On the next successful mirror operation, an older archive is rebuilt once to add the browsable checkout even when Git refs themselves are unchanged. After that one-time upgrade, unchanged repositories return to the no-extraction/no-recompression fast path.
+
+
+## Latest release bundle
+
+Each selected repository may also have one current latest-release bundle:
+
+```text
+latest-release/
+└── <owner>--<repo>--<tag>--release.tar.gz
+    ├── release.json
+    ├── source/
+    │   └── source.tar.gz
+    └── assets/
+        └── ...uploaded GitHub Release assets...
+```
+
+This is deliberately separate from the Git mirror archive.
+
+`release.json` records repository identity, GitHub release ID, tag, release name/body, release URL, publish/update timestamps, app version, source archive size/SHA-256, and every asset's original name, stored path, size, and SHA-256.
+
+Only one stable latest-release bundle is retained. The app compares GitHub release ID plus `updated_at` before downloading. A changed release is streamed into app-private temporary storage, individually hashed, packed, fully verified, written as a pending SAF file, re-hashed after persistence, and only then promoted over the previous latest-release backup.
+
+GitHub's `/releases/latest` semantics are used: drafts and prereleases are not treated as the latest published release. If no current latest published release exists, an already-retained local release bundle is not deleted.
