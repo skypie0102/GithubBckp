@@ -5,8 +5,8 @@ import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
 
 @Database(
-    entities = [RepositoryEntity::class, BackupEntity::class],
-    version = 9,
+    entities = [RepositoryEntity::class, MirrorEntity::class],
+    version = 1,
     exportSchema = false,
 )
 @TypeConverters(Converters::class)
