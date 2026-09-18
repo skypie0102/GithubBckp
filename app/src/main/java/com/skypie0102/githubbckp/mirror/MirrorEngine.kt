@@ -47,6 +47,18 @@ sealed interface MirrorSyncResult {
     ) : MirrorSyncResult
 }
 
+internal fun mirrorRequiresRebuild(
+    manifest: MirrorManifest,
+    repository: MirrorRepository,
+    remoteRefsDigest: String,
+): Boolean =
+    manifest.refsDigest != remoteRefsDigest ||
+        manifest.repositoryOwner != repository.owner ||
+        manifest.repositoryName != repository.name ||
+        manifest.remoteUrl != repository.remoteUrl ||
+        manifest.defaultBranch != repository.defaultBranch ||
+        manifest.isPrivate != repository.isPrivate
+
 /**
  * Replacement engine for the old multi-module ZIP backup pipeline.
  *
@@ -140,7 +152,7 @@ class MirrorEngine @Inject constructor(
             credentialsProvider = credentials,
         )
 
-        if (!requiresRebuild(existingManifest, repository, remoteRefsDigest)) {
+        if (!mirrorRequiresRebuild(existingManifest, repository, remoteRefsDigest)) {
             return@withContext MirrorSyncResult.Unchanged(existingManifest)
         }
 
@@ -197,18 +209,6 @@ class MirrorEngine @Inject constructor(
             sha256 = sha256(archive),
         )
     }
-
-    internal fun requiresRebuild(
-        manifest: MirrorManifest,
-        repository: MirrorRepository,
-        remoteRefsDigest: String,
-    ): Boolean =
-        manifest.refsDigest != remoteRefsDigest ||
-            manifest.repositoryOwner != repository.owner ||
-            manifest.repositoryName != repository.name ||
-            manifest.remoteUrl != repository.remoteUrl ||
-            manifest.defaultBranch != repository.defaultBranch ||
-            manifest.isPrivate != repository.isPrivate
 
     private fun synchronizeLfs(
         repository: MirrorRepository,
