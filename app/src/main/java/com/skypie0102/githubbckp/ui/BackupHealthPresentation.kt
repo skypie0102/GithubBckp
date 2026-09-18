@@ -43,6 +43,7 @@ data class BackupHealthSummary(
     }
     val protectedCount: Int = repositories.count {
         it.state == RepositoryBackupHealthState.HEALTHY ||
+            it.state == RepositoryBackupHealthState.UPDATE_AVAILABLE ||
             it.state == RepositoryBackupHealthState.UPDATING
     }
     val attentionCount: Int = repositories.count {
