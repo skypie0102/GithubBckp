@@ -30,6 +30,34 @@ class MirrorEnginePlanTest {
         assertTrue(mirrorRequiresRebuild(manifest, renamed, "same"))
     }
 
+    @Test
+    fun requiresRebuild_returnsTrueWhenDefaultBranchChanges() {
+        val repository = repository()
+        val manifest = manifest(repository, refsDigest = "same")
+
+        assertTrue(
+            mirrorRequiresRebuild(
+                manifest,
+                repository.copy(defaultBranch = "trunk"),
+                "same",
+            ),
+        )
+    }
+
+    @Test
+    fun requiresRebuild_returnsTrueWhenPrivacyChanges() {
+        val repository = repository()
+        val manifest = manifest(repository, refsDigest = "same")
+
+        assertTrue(
+            mirrorRequiresRebuild(
+                manifest,
+                repository.copy(isPrivate = false),
+                "same",
+            ),
+        )
+    }
+
     private fun repository() = MirrorRepository(
         id = 10L,
         owner = "owner",
