@@ -58,6 +58,19 @@ class LocalMirrorStore @Inject constructor(
         input.use(MirrorManifest::readFromArchive)
     }
 
+    suspend fun estimateUpdateWorkingBytes(repositoryId: Long): Long? = withContext(Dispatchers.IO) {
+        val folder = repositoryFolder(repositoryId, create = false) ?: return@withContext null
+        reconcileFolder(repositoryId, folder)
+        val document = folder.findFile(STABLE_NAME)
+            ?: folder.findFile(PENDING_NAME)
+            ?: return@withContext null
+        val compressedBytes = document.length().takeIf { it > 0L } ?: storedMirror(document).sizeBytes
+        val input = context.contentResolver.openInputStream(document.uri)
+            ?: throw IOException("Stored mirror can no longer be opened")
+        val expandedBytes = input.use(com.skypie0102.githubbckp.mirror.TarGzArchive::expandedSizeBytes)
+        requiredUpdateWorkspaceBytes(compressedBytes, expandedBytes)
+    }
+
     suspend fun copyCurrentTo(repositoryId: Long, destination: File): StoredMirror? =
         withContext(Dispatchers.IO) {
             val folder = repositoryFolder(repositoryId, create = false) ?: return@withContext null
@@ -264,7 +277,25 @@ class LocalMirrorStore @Inject constructor(
         )
     }
 
-    private companion object {
+    internal fun requiredUpdateWorkspaceBytes(compressedBytes: Long, expandedBytes: Long): Long {
+    require(compressedBytes >= 0L) { "Compressed size cannot be negative" }
+    require(expandedBytes >= 0L) { "Expanded size cannot be negative" }
+
+    fun add(left: Long, right: Long): Long =
+        if (Long.MAX_VALUE - left < right) Long.MAX_VALUE else left + right
+    fun multiply(value: Long, factor: Long): Long =
+        if (value == 0L || factor == 0L) 0L
+        else if (value > Long.MAX_VALUE / factor) Long.MAX_VALUE
+        else value * factor
+
+    val archiveCopies = multiply(compressedBytes, 2L)
+    val growthHeadroom = maxOf(expandedBytes / 4L, MIN_UPDATE_HEADROOM_BYTES)
+    return add(add(archiveCopies, expandedBytes), growthHeadroom)
+}
+
+private const val MIN_UPDATE_HEADROOM_BYTES = 64L * 1024L * 1024L
+
+private companion object {
         const val ROOT_DIRECTORY = "GitHub Backups"
         const val STABLE_NAME = "mirror.tar.gz"
         const val PENDING_NAME = "mirror.pending.tar.gz"
