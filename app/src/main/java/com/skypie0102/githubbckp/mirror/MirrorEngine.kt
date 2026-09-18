@@ -34,6 +34,11 @@ enum class MirrorStage {
     PACKAGING,
     VERIFYING,
     COMMITTING,
+    CHECKING_RELEASE,
+    DOWNLOADING_RELEASE,
+    PACKAGING_RELEASE,
+    VERIFYING_RELEASE,
+    COMMITTING_RELEASE,
 }
 
 sealed interface MirrorSyncResult {
