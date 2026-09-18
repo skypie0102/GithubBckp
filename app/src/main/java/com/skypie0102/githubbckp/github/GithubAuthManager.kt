@@ -33,8 +33,6 @@ class GithubAuthManager @Inject constructor(
             ?: throw IOException("GitHub is not connected; enter a personal access token")
     }
 
-    suspend fun requireRecoveryAccessToken(): String = requireAccessToken()
-
     fun disconnect() {
         secureStore.remove(KEY_ACCESS_TOKEN)
         clearLegacyOauthState()
