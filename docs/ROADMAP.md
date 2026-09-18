@@ -572,3 +572,20 @@ Status: **implemented; CI/release pending**
 - [x] retain fetch/prune correctness and existing branch/tag/force-update tests;
 - [x] upgrade JGit from 6.10.1 to 7.8.0, which includes upstream Android detection around ProcessHandle PID lookup;
 - [x] bump release version to 0.3.2 / code 6.
+
+
+## 0.3.3 browsable archive
+
+Status: **implemented; CI/release pending**
+
+- [x] retain the authoritative bare Git mirror for full history and incremental updates;
+- [x] add `repository/` containing the configured default branch's normal files;
+- [x] regenerate the working-tree snapshot after every changed fetch;
+- [x] force one compatibility rebuild for older archives that do not yet contain `repository/`;
+- [x] keep old manifests readable by treating the new manifest field as optional;
+- [x] verify that archives promising a browsable checkout actually contain it;
+- [x] preserve empty repositories;
+- [x] replace stale checkout contents rather than layering updates onto the old snapshot;
+- [x] represent symlinks as safe regular files containing their link target;
+- [x] avoid duplicating large Git LFS payloads in the human-readable checkout;
+- [x] bump release version to 0.3.3 / code 7.
