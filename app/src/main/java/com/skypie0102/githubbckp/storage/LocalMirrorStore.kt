@@ -190,11 +190,21 @@ class LocalMirrorStore @Inject constructor(
         check(root.canWrite()) { "The selected backup folder is read-only" }
 
         val backups = root.findFile(ROOT_DIRECTORY)?.takeIf { it.isDirectory }
-            ?: if (create) root.createDirectory(ROOT_DIRECTORY) else null
-            ?: return null
+            ?: if (create) {
+                root.createDirectory(ROOT_DIRECTORY)
+                    ?: throw IOException("Could not create backup root directory")
+            } else {
+                return null
+            }
+
         val id = repositoryId.toString()
-        return backups.findFile(id)?.takeIf { it.isDirectory }
-            ?: if (create) backups.createDirectory(id) else null
+        backups.findFile(id)?.takeIf { it.isDirectory }?.let { return it }
+        return if (create) {
+            backups.createDirectory(id)
+                ?: throw IOException("Could not create repository backup directory")
+        } else {
+            null
+        }
     }
 
     private fun storedMirror(document: DocumentFile): StoredMirror {
