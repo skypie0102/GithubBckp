@@ -124,7 +124,45 @@ class HomeViewModel @Inject constructor(
         }
 
         if (githubAuthManager.isAuthenticated()) {
-            refreshRepositories(showMessage = false)
+            refreshRemoteHealth()
+        }
+    }
+
+    private fun refreshRemoteHealth() {
+        viewModelScope.launch {
+            val repositories = repositoryDao.getRepositories()
+                .filter { it.isAvailable && it.selectedForBackup }
+            if (repositories.isEmpty()) return@launch
+
+            val limiter = Semaphore(REPOSITORY_ACCESS_CHECK_CONCURRENCY)
+            val remoteStates = coroutineScope {
+                repositories.map { repository ->
+                    async(Dispatchers.IO) {
+                        limiter.withPermit {
+                            val remoteUrl = "https://github.com/${repository.owner}/${repository.name}.git"
+                            repository.githubId to githubRepositoryAccessVerifier.inspectRemote(remoteUrl)
+                        }
+                    }
+                }.awaitAll()
+            }
+
+            remoteRefsDigests = remoteStates.mapNotNull { (repositoryId, remoteState) ->
+                remoteState.refsDigest?.let { repositoryId to it }
+            }.toMap()
+
+            _state.update { current ->
+                current.copy(
+                    backupHealth = summarizeBackupHealth(
+                        repositories = current.repositories,
+                        mirrors = mirrorHealthState,
+                        scheduleEnabled = current.scheduleEnabled,
+                        cadence = current.scheduleCadence,
+                        nowEpochMs = System.currentTimeMillis(),
+                        globalBlockMessage = current.globalBackupBlockMessage(),
+                        remoteRefsDigests = remoteRefsDigests,
+                    ),
+                )
+            }
         }
     }
 
