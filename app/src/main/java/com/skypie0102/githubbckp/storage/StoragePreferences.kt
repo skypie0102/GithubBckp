@@ -14,17 +14,6 @@ class StoragePreferences @Inject constructor(
 ) {
     private val preferences = context.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
 
-    fun destination(): StorageDestination = runCatching {
-        StorageDestination.valueOf(
-            preferences.getString(KEY_DESTINATION, StorageDestination.GOOGLE_DRIVE.name)
-                ?: StorageDestination.GOOGLE_DRIVE.name,
-        )
-    }.getOrDefault(StorageDestination.GOOGLE_DRIVE)
-
-    fun setDestination(destination: StorageDestination) {
-        preferences.edit().putString(KEY_DESTINATION, destination.name).apply()
-    }
-
     fun documentTreeUri(): Uri? =
         preferences.getString(KEY_DOCUMENT_TREE_URI, null)?.let(Uri::parse)
 
@@ -32,20 +21,20 @@ class StoragePreferences @Inject constructor(
         DocumentFile.fromTreeUri(context, uri)?.name
     }
 
-    fun isDocumentTreeConfigured(): Boolean = documentTreeUri() != null
+    fun isConfigured(): Boolean = documentTreeUri() != null
 
     fun persistDocumentTree(uri: Uri) {
         val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
         context.contentResolver.takePersistableUriPermission(uri, flags)
-        preferences.edit()
-            .putString(KEY_DOCUMENT_TREE_URI, uri.toString())
-            .putString(KEY_DESTINATION, StorageDestination.DOCUMENT_TREE.name)
-            .apply()
+        preferences.edit().putString(KEY_DOCUMENT_TREE_URI, uri.toString()).apply()
+    }
+
+    fun clear() {
+        preferences.edit().remove(KEY_DOCUMENT_TREE_URI).apply()
     }
 
     private companion object {
-        const val PREFERENCES_NAME = "storage-destination"
-        const val KEY_DESTINATION = "destination"
+        const val PREFERENCES_NAME = "local-backup-storage"
         const val KEY_DOCUMENT_TREE_URI = "document-tree-uri"
     }
 }
