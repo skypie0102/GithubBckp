@@ -50,7 +50,8 @@ private fun BackupHealthSummary.headlineText(): String = when {
     else -> "$verifiedCount of $selectedCount selected repositories have a local mirror; $attentionCount need attention."
 }
 
-private fun RepositoryBackupHealth.detailText(): String = when (state) {
+private fun RepositoryBackupHealth.detailText(): String {
+    val status = when (state) {
     RepositoryBackupHealthState.HEALTHY -> buildString {
         append("healthy")
         latestCheckedAtEpochMs?.let { append(" • checked ${formatTimestamp(it)}") }
@@ -70,6 +71,24 @@ private fun RepositoryBackupHealth.detailText(): String = when (state) {
         ?.let { "blocked: $it" }
         ?: "backup is blocked"
     RepositoryBackupHealthState.NEVER_BACKED_UP -> "no verified local mirror yet"
+    }
+    return buildString {
+        append(status)
+        archiveSizeBytes?.takeIf { it > 0L }?.let {
+            append(" • ")
+            append(formatBytes(it))
+        }
+        sourceHead?.takeIf { it.isNotBlank() }?.let {
+            append(" • HEAD ")
+            append(it.take(10))
+        }
+    }
+}
+
+private fun formatBytes(bytes: Long): String {
+    val mib = bytes / (1024.0 * 1024.0)
+    val gib = bytes / (1024.0 * 1024.0 * 1024.0)
+    return if (gib >= 1.0) "%.2f GiB".format(gib) else "%.1f MiB".format(mib)
 }
 
 private fun formatTimestamp(epochMs: Long): String =
