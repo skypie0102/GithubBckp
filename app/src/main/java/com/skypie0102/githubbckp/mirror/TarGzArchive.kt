@@ -161,6 +161,29 @@ object TarGzArchive {
         throw IOException("Archive entry is missing: $entryName")
     }
 
+    @Throws(IOException::class)
+    fun expandedSizeBytes(input: InputStream): Long {
+        var total = 0L
+        openArchive(input) { tarInput ->
+            while (true) {
+                val entry = tarInput.nextTarEntry ?: break
+                if (entry.isSymbolicLink || entry.isLink) {
+                    throw IOException("Mirror archive contains an unsupported link: ${entry.name}")
+                }
+                if (!entry.isDirectory) {
+                    if (entry.size < 0L) {
+                        throw IOException("Mirror archive contains an invalid entry size: ${entry.name}")
+                    }
+                    total = safeAdd(total, entry.size)
+                }
+            }
+        }
+        return total
+    }
+
+    private fun safeAdd(left: Long, right: Long): Long =
+        if (Long.MAX_VALUE - left < right) Long.MAX_VALUE else left + right
+
     private inline fun <T> openArchive(
         archive: File,
         block: (TarArchiveInputStream) -> T,
