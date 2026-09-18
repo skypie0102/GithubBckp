@@ -3,14 +3,25 @@ package com.skypie0102.githubbckp.worker
 import android.content.Context
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
+import com.skypie0102.githubbckp.data.local.MirrorDao
+import com.skypie0102.githubbckp.data.local.MirrorEntity
 import com.skypie0102.githubbckp.data.local.RepositoryDao
+import com.skypie0102.githubbckp.data.local.RepositoryEntity
 import com.skypie0102.githubbckp.github.GithubAuthManager
+import com.skypie0102.githubbckp.github.GithubRepositoryAccessVerifier
+import com.skypie0102.githubbckp.mirror.MirrorAttemptStatus
 import com.skypie0102.githubbckp.storage.StoragePreferences
 import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
 import dagger.hilt.android.EntryPointAccessors
 import dagger.hilt.components.SingletonComponent
 import java.util.UUID
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 
 class ScheduledBackupWorker(
     appContext: Context,
@@ -26,14 +37,11 @@ class ScheduledBackupWorker(
         if (!settings.enabled) return Result.success()
         val scheduledRunId = UUID.randomUUID().toString()
 
-        val repositoryIds = dependencies.repositoryDao()
+        val repositories = dependencies.repositoryDao()
             .getAvailableRepositories()
-            .asSequence()
             .filter { it.selectedForBackup }
-            .map { it.githubId }
-            .toList()
 
-        if (repositoryIds.isEmpty()) {
+        if (repositories.isEmpty()) {
             schedulePreferences.saveRunStatus(
                 scheduledBackupRunStatus(
                     completedAtEpochMs = System.currentTimeMillis(),
@@ -45,7 +53,7 @@ class ScheduledBackupWorker(
         }
 
         val readiness = evaluateScheduledBackupReadiness(
-            githubAuthenticated = dependencies.githubAuthManager().isAuthenticated(),
+            githubAuthenticated = dependencies.githubAuthManager().hasValidAccessToken(),
             documentTreeConfigured = dependencies.storagePreferences().isDocumentTreeConfigured(),
             notificationsReady = dependencies.activeBackupNotificationManager().isReady(),
         )
@@ -53,7 +61,7 @@ class ScheduledBackupWorker(
             schedulePreferences.saveRunStatus(
                 scheduledBackupRunStatus(
                     completedAtEpochMs = System.currentTimeMillis(),
-                    repositoryCount = repositoryIds.size,
+                    repositoryCount = repositories.size,
                     scheduledRunId = scheduledRunId,
                     readiness = readiness,
                 ),
@@ -61,16 +69,83 @@ class ScheduledBackupWorker(
             return Result.success()
         }
 
-        dependencies.backupScheduler().enqueueScheduled(repositoryIds)
+        val access = verifyRepositoryReadAccess(
+            repositories = repositories,
+            verifier = dependencies.githubRepositoryAccessVerifier(),
+        )
+        val blocked = access.filterNot { it.readable }.map { it.repository }
+        val readable = access.filter { it.readable }.map { it.repository }
+
+        val blockedAt = System.currentTimeMillis()
+        blocked.forEach { repository ->
+            val previous = dependencies.mirrorDao().get(repository.githubId)
+            dependencies.mirrorDao().upsert(
+                (previous ?: MirrorEntity(repositoryId = repository.githubId)).copy(
+                    lastAttemptAtEpochMs = blockedAt,
+                    lastAttemptStatus = MirrorAttemptStatus.BLOCKED.name,
+                    lastWarning = REPOSITORY_ACCESS_MESSAGE,
+                    lastError = null,
+                ),
+            )
+        }
+
+        if (readable.isEmpty()) {
+            val blockedReadiness = ScheduledBackupReadiness(
+                ready = false,
+                blockReason = ScheduledBackupBlockReason.REPOSITORY_ACCESS_UNAVAILABLE,
+            )
+            schedulePreferences.saveRunStatus(
+                scheduledBackupRunStatus(
+                    completedAtEpochMs = System.currentTimeMillis(),
+                    repositoryCount = repositories.size,
+                    scheduledRunId = scheduledRunId,
+                    readiness = blockedReadiness,
+                ),
+            )
+            return Result.success()
+        }
+
+        dependencies.backupScheduler().enqueueScheduled(readable.map { it.githubId })
         schedulePreferences.saveRunStatus(
             scheduledBackupRunStatus(
                 completedAtEpochMs = System.currentTimeMillis(),
-                repositoryCount = repositoryIds.size,
+                repositoryCount = readable.size,
                 scheduledRunId = scheduledRunId,
                 readiness = readiness,
             ),
         )
         return Result.success()
+    }
+
+    private companion object {
+        const val ACCESS_CHECK_CONCURRENCY = 4
+        const val REPOSITORY_ACCESS_MESSAGE =
+            "Repository cannot be read with the current GitHub token. Check fine-grained repository access or organization approval."
+    }
+}
+
+internal data class RepositoryReadAccess(
+    val repository: RepositoryEntity,
+    val readable: Boolean,
+)
+
+internal suspend fun verifyRepositoryReadAccess(
+    repositories: List<RepositoryEntity>,
+    verifier: GithubRepositoryAccessVerifier,
+): List<RepositoryReadAccess> {
+    val limiter = Semaphore(4)
+    return coroutineScope {
+        repositories.map { repository ->
+            async(Dispatchers.IO) {
+                val remoteUrl = "https://github.com/${repository.owner}/${repository.name}.git"
+                RepositoryReadAccess(
+                    repository = repository,
+                    readable = limiter.withPermit {
+                        verifier.canReadRemote(remoteUrl)
+                    },
+                )
+            }
+        }.awaitAll()
     }
 }
 
@@ -78,9 +153,11 @@ class ScheduledBackupWorker(
 @InstallIn(SingletonComponent::class)
 interface ScheduledBackupWorkerDependencies {
     fun repositoryDao(): RepositoryDao
+    fun mirrorDao(): MirrorDao
     fun backupScheduler(): BackupScheduler
     fun schedulePreferences(): BackupSchedulePreferences
     fun githubAuthManager(): GithubAuthManager
+    fun githubRepositoryAccessVerifier(): GithubRepositoryAccessVerifier
     fun storagePreferences(): StoragePreferences
     fun activeBackupNotificationManager(): ActiveBackupNotificationManager
 }
