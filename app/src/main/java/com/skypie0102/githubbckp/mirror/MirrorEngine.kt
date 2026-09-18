@@ -58,7 +58,8 @@ internal fun mirrorRequiresRebuild(
         manifest.repositoryName != repository.name ||
         manifest.remoteUrl != repository.remoteUrl ||
         manifest.defaultBranch != repository.defaultBranch ||
-        manifest.isPrivate != repository.isPrivate
+        manifest.isPrivate != repository.isPrivate ||
+        !manifest.workingTreeIncluded
 
 /**
  * Replacement engine for the old multi-module ZIP backup pipeline.
@@ -119,6 +120,11 @@ class MirrorEngine @Inject constructor(
         val lfsIncluded = synchronizeLfs(repository, token, repositoryDirectory)
 
         onProgress(MirrorStage.OPTIMIZING)
+        RepositoryCheckoutExporter.export(
+            repositoryDirectory = repositoryDirectory,
+            defaultBranch = repository.defaultBranch,
+            destinationDirectory = File(staging, MirrorVerifier.WORKING_TREE_DIRECTORY),
+        )
         val refsDigest = GitMirrorOperations.localRefsDigest(repositoryDirectory)
         val manifest = manifest(
             repository = repository,
@@ -198,6 +204,11 @@ class MirrorEngine @Inject constructor(
         val lfsIncluded = synchronizeLfs(repository, token, repositoryDirectory)
 
         onProgress(MirrorStage.OPTIMIZING)
+        RepositoryCheckoutExporter.export(
+            repositoryDirectory = repositoryDirectory,
+            defaultBranch = repository.defaultBranch,
+            destinationDirectory = File(staging, MirrorVerifier.WORKING_TREE_DIRECTORY),
+        )
         val now = System.currentTimeMillis()
         val updatedManifest = manifest(
             repository = repository,
@@ -265,6 +276,7 @@ class MirrorEngine @Inject constructor(
         refsDigest = refsDigest,
         headCommit = headCommit,
         lfsIncluded = lfsIncluded,
+        workingTreeIncluded = true,
         appVersion = BuildConfig.VERSION_NAME,
     )
 
