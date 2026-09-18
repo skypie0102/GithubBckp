@@ -5,11 +5,12 @@ import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
 
 @Database(
-    entities = [RepositoryEntity::class, BackupEntity::class],
-    version = 9,
+    entities = [RepositoryEntity::class, BackupEntity::class, MirrorEntity::class],
+    version = 10,
     exportSchema = false,
 )
 @TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun backupDao(): BackupDao
+    abstract fun mirrorDao(): MirrorDao
 }
