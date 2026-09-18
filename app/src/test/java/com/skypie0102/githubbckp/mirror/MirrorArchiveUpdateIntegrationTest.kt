@@ -121,6 +121,13 @@ class MirrorArchiveUpdateIntegrationTest {
                 assertNotNull(repository.findRef("refs/heads/main"))
                 assertNull(repository.findRef("refs/heads/feature"))
             }
+            assertEquals(
+                "two",
+                File(
+                    finalExtract,
+                    MirrorVerifier.WORKING_TREE_DIRECTORY + "/README.md",
+                ).readText(),
+            )
         } finally {
             root.deleteRecursively()
         }
@@ -252,6 +259,11 @@ class MirrorArchiveUpdateIntegrationTest {
         createdAt: Long,
         updatedAt: Long,
     ) {
+        RepositoryCheckoutExporter.export(
+            repositoryDirectory = repository,
+            defaultBranch = "main",
+            destinationDirectory = File(staging, MirrorVerifier.WORKING_TREE_DIRECTORY),
+        )
         MirrorManifest(
             repositoryId = REPOSITORY_ID,
             repositoryOwner = "owner",
@@ -265,6 +277,7 @@ class MirrorArchiveUpdateIntegrationTest {
             refsDigest = GitMirrorOperations.localRefsDigest(repository),
             headCommit = GitMirrorOperations.headCommit(repository, "main"),
             lfsIncluded = false,
+            workingTreeIncluded = true,
             appVersion = "test",
         ).writeTo(File(staging, MirrorManifest.FILE_NAME))
     }
