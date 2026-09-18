@@ -64,7 +64,7 @@ class GithubAuthManager @Inject constructor(
         }
         return try {
             val code = connection.responseCode
-            if (code !in 200..299) {
+            if (!githubTokenStatusAccepted(code)) {
                 val error = connection.errorStream?.bufferedReader()?.use { it.readText() }.orEmpty()
                 throw IOException(
                     "GitHub rejected the personal access token (HTTP $code)" +
@@ -93,3 +93,7 @@ class GithubAuthManager @Inject constructor(
 }
 
 internal fun normalizePersonalAccessToken(value: String): String = value.trim()
+
+
+internal fun githubTokenStatusAccepted(statusCode: Int): Boolean =
+    statusCode in 200..299
