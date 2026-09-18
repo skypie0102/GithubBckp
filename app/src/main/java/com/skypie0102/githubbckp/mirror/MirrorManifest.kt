@@ -1,6 +1,7 @@
 package com.skypie0102.githubbckp.mirror
 
 import java.io.File
+import java.io.InputStream
 import org.json.JSONObject
 
 data class MirrorManifest(
@@ -51,6 +52,9 @@ data class MirrorManifest(
 
         fun readFromArchive(archive: File): MirrorManifest =
             fromJson(TarGzArchive.readTextEntry(archive, FILE_NAME))
+
+        fun readFromArchive(input: InputStream): MirrorManifest =
+            fromJson(TarGzArchive.readTextEntry(input, FILE_NAME))
 
         fun fromJson(text: String): MirrorManifest {
             val json = JSONObject(text)
