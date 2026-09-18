@@ -10,6 +10,8 @@ import com.skypie0102.githubbckp.backup.MirrorRestoreCoordinator
 import com.skypie0102.githubbckp.backup.MirrorRestoreRecord
 import com.skypie0102.githubbckp.data.local.BackupDao
 import com.skypie0102.githubbckp.data.local.BackupEntity
+import com.skypie0102.githubbckp.data.local.MirrorDao
+import com.skypie0102.githubbckp.data.local.MirrorEntity
 import com.skypie0102.githubbckp.data.local.RepositoryEntity
 import com.skypie0102.githubbckp.data.local.toEntity
 import com.skypie0102.githubbckp.github.GithubAuthManager
@@ -66,6 +68,7 @@ data class HomeUiState(
 @HiltViewModel
 class HomeViewModel @Inject constructor(
     private val backupDao: BackupDao,
+    private val mirrorDao: MirrorDao,
     private val githubAuthManager: GithubAuthManager,
     private val githubGateway: GithubGateway,
     private val driveAuthManager: GoogleDriveAuthManager,
@@ -75,7 +78,7 @@ class HomeViewModel @Inject constructor(
     private val githubRestorePublisher: GithubMirrorRestorePublisher,
 ) : ViewModel() {
     private val initialSchedule = backupScheduler.scheduleSettings()
-    private var backupHealthHistory: List<BackupEntity> = emptyList()
+    private var mirrorHealthState: List<MirrorEntity> = emptyList()
     private val _state = MutableStateFlow(
         HomeUiState(
             githubConnected = githubAuthManager.isAuthenticated(),
@@ -100,7 +103,7 @@ class HomeViewModel @Inject constructor(
                         repositories = repositories,
                         backupHealth = summarizeBackupHealth(
                             repositories = repositories,
-                            backups = backupHealthHistory,
+                            mirrors = mirrorHealthState,
                             scheduleEnabled = current.scheduleEnabled,
                             cadence = current.scheduleCadence,
                             nowEpochMs = System.currentTimeMillis(),
@@ -110,13 +113,13 @@ class HomeViewModel @Inject constructor(
             }
         }
         viewModelScope.launch {
-            backupDao.observeBackupHealthHistory().collect { backups ->
-                backupHealthHistory = backups
+            mirrorDao.observeAll().collect { mirrors ->
+                mirrorHealthState = mirrors
                 _state.update { current ->
                     current.copy(
                         backupHealth = summarizeBackupHealth(
                             repositories = current.repositories,
-                            backups = backups,
+                            mirrors = mirrors,
                             scheduleEnabled = current.scheduleEnabled,
                             cadence = current.scheduleCadence,
                             nowEpochMs = System.currentTimeMillis(),
@@ -229,7 +232,7 @@ class HomeViewModel @Inject constructor(
                 scheduleCadence = settings.cadence,
                 backupHealth = summarizeBackupHealth(
                     repositories = current.repositories,
-                    backups = backupHealthHistory,
+                    mirrors = mirrorHealthState,
                     scheduleEnabled = settings.enabled,
                     cadence = settings.cadence,
                     nowEpochMs = System.currentTimeMillis(),
