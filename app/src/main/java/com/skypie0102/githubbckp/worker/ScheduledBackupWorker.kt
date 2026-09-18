@@ -61,10 +61,7 @@ class ScheduledBackupWorker(
             return Result.success()
         }
 
-        dependencies.backupScheduler().enqueueScheduled(
-            repositoryIds = repositoryIds,
-            scheduledRunId = scheduledRunId,
-        )
+        dependencies.backupScheduler().enqueueScheduled(repositoryIds)
         schedulePreferences.saveRunStatus(
             scheduledBackupRunStatus(
                 completedAtEpochMs = System.currentTimeMillis(),
