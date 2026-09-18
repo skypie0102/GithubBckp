@@ -58,11 +58,17 @@ class MirrorSyncCoordinator @Inject constructor(
                     onProgress = onStage,
                 )
                 if (!needsRebuild) {
+                    val readableStorage = mirrorStore.ensureReadableLayout(
+                        repositoryId = repository.githubId,
+                        owner = repository.owner,
+                        name = repository.name,
+                    )
                     recordUnchanged(
                         repositoryId = repository.githubId,
                         manifest = storedManifest,
                         completedAt = System.currentTimeMillis(),
                         previousState = previousState,
+                        copiedMirror = readableStorage,
                     )
                     return true
                 }
