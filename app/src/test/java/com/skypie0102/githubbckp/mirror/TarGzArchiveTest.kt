@@ -51,6 +51,26 @@ class TarGzArchiveTest {
     }
 
     @Test
+    fun extract_rejectsTruncatedArchive() {
+        val root = Files.createTempDirectory("tar-gz-truncated").toFile()
+        try {
+            val source = File(root, "source").apply { mkdirs() }
+            File(source, "large.bin").writeBytes(ByteArray(64 * 1024) { index -> (index % 251).toByte() })
+            val archive = File(root, "mirror.tar.gz")
+            TarGzArchive.create(source, archive)
+
+            val bytes = archive.readBytes()
+            archive.writeBytes(bytes.copyOf(bytes.size / 2))
+
+            assertThrows(IOException::class.java) {
+                TarGzArchive.extract(archive, File(root, "destination"))
+            }
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
     fun extract_rejectsPathTraversal() {
         val root = Files.createTempDirectory("tar-gz-traversal").toFile()
         try {
