@@ -60,7 +60,7 @@ fun GithubTokenSetupOverlay(
                     style = MaterialTheme.typography.bodySmall,
                 )
                 Text(
-                    "Classic PAT: use public_repo for public repositories only, or repo if any private repository must be backed up.",
+                    "Classic PAT: no repository scope is needed for public-only backups; use repo if any private repository must be backed up.",
                     style = MaterialTheme.typography.bodySmall,
                 )
                 OutlinedTextField(
