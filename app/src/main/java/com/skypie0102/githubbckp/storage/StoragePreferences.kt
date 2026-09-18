@@ -21,7 +21,11 @@ class StoragePreferences @Inject constructor(
         DocumentFile.fromTreeUri(context, uri)?.name
     }
 
-    fun isDocumentTreeConfigured(): Boolean = documentTreeUri() != null
+    fun isDocumentTreeConfigured(): Boolean {
+        val uri = documentTreeUri() ?: return false
+        val root = DocumentFile.fromTreeUri(context, uri) ?: return false
+        return root.canRead() && root.canWrite()
+    }
 
     fun persistDocumentTree(uri: Uri) {
         val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
