@@ -9,6 +9,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.CancellationException
 
 enum class MirrorAttemptStatus {
     CHECKING,
@@ -115,6 +116,7 @@ class MirrorSyncCoordinator @Inject constructor(
             }
             true
         } catch (throwable: Throwable) {
+            if (throwable is CancellationException) throw throwable
             mirrorDao.upsert(
                 (mirrorDao.get(repository.githubId) ?: previousState ?: MirrorEntity(repository.githubId)).copy(
                     lastAttemptAtEpochMs = attemptAt,
