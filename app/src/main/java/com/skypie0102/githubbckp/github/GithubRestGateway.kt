@@ -4,14 +4,11 @@ import com.skypie0102.githubbckp.backup.RepositoryRef
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
-import java.net.URLEncoder
-import java.nio.charset.StandardCharsets
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
-import org.json.JSONObject
 
 @Singleton
 class GithubRestGateway @Inject constructor(
@@ -42,17 +39,15 @@ class GithubRestGateway @Inject constructor(
         }
     }
 
-    override suspend fun repositoryHasWiki(repository: RepositoryRef): Boolean = withContext(Dispatchers.IO) {
-        val token = authManager.requireAccessToken()
-        val url = "$API_BASE/repos/${path(repository.owner)}/${path(repository.name)}"
-        getJsonObject(url, token).optBoolean("has_wiki", false)
-    }
-
-    private fun getJsonObject(url: String, token: String): JSONObject =
-        JSONObject(getJsonResponse(url, token).body)
-
     private fun getJsonResponse(url: String, token: String): GithubJsonResponse {
-        val connection = openGet(url, token)
+        val connection = (URL(url).openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            connectTimeout = CONNECT_TIMEOUT_MS
+            readTimeout = READ_TIMEOUT_MS
+            setRequestProperty("Accept", "application/vnd.github+json")
+            setRequestProperty("X-GitHub-Api-Version", GITHUB_API_VERSION)
+            setRequestProperty("Authorization", "Bearer $token")
+        }
         return try {
             val code = connection.responseCode
             val text = (if (code in 200..299) connection.inputStream else connection.errorStream)
@@ -71,24 +66,12 @@ class GithubRestGateway @Inject constructor(
         }
     }
 
-    private fun openGet(url: String, token: String): HttpURLConnection =
-        (URL(url).openConnection() as HttpURLConnection).apply {
-            requestMethod = "GET"
-            connectTimeout = CONNECT_TIMEOUT_MS
-            readTimeout = READ_TIMEOUT_MS
-            setRequestProperty("Accept", "application/vnd.github+json")
-            setRequestProperty("X-GitHub-Api-Version", "2022-11-28")
-            setRequestProperty("Authorization", "Bearer $token")
-        }
-
-    private fun path(value: String): String =
-        URLEncoder.encode(value, StandardCharsets.UTF_8.name()).replace("+", "%20")
-
     private companion object {
         const val API_BASE = "https://api.github.com"
         const val PAGE_SIZE = 100
         const val CONNECT_TIMEOUT_MS = 30_000
         const val READ_TIMEOUT_MS = 120_000
+        const val GITHUB_API_VERSION = "2026-03-10"
     }
 }
 
