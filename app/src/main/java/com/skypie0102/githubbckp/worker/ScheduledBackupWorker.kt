@@ -69,9 +69,12 @@ class ScheduledBackupWorker(
             return Result.success()
         }
 
+        val verifier = dependencies.githubRepositoryAccessVerifier()
         val access = verifyRepositoryReadAccess(
             repositories = repositories,
-            verifier = dependencies.githubRepositoryAccessVerifier(),
+            accessCheck = { repository ->
+                verifier.canReadRemote(repositoryRemoteUrl(repository))
+            },
         )
         val blocked = access.filterNot { it.readable }.map { it.repository }
         val readable = access.filter { it.readable }.map { it.repository }
@@ -131,23 +134,25 @@ internal data class RepositoryReadAccess(
 
 internal suspend fun verifyRepositoryReadAccess(
     repositories: List<RepositoryEntity>,
-    verifier: GithubRepositoryAccessVerifier,
+    accessCheck: suspend (RepositoryEntity) -> Boolean,
 ): List<RepositoryReadAccess> {
     val limiter = Semaphore(4)
     return coroutineScope {
         repositories.map { repository ->
             async(Dispatchers.IO) {
-                val remoteUrl = "https://github.com/${repository.owner}/${repository.name}.git"
                 RepositoryReadAccess(
                     repository = repository,
                     readable = limiter.withPermit {
-                        verifier.canReadRemote(remoteUrl)
+                        accessCheck(repository)
                     },
                 )
             }
         }.awaitAll()
     }
 }
+
+internal fun repositoryRemoteUrl(repository: RepositoryEntity): String =
+    "https://github.com/${repository.owner}/${repository.name}.git"
 
 @EntryPoint
 @InstallIn(SingletonComponent::class)
