@@ -71,10 +71,12 @@ class LatestReleaseSyncCoordinator @Inject constructor(
             }.getOrNull()
             val stored = store.current(repository.githubId)
             if (
-                storedManifest != null &&
-                stored != null &&
-                storedManifest.releaseId == latest.id &&
-                storedManifest.updatedAt == latest.updatedAt
+                !latestReleaseNeedsBackup(
+                    storedManifest = storedManifest,
+                    latestReleaseId = latest.id,
+                    latestUpdatedAt = latest.updatedAt,
+                    storedArchiveExists = stored != null,
+                )
             ) {
                 dao.upsert(
                     (previous ?: LatestReleaseEntity(repository.githubId)).copy(
@@ -292,3 +294,15 @@ internal fun uniqueAssetFileName(
 
 private fun safeAdd(left: Long, right: Long): Long =
     if (Long.MAX_VALUE - left < right) Long.MAX_VALUE else left + right
+
+
+internal fun latestReleaseNeedsBackup(
+    storedManifest: LatestReleaseManifest?,
+    latestReleaseId: Long,
+    latestUpdatedAt: String,
+    storedArchiveExists: Boolean,
+): Boolean =
+    !storedArchiveExists ||
+        storedManifest == null ||
+        storedManifest.releaseId != latestReleaseId ||
+        storedManifest.updatedAt != latestUpdatedAt
