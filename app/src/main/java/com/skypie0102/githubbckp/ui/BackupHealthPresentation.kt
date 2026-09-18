@@ -36,8 +36,7 @@ data class BackupHealthSummary(
 ) {
     val selectedCount: Int = repositories.size
     val verifiedCount: Int = repositories.count {
-        it.state != RepositoryBackupHealthState.NEVER_BACKED_UP &&
-            it.state != RepositoryBackupHealthState.MISSING
+        (it.archiveSizeBytes ?: 0L) > 0L
     }
     val protectedCount: Int = repositories.count {
         it.state == RepositoryBackupHealthState.HEALTHY ||
@@ -63,9 +62,10 @@ fun summarizeBackupHealth(
     scheduleEnabled: Boolean,
     cadence: BackupCadence,
     nowEpochMs: Long,
+    globalBlockMessage: String? = null,
 ): BackupHealthSummary {
     val selectedRepositories = repositories
-        .filter { it.isAvailable && it.selectedForBackup }
+        .filter { it.selectedForBackup }
         .sortedWith(compareBy<RepositoryEntity> { it.owner.lowercase() }.thenBy { it.name.lowercase() })
     if (selectedRepositories.isEmpty()) return BackupHealthSummary()
 
@@ -81,11 +81,20 @@ fun summarizeBackupHealth(
                 (mirror?.archiveSizeBytes ?: 0L) > 0L
             val hasPreviouslySucceeded = mirror?.lastSuccessfulSyncAtEpochMs != null
 
+            val repositoryBlockMessage = if (!repository.isAvailable) {
+                "Repository cannot be read with the current GitHub token."
+            } else {
+                null
+            }
+            val effectiveBlockMessage = repositoryBlockMessage ?: globalBlockMessage
+
             val state = when {
-                mirror == null -> RepositoryBackupHealthState.NEVER_BACKED_UP
                 attemptStatus == MirrorAttemptStatus.CHECKING.name ||
                     attemptStatus == MirrorAttemptStatus.UPDATING.name ->
                     RepositoryBackupHealthState.UPDATING
+                effectiveBlockMessage != null ->
+                    RepositoryBackupHealthState.BLOCKED
+                mirror == null -> RepositoryBackupHealthState.NEVER_BACKED_UP
                 !hasPersistedMirror && hasPreviouslySucceeded ->
                     RepositoryBackupHealthState.MISSING
                 attemptStatus == MirrorAttemptStatus.BLOCKED.name ->
@@ -113,7 +122,7 @@ fun summarizeBackupHealth(
                 latestAttemptAtEpochMs = mirror?.lastAttemptAtEpochMs,
                 archiveSizeBytes = mirror?.archiveSizeBytes,
                 sourceHead = mirror?.lastSourceHead,
-                warningMessage = mirror?.lastWarning,
+                warningMessage = effectiveBlockMessage ?: mirror?.lastWarning,
                 errorMessage = mirror?.lastError,
             )
         },
