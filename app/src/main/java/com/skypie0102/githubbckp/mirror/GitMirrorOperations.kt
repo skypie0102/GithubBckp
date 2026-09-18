@@ -53,7 +53,10 @@ object GitMirrorOperations {
                     repository.updateRef(Constants.HEAD).link(defaultRef)
                 }
 
-                git.gc().call()
+                // Do not call JGit GC on Android. Older JGit GC code directly
+                // referenced java.lang.ProcessHandle, which Android does not
+                // provide. Fetch + prune is sufficient for mirror correctness;
+                // archive rebuild already discards temporary working state.
             }
         }
     }
