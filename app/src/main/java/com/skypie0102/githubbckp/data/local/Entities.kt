@@ -22,6 +22,29 @@ data class RepositoryEntity(
     @ColumnInfo(defaultValue = "1") val isAvailable: Boolean = true,
 )
 
+/**
+ * vNext one-to-one mirror state. repositoryId is both the GitHub repository ID
+ * and the primary key, so Room cannot represent two current mirrors for one
+ * repository.
+ */
+@Entity(tableName = "mirrors")
+data class MirrorEntity(
+    @PrimaryKey val repositoryId: Long,
+    val archiveUri: String? = null,
+    val archiveSizeBytes: Long? = null,
+    val archiveSha256: String? = null,
+    @ColumnInfo(defaultValue = "1") val formatVersion: Int = 1,
+    val lastCheckedAtEpochMs: Long? = null,
+    val lastSuccessfulSyncAtEpochMs: Long? = null,
+    val lastChangedAtEpochMs: Long? = null,
+    val lastAttemptAtEpochMs: Long? = null,
+    val lastAttemptStatus: String? = null,
+    val lastSourceHead: String? = null,
+    val lastRefsDigest: String? = null,
+    val lastError: String? = null,
+    val lastWarning: String? = null,
+)
+
 @Entity(
     tableName = "backups",
     indices = [Index(value = ["scheduledRunId"])],
