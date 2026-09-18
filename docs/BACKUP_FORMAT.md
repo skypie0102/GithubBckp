@@ -1,22 +1,24 @@
 # Backup format
 
-GithubBckp stores one logical `mirror.tar.gz` per GitHub repository ID.
+GithubBckp stores one logical `.tar.gz` mirror per GitHub repository ID, using the owner/repository name for human-readable storage.
 
 ## Directory layout
 
 ```text
 <selected document tree>/
 └── GitHub Backups/
-    └── <github-repository-id>/
-        └── mirror.tar.gz
+    └── <owner>--<repo>--<github-repository-id>/
+        └── <owner>--<repo>.tar.gz
 ```
 
 A transaction may temporarily contain:
 
 ```text
-mirror.tar.gz
-mirror.pending.tar.gz
+<owner>--<repo>.tar.gz
+<owner>--<repo>.pending.tar.gz
 ```
+
+The repository ID remains in the folder name so identity remains unambiguous across repository renames and duplicate-looking names.
 
 The pending file is never an intentional historical generation.
 
@@ -88,9 +90,9 @@ Before a pending archive can be committed:
 
 ## Update safety
 
-The durable `mirror.tar.gz` is never edited in place.
+The durable repository-named `.tar.gz` is never edited in place.
 
-The app rebuilds into app-private temporary storage, verifies the result, writes `mirror.pending.tar.gz`, re-hashes the persisted bytes, and only then retires the previous stable archive.
+The app rebuilds into app-private temporary storage, verifies the result, writes the repository-named `.pending.tar.gz`, re-hashes the persisted bytes, and only then retires the previous stable archive.
 
 If the app is interrupted with only a pending archive available, startup reconciliation re-verifies it before promotion.
 
