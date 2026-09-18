@@ -4,6 +4,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
 import android.content.pm.ServiceInfo
+import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.work.CoroutineWorker
 import androidx.work.ForegroundInfo
@@ -61,16 +62,18 @@ class RepositoryBackupWorker(
     }
 
     private fun createForegroundInfo(repositoryId: Long, owner: String, name: String): ForegroundInfo {
-        val notificationManager = applicationContext.getSystemService(NotificationManager::class.java)
-        notificationManager.createNotificationChannel(
-            NotificationChannel(
-                CHANNEL_ID,
-                "Active backups",
-                NotificationManager.IMPORTANCE_LOW,
-            ).apply {
-                description = "Long-running GitHub mirror backups"
-            },
-        )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val notificationManager = applicationContext.getSystemService(NotificationManager::class.java)
+            notificationManager.createNotificationChannel(
+                NotificationChannel(
+                    CHANNEL_ID,
+                    "Active backups",
+                    NotificationManager.IMPORTANCE_LOW,
+                ).apply {
+                    description = "Long-running GitHub mirror backups"
+                },
+            )
+        }
 
         val notification = NotificationCompat.Builder(applicationContext, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.stat_sys_upload)
@@ -81,11 +84,18 @@ class RepositoryBackupWorker(
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
 
-        return ForegroundInfo(
-            foregroundNotificationId(repositoryId),
-            notification,
-            ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
-        )
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            ForegroundInfo(
+                foregroundNotificationId(repositoryId),
+                notification,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
+            )
+        } else {
+            ForegroundInfo(
+                foregroundNotificationId(repositoryId),
+                notification,
+            )
+        }
     }
 
     companion object {
