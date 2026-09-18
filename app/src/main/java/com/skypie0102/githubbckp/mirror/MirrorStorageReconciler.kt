@@ -1,10 +1,50 @@
 package com.skypie0102.githubbckp.mirror
 
 import com.skypie0102.githubbckp.data.local.MirrorDao
+import com.skypie0102.githubbckp.data.local.MirrorEntity
 import com.skypie0102.githubbckp.storage.LocalMirrorStore
 import com.skypie0102.githubbckp.storage.StoragePreferences
 import javax.inject.Inject
 import javax.inject.Singleton
+
+internal enum class MirrorStorageState {
+    AVAILABLE,
+    MISSING,
+    UNAVAILABLE,
+}
+
+internal fun reconcileMirrorStorageState(
+    mirror: MirrorEntity,
+    storageState: MirrorStorageState,
+    unavailableMessage: String = MirrorStorageReconciler.STORAGE_UNAVAILABLE_MESSAGE,
+): MirrorEntity = when (storageState) {
+    MirrorStorageState.UNAVAILABLE -> mirror.copy(
+        lastAttemptStatus = MirrorAttemptStatus.BLOCKED.name,
+        lastWarning = unavailableMessage.take(MirrorStorageReconciler.MAX_WARNING_LENGTH),
+    )
+
+    MirrorStorageState.MISSING -> mirror.copy(
+        archiveUri = null,
+        archiveSizeBytes = null,
+        archiveSha256 = null,
+        lastWarning = null,
+    )
+
+    MirrorStorageState.AVAILABLE -> if (
+        mirror.lastWarning == MirrorStorageReconciler.STORAGE_UNAVAILABLE_MESSAGE
+    ) {
+        mirror.copy(
+            lastAttemptStatus = if (mirror.lastSuccessfulSyncAtEpochMs != null) {
+                MirrorAttemptStatus.COMPLETED.name
+            } else {
+                mirror.lastAttemptStatus
+            },
+            lastWarning = null,
+        )
+    } else {
+        mirror
+    }
+}
 
 @Singleton
 class MirrorStorageReconciler @Inject constructor(
@@ -19,9 +59,9 @@ class MirrorStorageReconciler @Inject constructor(
         if (!storagePreferences.isDocumentTreeConfigured()) {
             mirrors.forEach { mirror ->
                 mirrorDao.upsert(
-                    mirror.copy(
-                        lastAttemptStatus = MirrorAttemptStatus.BLOCKED.name,
-                        lastWarning = STORAGE_UNAVAILABLE_MESSAGE,
+                    reconcileMirrorStorageState(
+                        mirror = mirror,
+                        storageState = MirrorStorageState.UNAVAILABLE,
                     ),
                 )
             }
@@ -32,35 +72,23 @@ class MirrorStorageReconciler @Inject constructor(
             runCatching {
                 mirrorStore.reconcile(mirror.repositoryId)
                 val exists = mirrorStore.hasCurrentMirror(mirror.repositoryId)
-                if (!exists) {
-                    mirrorDao.upsert(
-                        mirror.copy(
-                            archiveUri = null,
-                            archiveSizeBytes = null,
-                            archiveSha256 = null,
-                            lastWarning = null,
-                        ),
-                    )
-                } else if (mirror.lastWarning == STORAGE_UNAVAILABLE_MESSAGE) {
-                    mirrorDao.upsert(
-                        mirror.copy(
-                            lastAttemptStatus = if (mirror.lastSuccessfulSyncAtEpochMs != null) {
-                                MirrorAttemptStatus.COMPLETED.name
-                            } else {
-                                mirror.lastAttemptStatus
-                            },
-                            lastWarning = null,
-                        ),
-                    )
-                }
+                mirrorDao.upsert(
+                    reconcileMirrorStorageState(
+                        mirror = mirror,
+                        storageState = if (exists) {
+                            MirrorStorageState.AVAILABLE
+                        } else {
+                            MirrorStorageState.MISSING
+                        },
+                    ),
+                )
             }.onFailure { throwable ->
                 mirrorDao.upsert(
-                    mirror.copy(
-                        lastAttemptStatus = MirrorAttemptStatus.BLOCKED.name,
-                        lastWarning = (
-                            throwable.message
-                                ?: "The selected backup folder is unavailable."
-                            ).take(MAX_WARNING_LENGTH),
+                    reconcileMirrorStorageState(
+                        mirror = mirror,
+                        storageState = MirrorStorageState.UNAVAILABLE,
+                        unavailableMessage = throwable.message
+                            ?: "The selected backup folder is unavailable.",
                     ),
                 )
             }
@@ -70,6 +98,6 @@ class MirrorStorageReconciler @Inject constructor(
     companion object {
         const val STORAGE_UNAVAILABLE_MESSAGE =
             "The selected local backup folder is unavailable or its permission was revoked."
-        private const val MAX_WARNING_LENGTH = 500
+        internal const val MAX_WARNING_LENGTH = 500
     }
 }
