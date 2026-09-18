@@ -60,6 +60,7 @@ class HomeViewModel @Inject constructor(
 ) : ViewModel() {
     private val initialSchedule = backupScheduler.scheduleSettings()
     private var mirrorHealthState: List<MirrorEntity> = emptyList()
+    private var remoteRefsDigests: Map<Long, String> = emptyMap()
 
     private val _state = MutableStateFlow(
         HomeUiState(
@@ -90,6 +91,7 @@ class HomeViewModel @Inject constructor(
                             cadence = current.scheduleCadence,
                             nowEpochMs = System.currentTimeMillis(),
                             globalBlockMessage = current.globalBackupBlockMessage(),
+                            remoteRefsDigests = remoteRefsDigests,
                         ),
                     )
                 }
@@ -108,6 +110,7 @@ class HomeViewModel @Inject constructor(
                             cadence = current.scheduleCadence,
                             nowEpochMs = System.currentTimeMillis(),
                             globalBlockMessage = current.globalBackupBlockMessage(),
+                            remoteRefsDigests = remoteRefsDigests,
                         ),
                     )
                 }
@@ -117,6 +120,48 @@ class HomeViewModel @Inject constructor(
         viewModelScope.launch {
             backupScheduler.observeScheduledRunStatus().collect { status ->
                 _state.update { it.copy(scheduledRunStatus = status) }
+            }
+        }
+
+        if (githubAuthManager.isAuthenticated()) {
+            refreshRemoteHealth()
+        }
+    }
+
+    private fun refreshRemoteHealth() {
+        viewModelScope.launch {
+            val repositories = repositoryDao.getRepositories()
+                .filter { it.isAvailable && it.selectedForBackup }
+            if (repositories.isEmpty()) return@launch
+
+            val limiter = Semaphore(REPOSITORY_ACCESS_CHECK_CONCURRENCY)
+            val remoteStates = coroutineScope {
+                repositories.map { repository ->
+                    async(Dispatchers.IO) {
+                        limiter.withPermit {
+                            val remoteUrl = "https://github.com/${repository.owner}/${repository.name}.git"
+                            repository.githubId to githubRepositoryAccessVerifier.inspectRemote(remoteUrl)
+                        }
+                    }
+                }.awaitAll()
+            }
+
+            remoteRefsDigests = remoteStates.mapNotNull { (repositoryId, remoteState) ->
+                remoteState.refsDigest?.let { repositoryId to it }
+            }.toMap()
+
+            _state.update { current ->
+                current.copy(
+                    backupHealth = summarizeBackupHealth(
+                        repositories = current.repositories,
+                        mirrors = mirrorHealthState,
+                        scheduleEnabled = current.scheduleEnabled,
+                        cadence = current.scheduleCadence,
+                        nowEpochMs = System.currentTimeMillis(),
+                        globalBlockMessage = current.globalBackupBlockMessage(),
+                        remoteRefsDigests = remoteRefsDigests,
+                    ),
+                )
             }
         }
     }
@@ -137,6 +182,7 @@ class HomeViewModel @Inject constructor(
                     cadence = refreshed.scheduleCadence,
                     nowEpochMs = System.currentTimeMillis(),
                     globalBlockMessage = refreshed.globalBackupBlockMessage(),
+                    remoteRefsDigests = remoteRefsDigests,
                 ),
             )
         }
@@ -144,36 +190,58 @@ class HomeViewModel @Inject constructor(
     }
 
     fun refreshRepositories() {
+        refreshRepositories(showMessage = true)
+    }
+
+    private fun refreshRepositories(showMessage: Boolean) {
         viewModelScope.launch {
             runBusy {
                 val existing = repositoryDao.getRepositories().associateBy { it.githubId }
                 val remote = githubGateway.listRepositories()
                 val limiter = Semaphore(REPOSITORY_ACCESS_CHECK_CONCURRENCY)
-                val verified = coroutineScope {
+                val inspected = coroutineScope {
                     remote.map { repository ->
                         async(Dispatchers.IO) {
                             limiter.withPermit {
+                                val remoteState = githubRepositoryAccessVerifier.inspect(repository)
                                 repository.toEntity(
                                     selectedForBackup = existing[repository.id]?.selectedForBackup ?: true,
-                                    isAvailable = githubRepositoryAccessVerifier.canRead(repository),
-                                )
+                                    isAvailable = remoteState.readable,
+                                ) to remoteState.refsDigest
                             }
                         }
                     }.awaitAll()
                 }
+                val verified = inspected.map { it.first }
+                remoteRefsDigests = inspected.mapNotNull { (repository, digest) ->
+                    digest?.let { repository.githubId to it }
+                }.toMap()
                 repositoryDao.upsertRepositories(verified)
 
                 val unavailableCount = verified.count { !it.isAvailable }
-                _state.update {
-                    it.copy(
+                _state.update { current ->
+                    current.copy(
                         githubConnected = true,
-                        message = buildString {
-                            append("Found ${remote.size} repositories")
-                            if (unavailableCount > 0) {
-                                append("; ")
-                                append(unavailableCount)
-                                append(" cannot be read with this token")
+                        backupHealth = summarizeBackupHealth(
+                            repositories = verified,
+                            mirrors = mirrorHealthState,
+                            scheduleEnabled = current.scheduleEnabled,
+                            cadence = current.scheduleCadence,
+                            nowEpochMs = System.currentTimeMillis(),
+                            globalBlockMessage = current.globalBackupBlockMessage(),
+                            remoteRefsDigests = remoteRefsDigests,
+                        ),
+                        message = if (showMessage) {
+                            buildString {
+                                append("Checked ${remote.size} repositories")
+                                if (unavailableCount > 0) {
+                                    append("; ")
+                                    append(unavailableCount)
+                                    append(" cannot be read with this token")
+                                }
                             }
+                        } else {
+                            current.message
                         },
                     )
                 }
@@ -182,12 +250,16 @@ class HomeViewModel @Inject constructor(
     }
 
     fun setRepositorySelected(repositoryId: Long, selected: Boolean) {
-        viewModelScope.launch { repositoryDao.setRepositorySelected(repositoryId, selected) }
+        viewModelScope.launch {
+            repositoryDao.setRepositorySelected(repositoryId, selected)
+            if (selected) refreshRemoteHealth()
+        }
     }
 
     fun setAllRepositoriesSelected(selected: Boolean) {
         viewModelScope.launch {
             repositoryDao.setAvailableRepositoriesSelected(selected)
+            if (selected) refreshRemoteHealth()
             _state.update {
                 it.copy(
                     message = if (selected) {
@@ -218,6 +290,7 @@ class HomeViewModel @Inject constructor(
                             cadence = refreshed.scheduleCadence,
                             nowEpochMs = System.currentTimeMillis(),
                             globalBlockMessage = refreshed.globalBackupBlockMessage(),
+                            remoteRefsDigests = remoteRefsDigests,
                         ),
                     )
                 }
@@ -321,6 +394,7 @@ class HomeViewModel @Inject constructor(
                     cadence = settings.cadence,
                     nowEpochMs = System.currentTimeMillis(),
                     globalBlockMessage = current.globalBackupBlockMessage(),
+                    remoteRefsDigests = remoteRefsDigests,
                 ),
                 message = message,
             )

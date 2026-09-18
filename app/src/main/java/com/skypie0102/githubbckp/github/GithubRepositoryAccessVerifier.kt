@@ -1,5 +1,6 @@
 package com.skypie0102.githubbckp.github
 
+import com.skypie0102.githubbckp.mirror.GitMirrorOperations
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.Dispatchers
@@ -8,20 +9,38 @@ import org.eclipse.jgit.api.Git
 import org.eclipse.jgit.transport.CredentialsProvider
 import org.eclipse.jgit.transport.UsernamePasswordCredentialsProvider
 
+data class GithubRepositoryRemoteState(
+    val readable: Boolean,
+    val refsDigest: String? = null,
+)
+
 @Singleton
 class GithubRepositoryAccessVerifier @Inject constructor(
     private val authManager: GithubAuthManager,
 ) {
-    suspend fun canRead(repository: GithubRepository): Boolean =
-        canReadRemote(repository.remoteUrl)
+    suspend fun inspect(repository: GithubRepository): GithubRepositoryRemoteState =
+        inspectRemote(repository.remoteUrl)
 
-    suspend fun canReadRemote(remoteUrl: String): Boolean = withContext(Dispatchers.IO) {
-        val token = authManager.requireAccessToken()
-        gitRemoteReadable(
-            remoteUrl = remoteUrl,
-            credentialsProvider = UsernamePasswordCredentialsProvider("x-access-token", token),
-        )
-    }
+    suspend fun inspectRemote(remoteUrl: String): GithubRepositoryRemoteState =
+        withContext(Dispatchers.IO) {
+            val token = authManager.requireAccessToken()
+            val credentials = UsernamePasswordCredentialsProvider("x-access-token", token)
+            runCatching {
+                GithubRepositoryRemoteState(
+                    readable = true,
+                    refsDigest = GitMirrorOperations.remoteRefsDigest(
+                        remoteUri = remoteUrl,
+                        credentialsProvider = credentials,
+                    ),
+                )
+            }.getOrElse {
+                GithubRepositoryRemoteState(readable = false)
+            }
+        }
+
+    suspend fun canRead(repository: GithubRepository): Boolean = inspect(repository).readable
+
+    suspend fun canReadRemote(remoteUrl: String): Boolean = inspectRemote(remoteUrl).readable
 }
 
 internal fun gitRemoteReadable(

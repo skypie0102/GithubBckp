@@ -545,3 +545,18 @@ The refactor is complete when:
 18. Room cannot represent multiple current mirrors for one repository;
 19. legacy ZIP migration cannot delete the only verified backup;
 20. CI build, tests, and lint are green.
+
+
+## 0.3.1 UX follow-up
+
+Status: **implemented; CI/release pending**
+
+- [x] move GitHub token, backup folder, notification settings, and automatic-update cadence to a dedicated Settings page;
+- [x] add a top-right settings cog on the Home top bar;
+- [x] compare live GitHub refs with each saved mirror refs digest;
+- [x] surface repositories with changed refs as **Update available**;
+- [x] group health into Updates available, Needs attention, and Up to date / active;
+- [x] annotate selected repository rows with concise mirror status;
+- [x] change the primary action to **Update N selected repositories** when all selected repositories already have mirrors;
+- [x] use **Back up & update** for mixed first-backup/update selections;
+- [x] passively refresh selected mirror freshness on launch without converting transient network failures into lost repository access.

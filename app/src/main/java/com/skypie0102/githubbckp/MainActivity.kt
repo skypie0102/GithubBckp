@@ -2,15 +2,19 @@ package com.skypie0102.githubbckp
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import com.skypie0102.githubbckp.github.GithubAuthManager
 import com.skypie0102.githubbckp.ui.GithubTokenSetupOverlay
 import com.skypie0102.githubbckp.ui.HomeScreen
 import com.skypie0102.githubbckp.ui.HomeViewModel
+import com.skypie0102.githubbckp.ui.SettingsScreen
 import com.skypie0102.githubbckp.ui.theme.GithubBckpTheme
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
@@ -26,26 +30,51 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             GithubBckpTheme {
-                val showTokenSetup = remember {
-                    mutableStateOf(!githubAuthManager.isAuthenticated())
-                }
-                if (showTokenSetup.value) {
-                    GithubTokenSetupOverlay(
-                        authManager = githubAuthManager,
-                        canCancel = githubAuthManager.isAuthenticated(),
-                        onCancel = { showTokenSetup.value = false },
-                        onConnected = {
-                            showTokenSetup.value = false
-                            recreate()
+                var page by remember {
+                    mutableStateOf(
+                        if (githubAuthManager.isAuthenticated()) {
+                            AppPage.HOME
+                        } else {
+                            AppPage.SETTINGS
                         },
                     )
-                } else {
-                    HomeScreen(
+                }
+                var showTokenSetup by remember { mutableStateOf(false) }
+
+                if (page == AppPage.SETTINGS) {
+                    BackHandler { page = AppPage.HOME }
+                }
+
+                when (page) {
+                    AppPage.HOME -> HomeScreen(
                         viewModel = viewModel,
-                        onManageGithubToken = { showTokenSetup.value = true },
+                        onOpenSettings = { page = AppPage.SETTINGS },
+                    )
+                    AppPage.SETTINGS -> SettingsScreen(
+                        viewModel = viewModel,
+                        onBack = { page = AppPage.HOME },
+                        onManageGithubToken = { showTokenSetup = true },
+                    )
+                }
+
+                if (showTokenSetup) {
+                    GithubTokenSetupOverlay(
+                        authManager = githubAuthManager,
+                        canCancel = true,
+                        onCancel = { showTokenSetup = false },
+                        onConnected = {
+                            showTokenSetup = false
+                            viewModel.refreshReadiness()
+                            viewModel.refreshRepositories()
+                        },
                     )
                 }
             }
         }
     }
+}
+
+private enum class AppPage {
+    HOME,
+    SETTINGS,
 }

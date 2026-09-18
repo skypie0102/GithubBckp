@@ -46,6 +46,42 @@ class BackupHealthPresentationTest {
     }
 
     @Test
+    fun remoteRefsMismatchMarksMirrorAsUpdateAvailable() {
+        val summary = summarizeBackupHealth(
+            repositories = listOf(repository(1L)),
+            mirrors = listOf(mirror(1L)),
+            scheduleEnabled = false,
+            cadence = BackupCadence.DAILY,
+            nowEpochMs = NOW,
+            remoteRefsDigests = mapOf(1L to "new-refs"),
+        )
+
+        assertEquals(
+            RepositoryBackupHealthState.UPDATE_AVAILABLE,
+            summary.repositories.single().state,
+        )
+        assertEquals(1, summary.updateAvailableCount)
+        assertEquals(listOf(1L), summary.updateAvailableRepositories.map { it.repositoryId })
+    }
+
+    @Test
+    fun matchingRemoteRefsKeepMirrorHealthy() {
+        val summary = summarizeBackupHealth(
+            repositories = listOf(repository(1L)),
+            mirrors = listOf(mirror(1L)),
+            scheduleEnabled = false,
+            cadence = BackupCadence.DAILY,
+            nowEpochMs = NOW,
+            remoteRefsDigests = mapOf(1L to "refs"),
+        )
+
+        assertEquals(
+            RepositoryBackupHealthState.HEALTHY,
+            summary.repositories.single().state,
+        )
+    }
+
+    @Test
     fun dailyScheduleMarksMirrorStaleAfterTwoCadenceWindowsWithoutCheck() {
         val summary = summarizeBackupHealth(
             repositories = listOf(repository(1L)),

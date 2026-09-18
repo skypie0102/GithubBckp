@@ -2,15 +2,16 @@ package com.skypie0102.githubbckp.ui
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Card
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import java.text.DateFormat
 import java.util.Date
@@ -20,10 +21,17 @@ fun BackupHealthCard(
     summary: BackupHealthSummary,
     modifier: Modifier = Modifier,
 ) {
+    val updateAvailable = summary.updateAvailableRepositories
+    val problems = summary.problemRepositories
+    val current = summary.repositories.filter {
+        it.state == RepositoryBackupHealthState.HEALTHY ||
+            it.state == RepositoryBackupHealthState.UPDATING
+    }
+
     Card(modifier = modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Text("Backup health", style = MaterialTheme.typography.titleMedium)
             Text(
@@ -31,58 +39,146 @@ fun BackupHealthCard(
                 style = MaterialTheme.typography.bodyMedium,
             )
 
-            if (summary.repositories.isNotEmpty()) {
-                Spacer(Modifier.height(2.dp))
-                summary.repositories.forEach { health ->
-                    Text(
-                        text = "${health.fullName} • ${health.detailText()}",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
+            if (updateAvailable.isNotEmpty()) {
+                HealthSection(
+                    title = "Updates available",
+                    count = updateAvailable.size,
+                    repositories = updateAvailable,
+                )
+            }
+
+            if (problems.isNotEmpty()) {
+                HealthSection(
+                    title = "Needs attention",
+                    count = problems.size,
+                    repositories = problems,
+                )
+            }
+
+            if (current.isNotEmpty()) {
+                HorizontalDivider()
+                Text(
+                    "Up to date / active (${current.size})",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                current.forEach { health ->
+                    HealthRow(health)
                 }
             }
         }
     }
 }
 
-private fun BackupHealthSummary.headlineText(): String = when {
-    selectedCount == 0 -> "No repositories are currently selected for backup."
-    attentionCount == 0 -> "$verifiedCount of $selectedCount selected repositories have a healthy local mirror."
-    else -> "$verifiedCount of $selectedCount selected repositories have a local mirror; $attentionCount need attention."
+@Composable
+private fun HealthSection(
+    title: String,
+    count: Int,
+    repositories: List<RepositoryBackupHealth>,
+) {
+    HorizontalDivider()
+    Text(
+        "$title ($count)",
+        style = MaterialTheme.typography.labelLarge,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    repositories.forEach { health ->
+        HealthRow(health)
+    }
 }
 
-private fun RepositoryBackupHealth.detailText(): String {
-    val status = when (state) {
+@Composable
+private fun HealthRow(
+    health: RepositoryBackupHealth,
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        Row(modifier = Modifier.fillMaxWidth()) {
+            Text(
+                health.fullName,
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                health.shortStatus(),
+                style = MaterialTheme.typography.labelMedium,
+                color = when (health.state) {
+                    RepositoryBackupHealthState.UPDATE_AVAILABLE ->
+                        MaterialTheme.colorScheme.primary
+                    RepositoryBackupHealthState.FAILED,
+                    RepositoryBackupHealthState.MISSING,
+                    RepositoryBackupHealthState.BLOCKED ->
+                        MaterialTheme.colorScheme.error
+                    else -> MaterialTheme.colorScheme.onSurfaceVariant
+                },
+            )
+        }
+        Text(
+            health.supportingText(),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+private fun BackupHealthSummary.headlineText(): String = when {
+    selectedCount == 0 -> "No repositories are selected."
+    updateAvailableCount > 0 -> {
+        val noun = if (updateAvailableCount == 1) "repository has" else "repositories have"
+        "$updateAvailableCount $noun changes on GitHub and should be updated."
+    }
+    problemRepositories.isNotEmpty() -> {
+        val count = problemRepositories.size
+        val noun = if (count == 1) "repository needs" else "repositories need"
+        "$count $noun attention."
+    }
+    else -> "All $selectedCount selected repositories are up to date."
+}
+
+private fun RepositoryBackupHealth.shortStatus(): String = when (state) {
+    RepositoryBackupHealthState.HEALTHY -> "Up to date"
+    RepositoryBackupHealthState.UPDATE_AVAILABLE -> "Update available"
+    RepositoryBackupHealthState.UPDATING -> "Updating"
+    RepositoryBackupHealthState.FAILED -> "Failed"
+    RepositoryBackupHealthState.STALE -> "Check overdue"
+    RepositoryBackupHealthState.MISSING -> "Missing"
+    RepositoryBackupHealthState.BLOCKED -> "Blocked"
+    RepositoryBackupHealthState.NEVER_BACKED_UP -> "Not backed up"
+}
+
+private fun RepositoryBackupHealth.supportingText(): String = when (state) {
     RepositoryBackupHealthState.HEALTHY -> buildString {
-        append("healthy")
-        latestCheckedAtEpochMs?.let { append(" • checked ${formatTimestamp(it)}") }
-        latestChangedAtEpochMs?.let { append(" • changed ${formatTimestamp(it)}") }
-    }
-    RepositoryBackupHealthState.UPDATING -> "update in progress"
-    RepositoryBackupHealthState.FAILED -> errorMessage
-        ?.takeIf { it.isNotBlank() }
-        ?.let { "latest update failed: $it" }
-        ?: "latest update failed"
-    RepositoryBackupHealthState.STALE -> latestCheckedAtEpochMs
-        ?.let { "last checked ${formatTimestamp(it)}; scheduled check is overdue" }
-        ?: "scheduled check is overdue"
-    RepositoryBackupHealthState.MISSING -> "mirror metadata exists but mirror.tar.gz is missing"
-    RepositoryBackupHealthState.BLOCKED -> warningMessage
-        ?.takeIf { it.isNotBlank() }
-        ?.let { "blocked: $it" }
-        ?: "backup is blocked"
-    RepositoryBackupHealthState.NEVER_BACKED_UP -> "no verified local mirror yet"
-    }
-    return buildString {
-        append(status)
+        latestCheckedAtEpochMs?.let { append("Last mirror check ${formatTimestamp(it)}") }
         archiveSizeBytes?.takeIf { it > 0L }?.let {
-            append(" • ")
+            if (isNotEmpty()) append(" • ")
             append(formatBytes(it))
         }
         sourceHead?.takeIf { it.isNotBlank() }?.let {
-            append(" • HEAD ")
-            append(it.take(10))
+            if (isNotEmpty()) append(" • ")
+            append("HEAD ${it.take(10)}")
         }
+        if (isEmpty()) append("Verified local mirror")
     }
+    RepositoryBackupHealthState.UPDATE_AVAILABLE ->
+        "GitHub refs differ from the saved mirror. Run an update to bring it current."
+    RepositoryBackupHealthState.UPDATING -> "Mirror update is currently running."
+    RepositoryBackupHealthState.FAILED -> errorMessage
+        ?.takeIf { it.isNotBlank() }
+        ?.let { "Latest update failed: $it" }
+        ?: "The latest update failed; the previous verified mirror is retained."
+    RepositoryBackupHealthState.STALE -> latestCheckedAtEpochMs
+        ?.let { "Last checked ${formatTimestamp(it)}; the scheduled check is overdue." }
+        ?: "The scheduled mirror check is overdue."
+    RepositoryBackupHealthState.MISSING ->
+        "The app has mirror metadata, but the archive is missing from storage."
+    RepositoryBackupHealthState.BLOCKED -> warningMessage
+        ?.takeIf { it.isNotBlank() }
+        ?: "Backup is blocked by a setup or access problem."
+    RepositoryBackupHealthState.NEVER_BACKED_UP ->
+        "No verified local mirror exists yet."
 }
 
 private fun formatBytes(bytes: Long): String {
