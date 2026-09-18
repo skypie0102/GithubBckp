@@ -117,6 +117,93 @@ class LocalMirrorStore @Inject constructor(
             null
         }
 
+    suspend fun ensureReadableLayout(
+        repositoryId: Long,
+        owner: String,
+        name: String,
+    ): StoredMirror? = withContext(Dispatchers.IO) {
+        val names = mirrorStorageNames(repositoryId, owner, name)
+        val sourceFolder = repositoryFolders(repositoryId).firstOrNull { folder ->
+            reconcileFolder(repositoryId, folder)
+            currentMirrorDocument(folder) != null
+        } ?: return@withContext null
+        val sourceDocument = currentMirrorDocument(sourceFolder) ?: return@withContext null
+        val source = storedMirror(sourceDocument)
+
+        val targetFolder = namedRepositoryFolder(names, create = true)
+            ?: throw IOException("Could not create readable repository backup folder")
+        reconcileFolder(repositoryId, targetFolder)
+
+        if (sourceFolder.uri == targetFolder.uri) {
+            if (sourceDocument.name != names.stableFileName) {
+                val existingReadable = targetFolder.findFile(names.stableFileName)
+                if (existingReadable != null) return@withContext storedMirror(existingReadable)
+                check(sourceDocument.renameTo(names.stableFileName)) {
+                    "Could not rename mirror archive to a readable filename"
+                }
+                val renamed = targetFolder.findFile(names.stableFileName)
+                    ?: throw IOException("Renamed mirror archive could not be found")
+                return@withContext storedMirror(renamed)
+            }
+            return@withContext source
+        }
+
+        stableMirrorDocument(targetFolder)?.let { readable ->
+            val readableMirror = storedMirror(readable)
+            if (readableMirror.sha256.equals(source.sha256, ignoreCase = true)) {
+                deleteMirrorFiles(sourceFolder)
+                if (sourceFolder.listFiles().isEmpty()) sourceFolder.delete()
+                return@withContext readableMirror
+            }
+            readable.delete()
+        }
+        pendingMirrorDocument(targetFolder)?.delete()
+
+        val pending = targetFolder.createFile(MIME_TYPE, names.pendingFileName)
+            ?: throw IOException("Could not create readable mirror candidate")
+        try {
+            val digest = MessageDigest.getInstance("SHA-256")
+            val input = context.contentResolver.openInputStream(sourceDocument.uri)
+                ?: throw IOException("Stored mirror can no longer be opened")
+            val output = context.contentResolver.openOutputStream(pending.uri, "wt")
+                ?: throw IOException("Could not open readable mirror candidate")
+            input.buffered(BUFFER_SIZE).use { sourceInput ->
+                output.buffered(BUFFER_SIZE).use { targetOutput ->
+                    val buffer = ByteArray(BUFFER_SIZE)
+                    while (true) {
+                        val count = sourceInput.read(buffer)
+                        if (count < 0) break
+                        if (count > 0) {
+                            targetOutput.write(buffer, 0, count)
+                            digest.update(buffer, 0, count)
+                        }
+                    }
+                }
+            }
+
+            val copiedSha = digest.digest().joinToString("") { byte ->
+                "%02x".format(byte.toInt() and 0xff)
+            }
+            check(copiedSha.equals(source.sha256, ignoreCase = true)) {
+                "Readable mirror migration checksum verification failed"
+            }
+            check(pending.renameTo(names.stableFileName)) {
+                "Could not promote readable mirror archive"
+            }
+
+            val migrated = targetFolder.findFile(names.stableFileName)
+                ?: throw IOException("Readable mirror archive could not be found")
+            val result = storedMirror(migrated)
+
+            deleteMirrorFiles(sourceFolder)
+            if (sourceFolder.listFiles().isEmpty()) sourceFolder.delete()
+            result
+        } catch (throwable: Throwable) {
+            runCatching { pending.delete() }
+            throw throwable
+        }
+    }
+
     suspend fun commit(
         repositoryId: Long,
         owner: String,
