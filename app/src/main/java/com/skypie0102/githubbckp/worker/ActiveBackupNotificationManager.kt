@@ -24,20 +24,24 @@ class ActiveBackupNotificationManager @Inject constructor(
 ) {
     fun isReady(): Boolean {
         ensureChannel()
-        if (
-            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
-            PackageManager.PERMISSION_GRANTED
-        ) {
-            return false
-        }
-        if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) return false
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        val permissionGranted =
+            Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+                ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) ==
+                PackageManager.PERMISSION_GRANTED
+        val appNotificationsEnabled =
+            NotificationManagerCompat.from(context).areNotificationsEnabled()
+        val channelEnabled = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = context.getSystemService(NotificationManager::class.java)
                 .getNotificationChannel(CHANNEL_ID)
-            if (channel == null || channel.importance == NotificationManager.IMPORTANCE_NONE) return false
+            channel != null && channel.importance != NotificationManager.IMPORTANCE_NONE
+        } else {
+            true
         }
-        return true
+        return activeBackupNotificationsReady(
+            permissionGranted = permissionGranted,
+            appNotificationsEnabled = appNotificationsEnabled,
+            channelEnabled = channelEnabled,
+        )
     }
 
     fun foregroundInfo(
@@ -128,3 +132,10 @@ internal fun backupProgressPercent(completedBytes: Long, totalBytes: Long): Int?
     if (completedBytes >= totalBytes) return 100
     return ((completedBytes * 100L) / totalBytes).toInt().coerceIn(0, 99)
 }
+
+
+internal fun activeBackupNotificationsReady(
+    permissionGranted: Boolean,
+    appNotificationsEnabled: Boolean,
+    channelEnabled: Boolean,
+): Boolean = permissionGranted && appNotificationsEnabled && channelEnabled
