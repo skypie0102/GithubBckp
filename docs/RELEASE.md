@@ -6,11 +6,11 @@ Persistent signing secrets are optional. When they are absent, the workflow gene
 
 ## Release artifact
 
-For app version `0.2.0`, the release workflow produces:
+For app version `<version>`, the release workflow produces:
 
 ```text
-githubbckp-v0.2.0.apk
-githubbckp-v0.2.0.apk.sha256
+githubbckp-v<version>.apk
+githubbckp-v<version>.apk.sha256
 ```
 
 The APK is a minified/resource-shrunk release build, not a debug APK.
