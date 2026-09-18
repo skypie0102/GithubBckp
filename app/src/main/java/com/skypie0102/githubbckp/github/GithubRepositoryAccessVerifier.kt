@@ -19,6 +19,9 @@ class GithubRepositoryAccessVerifier @Inject constructor(
     private val authManager: GithubAuthManager,
 ) {
     suspend fun inspect(repository: GithubRepository): GithubRepositoryRemoteState =
+        inspectRemote(repository.remoteUrl)
+
+    suspend fun inspectRemote(remoteUrl: String): GithubRepositoryRemoteState =
         withContext(Dispatchers.IO) {
             val token = authManager.requireAccessToken()
             val credentials = UsernamePasswordCredentialsProvider("x-access-token", token)
@@ -26,7 +29,7 @@ class GithubRepositoryAccessVerifier @Inject constructor(
                 GithubRepositoryRemoteState(
                     readable = true,
                     refsDigest = GitMirrorOperations.remoteRefsDigest(
-                        remoteUri = repository.remoteUrl,
+                        remoteUri = remoteUrl,
                         credentialsProvider = credentials,
                     ),
                 )
@@ -37,13 +40,7 @@ class GithubRepositoryAccessVerifier @Inject constructor(
 
     suspend fun canRead(repository: GithubRepository): Boolean = inspect(repository).readable
 
-    suspend fun canReadRemote(remoteUrl: String): Boolean = withContext(Dispatchers.IO) {
-        val token = authManager.requireAccessToken()
-        gitRemoteReadable(
-            remoteUrl = remoteUrl,
-            credentialsProvider = UsernamePasswordCredentialsProvider("x-access-token", token),
-        )
-    }
+    suspend fun canReadRemote(remoteUrl: String): Boolean = inspectRemote(remoteUrl).readable
 }
 
 internal fun gitRemoteReadable(
