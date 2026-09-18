@@ -14,60 +14,36 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
-import kotlinx.coroutines.flow.Flow
 
 @Singleton
 class BackupScheduler @Inject constructor(
     @ApplicationContext context: Context,
-    private val schedulePreferences: BackupSchedulePreferences,
-    private val backupProblemNotifier: BackupProblemNotifier,
+    private val preferences: BackupSchedulePreferences,
 ) {
     private val workManager = WorkManager.getInstance(context)
 
-    fun enqueue(repositoryIds: List<Long>) {
-        enqueueWithConstraints(
-            repositoryIds = repositoryIds,
-            origin = BackupOrigin.MANUAL,
-            scheduledRunId = null,
-            constraints = manualConstraints(),
-            originTag = TAG_MANUAL,
-        )
+    fun settings(): BackupScheduleSettings = preferences.settings()
+
+    fun enqueueManual(repositoryIds: List<Long>) {
+        repositoryIds.forEach { enqueueRepository(it, BackupOrigin.MANUAL) }
     }
 
-    fun enqueueScheduled(
-        repositoryIds: List<Long>,
-        scheduledRunId: String,
-    ) {
-        enqueueWithConstraints(
-            repositoryIds = repositoryIds,
-            origin = BackupOrigin.SCHEDULED,
-            scheduledRunId = scheduledRunId,
-            constraints = scheduledConstraints(),
-            originTag = TAG_SCHEDULED,
-        )
+    fun enqueueScheduled(repositoryIds: List<Long>) {
+        repositoryIds.forEach { enqueueRepository(it, BackupOrigin.SCHEDULED) }
     }
-
-    fun scheduleSettings(): BackupScheduleSettings = schedulePreferences.settings()
-
-    fun scheduledRunStatus(): ScheduledBackupRunStatus? = schedulePreferences.runStatus()
-
-    fun observeScheduledRunStatus(): Flow<ScheduledBackupRunStatus?> = schedulePreferences.observeRunStatus()
 
     fun updateSchedule(settings: BackupScheduleSettings) {
-        schedulePreferences.save(settings)
-        applySchedule(settings)
+        preferences.save(settings)
+        apply(settings)
     }
 
     fun reconcileSchedule() {
-        schedulePreferences.ensureEnabledAt()
-        applySchedule(schedulePreferences.settings())
+        apply(preferences.settings())
     }
 
-    private fun applySchedule(settings: BackupScheduleSettings) {
+    private fun apply(settings: BackupScheduleSettings) {
         if (!settings.enabled) {
             workManager.cancelUniqueWork(SCHEDULE_WORK_NAME)
-            workManager.cancelUniqueWork(HEALTH_CHECK_WORK_NAME)
-            backupProblemNotifier.clearOverdueBackupState()
             return
         }
 
@@ -77,7 +53,6 @@ class BackupScheduler @Inject constructor(
         )
             .setInitialDelay(settings.cadence.repeatHours, TimeUnit.HOURS)
             .setConstraints(scheduledConstraints())
-            .addTag(TAG_SCHEDULE_CONTROLLER)
             .build()
 
         workManager.enqueueUniquePeriodicWork(
@@ -85,73 +60,40 @@ class BackupScheduler @Inject constructor(
             ExistingPeriodicWorkPolicy.UPDATE,
             request,
         )
+    }
 
-        val healthCheckRequest = PeriodicWorkRequestBuilder<BackupHealthCheckWorker>(
-            HEALTH_CHECK_REPEAT_HOURS,
-            TimeUnit.HOURS,
-        )
-            .setInitialDelay(HEALTH_CHECK_INITIAL_DELAY_HOURS, TimeUnit.HOURS)
-            .addTag(TAG_HEALTH_CHECK)
+    private fun enqueueRepository(repositoryId: Long, origin: BackupOrigin) {
+        val request = OneTimeWorkRequestBuilder<RepositoryBackupWorker>()
+            .setConstraints(
+                Constraints.Builder()
+                    .setRequiredNetworkType(NetworkType.CONNECTED)
+                    .build(),
+            )
+            .setInputData(
+                workDataOf(
+                    RepositoryBackupWorker.KEY_REPOSITORY_ID to repositoryId,
+                    RepositoryBackupWorker.KEY_BACKUP_ORIGIN to origin.name,
+                ),
+            )
+            .addTag("mirror-backup")
+            .addTag("mirror-backup-$repositoryId")
             .build()
 
-        workManager.enqueueUniquePeriodicWork(
-            HEALTH_CHECK_WORK_NAME,
-            ExistingPeriodicWorkPolicy.UPDATE,
-            healthCheckRequest,
+        workManager.enqueueUniqueWork(
+            "mirror-backup-$repositoryId",
+            ExistingWorkPolicy.KEEP,
+            request,
         )
     }
 
-    private fun enqueueWithConstraints(
-        repositoryIds: List<Long>,
-        origin: BackupOrigin,
-        scheduledRunId: String?,
-        constraints: Constraints,
-        originTag: String,
-    ) {
-        repositoryIds.forEach { repositoryId ->
-            val request = OneTimeWorkRequestBuilder<RepositoryBackupWorker>()
-                .setConstraints(constraints)
-                .setInputData(
-                    workDataOf(
-                        RepositoryBackupWorker.KEY_REPOSITORY_ID to repositoryId,
-                        RepositoryBackupWorker.KEY_BACKUP_ORIGIN to origin.name,
-                        RepositoryBackupWorker.KEY_SCHEDULED_RUN_ID to scheduledRunId,
-                    ),
-                )
-                .addTag("backup-$repositoryId")
-                .addTag(originTag)
-                .build()
-
-            workManager.enqueueUniqueWork(
-                "backup-$repositoryId-mirror",
-                ExistingWorkPolicy.KEEP,
-                request,
-            )
-        }
-    }
-
-    private fun manualConstraints(): Constraints = Constraints.Builder()
-        // Manual backups are explicit user actions. Requiring "battery not low"
-        // or "storage not low" lets WorkManager stop a backup mid-clone when
-        // Android crosses those thresholds. Keep only the network prerequisite;
-        // actual storage exhaustion will surface as a concrete backup error.
-        .setRequiredNetworkType(NetworkType.CONNECTED)
-        .build()
-
-    companion object {
-        private const val SCHEDULE_WORK_NAME = "scheduled-repository-backups"
-        private const val HEALTH_CHECK_WORK_NAME = "backup-health-notification-check"
-        private const val TAG_MANUAL = "backup-origin-manual"
-        private const val TAG_SCHEDULED = "backup-origin-scheduled"
-        private const val TAG_SCHEDULE_CONTROLLER = "backup-schedule-controller"
-        private const val TAG_HEALTH_CHECK = "backup-health-check"
-        private const val HEALTH_CHECK_REPEAT_HOURS = 24L
-        private const val HEALTH_CHECK_INITIAL_DELAY_HOURS = 1L
-
-        fun scheduledConstraints(): Constraints = Constraints.Builder()
-            .setRequiredNetworkType(NetworkType.UNMETERED)
+    private fun scheduledConstraints(): Constraints =
+        Constraints.Builder()
+            .setRequiredNetworkType(NetworkType.CONNECTED)
             .setRequiresBatteryNotLow(true)
             .setRequiresStorageNotLow(true)
             .build()
+
+    private companion object {
+        const val SCHEDULE_WORK_NAME = "scheduled-local-mirror-backups"
     }
 }
