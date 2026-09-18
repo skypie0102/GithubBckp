@@ -23,33 +23,37 @@ data class MirrorManifest(
 
     fun writeTo(file: File) {
         file.parentFile?.mkdirs()
-        file.writeText(
-            JSONObject()
-                .put("formatVersion", formatVersion)
-                .put("repositoryId", repositoryId)
-                .put("repositoryOwner", repositoryOwner)
-                .put("repositoryName", repositoryName)
-                .put("repositoryFullName", repositoryFullName)
-                .put("remoteUrl", remoteUrl)
-                .put("defaultBranch", defaultBranch)
-                .put("private", isPrivate)
-                .put("createdAtEpochMs", createdAtEpochMs)
-                .put("updatedAtEpochMs", updatedAtEpochMs)
-                .put("lastSuccessfulFetchAtEpochMs", lastSuccessfulFetchAtEpochMs)
-                .put("refsDigest", refsDigest)
-                .put("headCommit", headCommit ?: JSONObject.NULL)
-                .put("lfsIncluded", lfsIncluded)
-                .put("appVersion", appVersion)
-                .toString(2),
-        )
+        file.writeText(toJson().toString(2))
     }
+
+    fun toJson(): JSONObject = JSONObject()
+        .put("formatVersion", formatVersion)
+        .put("repositoryId", repositoryId)
+        .put("repositoryOwner", repositoryOwner)
+        .put("repositoryName", repositoryName)
+        .put("repositoryFullName", repositoryFullName)
+        .put("remoteUrl", remoteUrl)
+        .put("defaultBranch", defaultBranch)
+        .put("private", isPrivate)
+        .put("createdAtEpochMs", createdAtEpochMs)
+        .put("updatedAtEpochMs", updatedAtEpochMs)
+        .put("lastSuccessfulFetchAtEpochMs", lastSuccessfulFetchAtEpochMs)
+        .put("refsDigest", refsDigest)
+        .put("headCommit", headCommit ?: JSONObject.NULL)
+        .put("lfsIncluded", lfsIncluded)
+        .put("appVersion", appVersion)
 
     companion object {
         const val FILE_NAME = "manifest.json"
         const val CURRENT_FORMAT_VERSION = 1
 
-        fun readFrom(file: File): MirrorManifest {
-            val json = JSONObject(file.readText())
+        fun readFrom(file: File): MirrorManifest = fromJson(file.readText())
+
+        fun readFromArchive(archive: File): MirrorManifest =
+            fromJson(TarGzArchive.readTextEntry(archive, FILE_NAME))
+
+        fun fromJson(text: String): MirrorManifest {
+            val json = JSONObject(text)
             val formatVersion = json.getInt("formatVersion")
             require(formatVersion == CURRENT_FORMAT_VERSION) {
                 "Unsupported mirror format version: $formatVersion"
