@@ -157,7 +157,7 @@ Status: **complete**
 - [x] Reopen extracted `repository.git` with JGit and require a bare repository.
 - [x] Add archive and manifest unit tests.
 - [x] Validate every reachable LFS object during full mirror verification.
-- [ ] Add corruption/truncation tests.
+- [x] Add corruption/truncation tests.
 
 Exit criteria:
 
@@ -168,7 +168,7 @@ Exit criteria:
 
 ## Phase 2 — Incremental Git mirror engine
 
-Status: **hardening**
+Status: **complete; broader device hardening continues in Phase 11**
 
 - [x] Add pure `GitMirrorOperations`.
 - [x] Mirror clone semantics.
@@ -182,7 +182,7 @@ Status: **hardening**
 - [x] Add `MirrorEngine.update`.
 - [x] Skip extraction/rebuild when refs and repository metadata are unchanged.
 - [x] Reuse read-side Git LFS scanning/download.
-- [ ] Add end-to-end create/update tests around an archived mirror.
+- [x] Add end-to-end archived mirror extract → fetch/prune → repack → verify coverage.
 - [x] Test force-updated branches and deleted tags.
 - [x] Test empty repositories.
 
@@ -289,7 +289,7 @@ Exit criteria:
 
 ## Phase 6 — Scheduling and mandatory active-job notifications
 
-Status: **substantially complete**
+Status: **complete**
 
 Keep WorkManager with only:
 
@@ -303,9 +303,9 @@ Tasks:
 - [x] retain unique repository work;
 - [x] foreground every active repository job;
 - [x] expose stages: checking, extracting, fetching, LFS, optimizing, compressing, verifying;
-- [ ] add progress where measurable;
+- [x] show exact byte progress during final archive commit; keep non-measurable Git/network stages indeterminate;
 - [x] add cancel action;
-- [ ] group simultaneous repository notifications;
+- [x] group simultaneous repository notifications under one active-mirror group;
 - [x] block job start when Android notification visibility is unavailable;
 - [x] show notification-disabled state as a readiness/health problem.
 
@@ -317,7 +317,7 @@ Exit criteria:
 
 ## Phase 7 — Authentication and onboarding
 
-Status: **substantially complete**
+Status: **complete**
 
 - [x] Replace recovery/write permission wording.
 - [x] State exact recommended fine-grained PAT permissions:
@@ -326,8 +326,8 @@ Status: **substantially complete**
 - [x] State that no write/admin permission is required.
 - [x] Explain classic `repo` scope only as a broader compatibility fallback.
 - [x] validate repository Git readability with bounded-concurrency `ls-remote` checks during refresh;
-- [ ] move notification permission request into explained onboarding;
-- [ ] enforce onboarding order: token → folder → notifications → repository selection.
+- [x] move notification permission/settings handling into explained onboarding;
+- [x] enforce onboarding order: token → folder → notifications → repository selection.
 
 Exit criteria:
 
@@ -449,15 +449,15 @@ Required tests include:
 - missing fine-grained repository access;
 - organization token approval pending;
 - repository deleted;
-- repository renamed;
-- repository made private;
-- default branch changed;
+- [x] repository renamed;
+- [x] repository privacy changed;
+- [x] default branch changed;
 - [x] branch force-pushed;
 - [x] branch deleted;
 - [x] tag deleted;
 - [x] empty repository;
 - large repository;
-- Unicode paths;
+- [x] Unicode paths;
 - [x] Git LFS pointers and missing/corrupt LFS object;
 - [x] corrupt/truncated tar.gz;
 - archive manually deleted;
@@ -466,10 +466,10 @@ Required tests include:
 - notification permission/channel unavailable;
 - [x] preflight temporary-space estimate before extraction;
 - storage exhaustion during compression;
-- process death during fetch;
-- process death during compression;
+- process death during fetch; automated failed-fetch coverage proves the stable archive is untouched, but device-level process-kill testing remains;
+- process death during compression; automated truncated-candidate coverage proves the stable archive is untouched, but device-level process-kill testing remains;
 - process death before/after promotion;
-- WorkManager retry;
+- [x] bounded WorkManager retry policy;
 - multiple simultaneous selected repositories.
 
 Exit criteria:
