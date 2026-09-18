@@ -33,6 +33,14 @@ class GithubAuthManager @Inject constructor(
             ?: throw IOException("GitHub is not connected; enter a personal access token")
     }
 
+    suspend fun hasValidAccessToken(): Boolean = withContext(Dispatchers.IO) {
+        val token = secureStore.get(KEY_ACCESS_TOKEN)
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+            ?: return@withContext false
+        runCatching { validateToken(token) }.isSuccess
+    }
+
     fun disconnect() {
         secureStore.remove(KEY_ACCESS_TOKEN)
         clearLegacyOauthState()
