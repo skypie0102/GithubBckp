@@ -3,7 +3,7 @@ package com.skypie0102.githubbckp.worker
 import android.content.Context
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
-import com.skypie0102.githubbckp.data.local.BackupDao
+import com.skypie0102.githubbckp.data.local.RepositoryDao
 import com.skypie0102.githubbckp.data.local.MirrorDao
 import com.skypie0102.githubbckp.data.local.MirrorEntity
 import com.skypie0102.githubbckp.mirror.MirrorAttemptStatus
@@ -25,7 +25,7 @@ class RepositoryBackupWorker(
             applicationContext,
             BackupWorkerDependencies::class.java,
         )
-        val repository = dependencies.backupDao().getRepository(repositoryId)
+        val repository = dependencies.repositoryDao().getRepository(repositoryId)
             ?: return Result.success()
 
         val notifications = dependencies.activeBackupNotificationManager()
@@ -64,7 +64,7 @@ class RepositoryBackupWorker(
         }
 
         if (!success) {
-            val currentRepository = dependencies.backupDao().getRepository(repositoryId)
+            val currentRepository = dependencies.repositoryDao().getRepository(repositoryId)
             if (currentRepository?.selectedForBackup == true) {
                 val state = dependencies.mirrorDao().get(repositoryId)
                 dependencies.backupProblemNotifier().notifyBackupFailure(
@@ -93,7 +93,7 @@ class RepositoryBackupWorker(
 @EntryPoint
 @InstallIn(SingletonComponent::class)
 interface BackupWorkerDependencies {
-    fun backupDao(): BackupDao
+    fun repositoryDao(): RepositoryDao
     fun mirrorDao(): MirrorDao
     fun mirrorSyncCoordinator(): MirrorSyncCoordinator
     fun activeBackupNotificationManager(): ActiveBackupNotificationManager
