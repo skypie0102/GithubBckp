@@ -447,7 +447,7 @@ Exit criteria:
 
 ## Phase 11 — Hardening matrix
 
-Status: **automated hardening complete; device/live-provider validation remains**
+Status: **complete for 0.3.0; device gate accepted by repository owner in closed issue #53**
 
 Required tests include:
 
@@ -482,25 +482,15 @@ Exit criteria:
 
 - interruption testing demonstrates the previous verified mirror survives every failed update stage.
 
-### Remaining manual gates
+### Device gate disposition
 
-The automated test matrix is green. The following remain intentionally manual and are mirrored in `docs/RELEASE.md`:
-
-- live GitHub organization approval/revocation behavior;
-- upgrade migration from a signed pre-refactor installation;
-- real device-scale large repository;
-- Android process kill during fetch;
-- Android process kill during compression;
-- Android process kill immediately before/after archive promotion;
-- real SAF folder move/revocation and recovery;
-- real notification permission/channel disablement;
-- several simultaneous real repository jobs.
+The automated test matrix is green. Repository owner **skypie0102** tested the refactored app on a real device, confirmed repository backup worked, and explicitly accepted that device testing as sufficient for the 0.3.0 release gate. Issue #53 is closed as completed by owner attestation. Its granular scenarios remain preserved as historical QA detail rather than being falsely marked as individually evidenced.
 
 ---
 
 ## Phase 12 — Documentation and release cutover
 
-Status: **automated release preparation complete; manual device gates and merge remain**
+Status: **release preparation complete; owner-accepted device gate passed, green final CI and merge remain**
 
 Keep only documentation that serves the new product:
 
