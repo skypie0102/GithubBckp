@@ -26,7 +26,7 @@ Repository work also requires network connectivity. Scheduled repository jobs cu
 Every repository job updates the same logical artifact:
 
 ```text
-GitHub Backups/<repository-id>/mirror.tar.gz
+GitHub Backups/<owner>--<repo>--<repository-id>/<owner>--<repo>.tar.gz
 ```
 
 No scheduled run intentionally creates a historical generation.
