@@ -1,11 +1,9 @@
 package com.skypie0102.githubbckp.worker
 
-import com.skypie0102.githubbckp.storage.StorageDestination
-
 enum class ScheduledBackupBlockReason {
     GITHUB_DISCONNECTED,
-    DRIVE_DISCONNECTED,
     DOCUMENT_TREE_MISSING,
+    NOTIFICATIONS_DISABLED,
 }
 
 data class ScheduledBackupReadiness(
@@ -15,9 +13,8 @@ data class ScheduledBackupReadiness(
 
 fun evaluateScheduledBackupReadiness(
     githubAuthenticated: Boolean,
-    destination: StorageDestination,
-    driveAuthenticated: Boolean,
     documentTreeConfigured: Boolean,
+    notificationsReady: Boolean,
 ): ScheduledBackupReadiness {
     if (!githubAuthenticated) {
         return ScheduledBackupReadiness(
@@ -25,25 +22,19 @@ fun evaluateScheduledBackupReadiness(
             blockReason = ScheduledBackupBlockReason.GITHUB_DISCONNECTED,
         )
     }
-
-    return when (destination) {
-        StorageDestination.GOOGLE_DRIVE -> if (driveAuthenticated) {
-            ScheduledBackupReadiness(ready = true)
-        } else {
-            ScheduledBackupReadiness(
-                ready = false,
-                blockReason = ScheduledBackupBlockReason.DRIVE_DISCONNECTED,
-            )
-        }
-        StorageDestination.DOCUMENT_TREE -> if (documentTreeConfigured) {
-            ScheduledBackupReadiness(ready = true)
-        } else {
-            ScheduledBackupReadiness(
-                ready = false,
-                blockReason = ScheduledBackupBlockReason.DOCUMENT_TREE_MISSING,
-            )
-        }
+    if (!documentTreeConfigured) {
+        return ScheduledBackupReadiness(
+            ready = false,
+            blockReason = ScheduledBackupBlockReason.DOCUMENT_TREE_MISSING,
+        )
     }
+    if (!notificationsReady) {
+        return ScheduledBackupReadiness(
+            ready = false,
+            blockReason = ScheduledBackupBlockReason.NOTIFICATIONS_DISABLED,
+        )
+    }
+    return ScheduledBackupReadiness(ready = true)
 }
 
 fun scheduledBackupRunStatus(
