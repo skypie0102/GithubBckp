@@ -123,6 +123,18 @@ class MirrorSyncCoordinator @Inject constructor(
                         verifiedArchive = result.archive,
                         expectedSha256 = result.sha256,
                     )
+                    val legacyCleanupFailures = mirrorStore.deleteLegacyMirrors(
+                        owner = repository.owner,
+                        name = repository.name,
+                    )
+                    val cleanupWarning = legacyCleanupFailures
+                        .takeIf { it.isNotEmpty() }
+                        ?.joinToString(
+                            prefix = "Verified the new mirror, but could not remove legacy ZIP: ",
+                            separator = ", ",
+                        )
+                        ?.take(MAX_WARNING_LENGTH)
+
                     mirrorDao.upsert(
                         (mirrorDao.get(repository.githubId) ?: MirrorEntity(repository.githubId)).copy(
                             archiveUri = committed.uri.toString(),
@@ -136,7 +148,7 @@ class MirrorSyncCoordinator @Inject constructor(
                             lastSourceHead = result.manifest.headCommit,
                             lastRefsDigest = result.manifest.refsDigest,
                             lastError = null,
-                            lastWarning = null,
+                            lastWarning = cleanupWarning,
                         ),
                     )
                 }
@@ -213,6 +225,7 @@ class MirrorSyncCoordinator @Inject constructor(
 
     private companion object {
         const val MAX_ERROR_LENGTH = 1_000
+        const val MAX_WARNING_LENGTH = 1_000
         const val MIN_INITIAL_WORKSPACE_BYTES = 128L * 1024L * 1024L
     }
 }
