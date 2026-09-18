@@ -173,9 +173,15 @@ class LocalMirrorStore @Inject constructor(
         }
     }
 
-    suspend fun reconcile(repositoryId: Long) = withContext(Dispatchers.IO) {
-        val folder = repositoryFolder(repositoryId, create = false) ?: return@withContext
+    suspend fun reconcile(repositoryId: Long): Boolean = withContext(Dispatchers.IO) {
+        val folder = repositoryFolder(repositoryId, create = false) ?: return@withContext false
         reconcileFolder(repositoryId, folder)
+    }
+
+    suspend fun hasCurrentMirror(repositoryId: Long): Boolean = withContext(Dispatchers.IO) {
+        val folder = repositoryFolder(repositoryId, create = false) ?: return@withContext false
+        reconcileFolder(repositoryId, folder)
+        folder.findFile(STABLE_NAME) != null || folder.findFile(PENDING_NAME) != null
     }
 
     suspend fun delete(repositoryId: Long) = withContext(Dispatchers.IO) {
@@ -187,15 +193,15 @@ class LocalMirrorStore @Inject constructor(
         }
     }
 
-    private fun reconcileFolder(repositoryId: Long, folder: DocumentFile) {
+    private fun reconcileFolder(repositoryId: Long, folder: DocumentFile): Boolean {
         val stable = folder.findFile(STABLE_NAME)
-        val pending = folder.findFile(PENDING_NAME) ?: return
+        val pending = folder.findFile(PENDING_NAME) ?: return false
 
         if (stable != null) {
             // A crash before commit left a candidate behind. The stable mirror
             // is authoritative, so discard the candidate.
             pending.delete()
-            return
+            return false
         }
 
         // No stable archive means the process may have died between retiring
@@ -206,7 +212,8 @@ class LocalMirrorStore @Inject constructor(
             delete()
         }
         val verifyDirectory = File(context.cacheDir, "mirror-reconcile-$repositoryId-verify")
-        try {
+        var verified = false
+        return try {
             context.contentResolver.openInputStream(pending.uri)?.use { input ->
                 FileOutputStream(scratch).buffered(BUFFER_SIZE).use { output ->
                     input.buffered(BUFFER_SIZE).copyTo(output, BUFFER_SIZE)
@@ -218,10 +225,18 @@ class LocalMirrorStore @Inject constructor(
                 verificationDirectory = verifyDirectory,
                 expectedRepositoryId = repositoryId,
             )
+            verified = true
 
-            pending.renameTo(STABLE_NAME)
+            check(pending.renameTo(STABLE_NAME)) {
+                "Verified pending mirror could not be promoted"
+            }
+            true
         } catch (_: Throwable) {
-            pending.delete()
+            // Never destroy the only verified copy merely because the document
+            // provider refused a rename. The normal read path accepts a pending
+            // file when no stable mirror exists and can retry promotion later.
+            if (!verified) pending.delete()
+            false
         } finally {
             scratch.delete()
             verifyDirectory.deleteRecursively()
