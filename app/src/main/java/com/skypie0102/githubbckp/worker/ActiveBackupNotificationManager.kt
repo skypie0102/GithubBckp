@@ -46,8 +46,10 @@ class ActiveBackupNotificationManager @Inject constructor(
         owner: String,
         name: String,
         stage: MirrorStage? = null,
+        progressPercent: Int? = null,
     ): ForegroundInfo {
         ensureChannel()
+        val normalizedProgress = progressPercent?.coerceIn(0, 100)
         val stageText = when (stage) {
             null -> "Preparing…"
             MirrorStage.CHECKING_REMOTE -> "Checking GitHub…"
@@ -58,10 +60,12 @@ class ActiveBackupNotificationManager @Inject constructor(
             MirrorStage.OPTIMIZING -> "Optimizing repository…"
             MirrorStage.PACKAGING -> "Compressing backup…"
             MirrorStage.VERIFYING -> "Verifying backup…"
-            MirrorStage.COMMITTING -> "Saving backup…"
+            MirrorStage.COMMITTING -> normalizedProgress
+                ?.let { "Saving backup… $it%" }
+                ?: "Saving backup…"
         }
 
-        val notification = NotificationCompat.Builder(context, CHANNEL_ID)
+        val builder = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.stat_sys_upload)
             .setContentTitle("$owner/$name")
             .setContentText(stageText)
@@ -69,13 +73,20 @@ class ActiveBackupNotificationManager @Inject constructor(
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
-            .setProgress(0, 0, true)
+            .setGroup(GROUP_KEY)
             .addAction(
                 android.R.drawable.ic_menu_close_clear_cancel,
                 "Cancel",
                 WorkManager.getInstance(context).createCancelPendingIntent(workId),
             )
-            .build()
+
+        if (normalizedProgress != null) {
+            builder.setProgress(100, normalizedProgress, false)
+        } else {
+            builder.setProgress(0, 0, true)
+        }
+
+        val notification = builder.build()
 
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             ForegroundInfo(
@@ -107,6 +118,13 @@ class ActiveBackupNotificationManager @Inject constructor(
 
     private companion object {
         const val CHANNEL_ID = "active-backups"
+        const val GROUP_KEY = "githubbckp.active-mirrors"
         const val FOREGROUND_NOTIFICATION_BASE = 0x4A000000
     }
+}
+
+internal fun backupProgressPercent(completedBytes: Long, totalBytes: Long): Int? {
+    if (completedBytes < 0L || totalBytes <= 0L) return null
+    if (completedBytes >= totalBytes) return 100
+    return ((completedBytes * 100L) / totalBytes).toInt().coerceIn(0, 99)
 }
