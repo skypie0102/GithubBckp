@@ -1,107 +1,102 @@
 package com.skypie0102.githubbckp.ui
 
-import com.skypie0102.githubbckp.backup.BackupStatus
-import com.skypie0102.githubbckp.backup.BackupType
-import com.skypie0102.githubbckp.data.local.BackupEntity
+import com.skypie0102.githubbckp.backup.MirrorStatus
+import com.skypie0102.githubbckp.data.local.MirrorEntity
 import com.skypie0102.githubbckp.data.local.RepositoryEntity
 import com.skypie0102.githubbckp.worker.BackupCadence
+import java.util.concurrent.TimeUnit
 
-enum class RepositoryBackupHealthState {
-    PROTECTED,
-    WARNING,
-    FAILED,
+enum class RepositoryHealth {
+    HEALTHY,
+    NEEDS_FIRST_BACKUP,
     STALE,
-    NEVER_BACKED_UP,
-}
-
-data class RepositoryBackupHealth(
-    val repositoryId: Long,
-    val owner: String,
-    val name: String,
-    val state: RepositoryBackupHealthState,
-    val latestVerifiedAtEpochMs: Long? = null,
-    val latestAttemptAtEpochMs: Long? = null,
-    val latestAttemptStatus: BackupStatus? = null,
-    val warningMessage: String? = null,
-    val errorMessage: String? = null,
-) {
-    val fullName: String = "$owner/$name"
+    FAILED,
+    RUNNING,
 }
 
 data class BackupHealthSummary(
-    val repositories: List<RepositoryBackupHealth> = emptyList(),
-) {
-    val selectedCount: Int = repositories.size
-    val verifiedCount: Int = repositories.count { it.latestVerifiedAtEpochMs != null }
-    val protectedCount: Int = repositories.count {
-        it.state == RepositoryBackupHealthState.PROTECTED
+    val selectedCount: Int = 0,
+    val healthyCount: Int = 0,
+    val needsFirstBackupCount: Int = 0,
+    val staleCount: Int = 0,
+    val failedCount: Int = 0,
+    val runningCount: Int = 0,
+)
+
+fun repositoryHealth(
+    repository: RepositoryEntity,
+    mirror: MirrorEntity?,
+    scheduleEnabled: Boolean,
+    cadence: BackupCadence,
+    nowEpochMs: Long = System.currentTimeMillis(),
+): RepositoryHealth {
+    if (mirror?.status == MirrorStatus.RUNNING || mirror?.status == MirrorStatus.QUEUED) {
+        return RepositoryHealth.RUNNING
     }
-    val attentionCount: Int = repositories.count {
-        it.state != RepositoryBackupHealthState.PROTECTED
+
+    val lastSuccess = mirror?.lastSuccessfulAtEpochMs
+        ?: return if (mirror?.status == MirrorStatus.FAILED) {
+            RepositoryHealth.FAILED
+        } else {
+            RepositoryHealth.NEEDS_FIRST_BACKUP
+        }
+
+    if (
+        mirror.status == MirrorStatus.FAILED &&
+        (mirror.lastStartedAtEpochMs ?: 0L) > lastSuccess
+    ) {
+        return RepositoryHealth.FAILED
     }
-    val problemRepositories: List<RepositoryBackupHealth> = repositories.filter {
-        it.state != RepositoryBackupHealthState.PROTECTED
+
+    if (scheduleEnabled) {
+        val staleAfterMs = TimeUnit.HOURS.toMillis(cadence.repeatHours * 2)
+        if (nowEpochMs - lastSuccess > staleAfterMs) {
+            return RepositoryHealth.STALE
+        }
     }
+
+    return RepositoryHealth.HEALTHY
 }
 
 fun summarizeBackupHealth(
     repositories: List<RepositoryEntity>,
-    backups: List<BackupEntity>,
+    mirrors: List<MirrorEntity>,
     scheduleEnabled: Boolean,
     cadence: BackupCadence,
-    nowEpochMs: Long,
+    nowEpochMs: Long = System.currentTimeMillis(),
 ): BackupHealthSummary {
-    val selectedRepositories = repositories
-        .filter { it.isAvailable && it.selectedForBackup }
-        .sortedWith(compareBy<RepositoryEntity> { it.owner.lowercase() }.thenBy { it.name.lowercase() })
-    if (selectedRepositories.isEmpty()) return BackupHealthSummary()
+    val mirrorByRepository = mirrors.associateBy { it.repositoryId }
+    val selected = repositories.filter { it.selectedForBackup && it.isAvailable }
+    var healthy = 0
+    var first = 0
+    var stale = 0
+    var failed = 0
+    var running = 0
 
-    val backupsByRepository = backups.groupBy { it.repositoryId }
-    val freshnessWindowMs = cadence.repeatHours * 2L * MILLIS_PER_HOUR
-
-    val health = selectedRepositories.map { repository ->
-        val repositoryBackups = backupsByRepository[repository.githubId]
-            .orEmpty()
-            .filter { it.type == BackupType.GIT_MIRROR }
-        val latestAttempt = repositoryBackups.maxWithOrNull(
-            compareBy<BackupEntity> { it.startedAtEpochMs }.thenBy { it.id },
-        )
-        val latestVerified = repositoryBackups
-            .asSequence()
-            .filter { it.status == BackupStatus.COMPLETED && it.remoteDeletedAtEpochMs == null }
-            .maxWithOrNull(
-                compareBy<BackupEntity> { it.completedAtEpochMs ?: it.startedAtEpochMs }.thenBy { it.id },
+    selected.forEach { repository ->
+        when (
+            repositoryHealth(
+                repository = repository,
+                mirror = mirrorByRepository[repository.githubId],
+                scheduleEnabled = scheduleEnabled,
+                cadence = cadence,
+                nowEpochMs = nowEpochMs,
             )
-
-        val verifiedAt = latestVerified?.completedAtEpochMs ?: latestVerified?.startedAtEpochMs
-        val attemptAfterVerified = latestAttempt != null && latestVerified != null &&
-            latestAttempt.id != latestVerified.id &&
-            latestAttempt.startedAtEpochMs >= (verifiedAt ?: Long.MIN_VALUE)
-
-        val state = when {
-            latestVerified == null -> RepositoryBackupHealthState.NEVER_BACKED_UP
-            attemptAfterVerified && latestAttempt?.status == BackupStatus.FAILED -> RepositoryBackupHealthState.FAILED
-            scheduleEnabled && verifiedAt != null && nowEpochMs - verifiedAt > freshnessWindowMs ->
-                RepositoryBackupHealthState.STALE
-            attemptAfterVerified && latestAttempt?.status == BackupStatus.CANCELLED -> RepositoryBackupHealthState.WARNING
-            !latestVerified.warningMessage.isNullOrBlank() -> RepositoryBackupHealthState.WARNING
-            else -> RepositoryBackupHealthState.PROTECTED
+        ) {
+            RepositoryHealth.HEALTHY -> healthy++
+            RepositoryHealth.NEEDS_FIRST_BACKUP -> first++
+            RepositoryHealth.STALE -> stale++
+            RepositoryHealth.FAILED -> failed++
+            RepositoryHealth.RUNNING -> running++
         }
-
-        RepositoryBackupHealth(
-            repositoryId = repository.githubId,
-            owner = repository.owner,
-            name = repository.name,
-            state = state,
-            latestVerifiedAtEpochMs = verifiedAt,
-            latestAttemptAtEpochMs = latestAttempt?.startedAtEpochMs,
-            latestAttemptStatus = latestAttempt?.status,
-            warningMessage = latestVerified?.warningMessage,
-            errorMessage = if (attemptAfterVerified) latestAttempt?.errorMessage else null,
-        )
     }
 
-    return BackupHealthSummary(repositories = health)
+    return BackupHealthSummary(
+        selectedCount = selected.size,
+        healthyCount = healthy,
+        needsFirstBackupCount = first,
+        staleCount = stale,
+        failedCount = failed,
+        runningCount = running,
+    )
 }
-
-private const val MILLIS_PER_HOUR = 60L * 60L * 1000L
