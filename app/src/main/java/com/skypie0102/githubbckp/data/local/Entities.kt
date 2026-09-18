@@ -33,3 +33,22 @@ data class MirrorEntity(
     val lastError: String? = null,
     val lastWarning: String? = null,
 )
+
+
+@Entity(tableName = "latest_releases")
+data class LatestReleaseEntity(
+    @PrimaryKey val repositoryId: Long,
+    val releaseId: Long? = null,
+    val tagName: String? = null,
+    val releaseName: String? = null,
+    val releaseUpdatedAt: String? = null,
+    val archiveUri: String? = null,
+    val archiveName: String? = null,
+    val archiveSizeBytes: Long? = null,
+    val archiveSha256: String? = null,
+    val lastCheckedAtEpochMs: Long? = null,
+    val lastChangedAtEpochMs: Long? = null,
+    val lastAttemptAtEpochMs: Long? = null,
+    val lastAttemptStatus: String? = null,
+    val lastError: String? = null,
+)
