@@ -250,12 +250,16 @@ class HomeViewModel @Inject constructor(
     }
 
     fun setRepositorySelected(repositoryId: Long, selected: Boolean) {
-        viewModelScope.launch { repositoryDao.setRepositorySelected(repositoryId, selected) }
+        viewModelScope.launch {
+            repositoryDao.setRepositorySelected(repositoryId, selected)
+            if (selected) refreshRemoteHealth()
+        }
     }
 
     fun setAllRepositoriesSelected(selected: Boolean) {
         viewModelScope.launch {
             repositoryDao.setAvailableRepositoriesSelected(selected)
+            if (selected) refreshRemoteHealth()
             _state.update {
                 it.copy(
                     message = if (selected) {
