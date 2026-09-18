@@ -134,7 +134,7 @@ Status: **complete except final merge**
 - [x] Create `refactor/simple-local-mirrors`.
 - [x] Open draft PR #52.
 - [x] Keep existing Android CI running against every refactor commit.
-- [ ] Keep PR draft until the replacement pipeline is the only active pipeline.
+- [x] Keep PR draft through cutover; the replacement pipeline is now the only active backup pipeline.
 
 Exit criteria:
 
@@ -441,14 +441,14 @@ Exit criteria:
 
 ## Phase 11 — Hardening matrix
 
-Status: **in progress; core archive/Git/LFS cases covered**
+Status: **automated hardening substantially complete; device/manual stress cases remain**
 
 Required tests include:
 
-- revoked/expired PAT;
-- missing fine-grained repository access;
-- organization token approval pending;
-- repository deleted;
+- [x] revoked/expired PAT response policy and scheduled token revalidation;
+- [x] missing fine-grained repository access via unreadable-repository preflight;
+- organization token approval pending; same unreadable-repository path is implemented, but live org-approval testing remains manual;
+- [x] repository deleted/unreadable remote;
 - [x] repository renamed;
 - [x] repository privacy changed;
 - [x] default branch changed;
@@ -460,17 +460,17 @@ Required tests include:
 - [x] Unicode paths;
 - [x] Git LFS pointers and missing/corrupt LFS object;
 - [x] corrupt/truncated tar.gz;
-- archive manually deleted;
-- selected folder moved;
-- SAF permission revoked;
-- notification permission/channel unavailable;
+- [x] archive manually deleted;
+- [x] selected folder moved/unavailable;
+- [x] SAF permission revoked/unavailable;
+- [x] notification permission/app/channel unavailable;
 - [x] preflight temporary-space estimate before extraction;
-- storage exhaustion during compression;
+- [x] simulated storage exhaustion/write failure during compression;
 - process death during fetch; automated failed-fetch coverage proves the stable archive is untouched, but device-level process-kill testing remains;
 - process death during compression; automated truncated-candidate coverage proves the stable archive is untouched, but device-level process-kill testing remains;
-- process death before/after promotion;
+- process death before/after promotion; recovery state-machine coverage is implemented, but device-level process-kill testing remains;
 - [x] bounded WorkManager retry policy;
-- multiple simultaneous selected repositories.
+- [x] multiple simultaneous selected repositories use independent unique work plans.
 
 Exit criteria:
 
@@ -480,7 +480,7 @@ Exit criteria:
 
 ## Phase 12 — Documentation and release cutover
 
-Status: **in progress; product docs now reflect the new architecture**
+Status: **documentation complete; final release/version cutover remains**
 
 Keep only documentation that serves the new product:
 
