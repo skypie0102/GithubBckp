@@ -6,6 +6,8 @@ import androidx.lifecycle.viewModelScope
 import com.skypie0102.githubbckp.data.local.RepositoryDao
 import com.skypie0102.githubbckp.data.local.MirrorDao
 import com.skypie0102.githubbckp.data.local.MirrorEntity
+import com.skypie0102.githubbckp.data.local.LatestReleaseDao
+import com.skypie0102.githubbckp.data.local.LatestReleaseEntity
 import com.skypie0102.githubbckp.data.local.RepositoryEntity
 import com.skypie0102.githubbckp.data.local.toEntity
 import com.skypie0102.githubbckp.github.GithubAuthManager
@@ -41,6 +43,7 @@ data class HomeUiState(
     val scheduleCadence: BackupCadence = BackupCadence.DAILY,
     val scheduledRunStatus: ScheduledBackupRunStatus? = null,
     val repositories: List<RepositoryEntity> = emptyList(),
+    val latestReleases: Map<Long, LatestReleaseEntity> = emptyMap(),
     val backupHealth: BackupHealthSummary = BackupHealthSummary(),
     val busy: Boolean = false,
     val message: String? = null,
@@ -50,6 +53,7 @@ data class HomeUiState(
 class HomeViewModel @Inject constructor(
     private val repositoryDao: RepositoryDao,
     private val mirrorDao: MirrorDao,
+    private val latestReleaseDao: LatestReleaseDao,
     private val githubAuthManager: GithubAuthManager,
     private val githubGateway: GithubGateway,
     private val githubRepositoryAccessVerifier: GithubRepositoryAccessVerifier,
@@ -112,6 +116,16 @@ class HomeViewModel @Inject constructor(
                             globalBlockMessage = current.globalBackupBlockMessage(),
                             remoteRefsDigests = remoteRefsDigests,
                         ),
+                    )
+                }
+            }
+        }
+
+        viewModelScope.launch {
+            latestReleaseDao.observeAll().collect { releases ->
+                _state.update { current ->
+                    current.copy(
+                        latestReleases = releases.associateBy { it.repositoryId },
                     )
                 }
             }
