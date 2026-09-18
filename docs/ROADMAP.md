@@ -480,7 +480,7 @@ Exit criteria:
 
 ## Phase 12 — Documentation and release cutover
 
-Status: **documentation complete; final release/version cutover remains**
+Status: **release version prepared; merge/release gate remains**
 
 Keep only documentation that serves the new product:
 
@@ -492,6 +492,8 @@ Keep only documentation that serves the new product:
 - `docs/RELEASE.md`
 
 Delete obsolete recovery/Drive/metadata-backup documents.
+
+Version target: `0.3.0` (version code `4`), prepared on the refactor branch and published only after merge to `main`.
 
 The final architecture should reduce to:
 
