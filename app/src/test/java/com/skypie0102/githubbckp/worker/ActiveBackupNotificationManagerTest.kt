@@ -15,6 +15,42 @@ class ActiveBackupNotificationManagerTest {
     }
 
     @Test
+    fun readinessRequiresPermissionAppNotificationsAndChannel() {
+        assertEquals(
+            true,
+            activeBackupNotificationsReady(
+                permissionGranted = true,
+                appNotificationsEnabled = true,
+                channelEnabled = true,
+            ),
+        )
+        assertEquals(
+            false,
+            activeBackupNotificationsReady(
+                permissionGranted = false,
+                appNotificationsEnabled = true,
+                channelEnabled = true,
+            ),
+        )
+        assertEquals(
+            false,
+            activeBackupNotificationsReady(
+                permissionGranted = true,
+                appNotificationsEnabled = false,
+                channelEnabled = true,
+            ),
+        )
+        assertEquals(
+            false,
+            activeBackupNotificationsReady(
+                permissionGranted = true,
+                appNotificationsEnabled = true,
+                channelEnabled = false,
+            ),
+        )
+    }
+
+    @Test
     fun progressPercentRejectsUnknownTotals() {
         assertNull(backupProgressPercent(10L, 0L))
         assertNull(backupProgressPercent(-1L, 100L))
