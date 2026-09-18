@@ -55,7 +55,7 @@ class TarGzArchive @Inject constructor() {
             ),
         ).use { tar ->
             while (true) {
-                val entry = tar.nextTarEntry ?: break
+                val entry = tar.nextEntry ?: break
                 val output = File(destination, entry.name).canonicalFile
                 if (output != destinationRoot && !output.path.startsWith(destinationRoot.path + File.separator)) {
                     throw IOException("Unsafe path in mirror archive: ${entry.name}")
