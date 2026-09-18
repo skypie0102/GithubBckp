@@ -1,27 +1,16 @@
 package com.skypie0102.githubbckp.mirror
 
-import com.skypie0102.githubbckp.backup.GitLfsDownloadService
-import com.skypie0102.githubbckp.backup.GitLfsObjectStore
-import com.skypie0102.githubbckp.backup.GitLfsPointerScanner
-import com.skypie0102.githubbckp.auth.SecureStore
-import com.skypie0102.githubbckp.github.GithubAuthManager
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class MirrorEnginePlanTest {
-    private val engine = MirrorEngine(
-        authManager = GithubAuthManager(FakeSecureStore()),
-        lfsPointerScanner = GitLfsPointerScanner(),
-        lfsDownloadService = GitLfsDownloadService(GitLfsObjectStore()),
-    )
-
     @Test
     fun requiresRebuild_returnsFalseWhenRefsAndMetadataMatch() {
         val repository = repository()
         val manifest = manifest(repository, refsDigest = "same")
 
-        assertFalse(engine.requiresRebuild(manifest, repository, "same"))
+        assertFalse(mirrorRequiresRebuild(manifest, repository, "same"))
     }
 
     @Test
@@ -29,7 +18,7 @@ class MirrorEnginePlanTest {
         val repository = repository()
         val manifest = manifest(repository, refsDigest = "before")
 
-        assertTrue(engine.requiresRebuild(manifest, repository, "after"))
+        assertTrue(mirrorRequiresRebuild(manifest, repository, "after"))
     }
 
     @Test
@@ -38,7 +27,7 @@ class MirrorEnginePlanTest {
         val manifest = manifest(repository, refsDigest = "same")
         val renamed = repository.copy(name = "renamed")
 
-        assertTrue(engine.requiresRebuild(manifest, renamed, "same"))
+        assertTrue(mirrorRequiresRebuild(manifest, renamed, "same"))
     }
 
     private fun repository() = MirrorRepository(
@@ -64,15 +53,4 @@ class MirrorEnginePlanTest {
         lfsIncluded = false,
         appVersion = "test",
     )
-
-    /**
-     * The plan tests never perform authentication. A tiny SecureStore fake
-     * keeps this test dependency-free while exercising MirrorEngine's pure
-     * rebuild decision.
-     */
-    private class FakeSecureStore : SecureStore {
-        override fun put(key: String, value: String) = Unit
-        override fun get(key: String): String? = null
-        override fun remove(key: String) = Unit
-    }
 }
