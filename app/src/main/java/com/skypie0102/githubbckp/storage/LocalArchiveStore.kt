@@ -26,10 +26,16 @@ class LocalArchiveStore @Inject constructor(
 
     suspend fun copyExistingArchive(repository: RepositoryRef, destination: File): Boolean =
         withContext(Dispatchers.IO) {
-            val archive = mirrorDirectory().findFile(archiveName(repository)) ?: return@withContext false
+            val directory = mirrorDirectory()
+            val stableName = archiveName(repository)
+            recoverInterruptedReplacement(directory, stableName)
+            val archive = directory.findFile(stableName) ?: return@withContext false
+
             context.contentResolver.openInputStream(archive.uri)?.use { input ->
                 destination.parentFile?.mkdirs()
-                destination.outputStream().buffered().use { output -> input.copyTo(output, BUFFER_SIZE) }
+                destination.outputStream().buffered().use { output ->
+                    input.copyTo(output, BUFFER_SIZE)
+                }
             } ?: throw IOException("Unable to read existing local mirror ${archive.name}")
             true
         }
@@ -43,13 +49,21 @@ class LocalArchiveStore @Inject constructor(
         val directory = mirrorDirectory()
         val stableName = archiveName(repository)
         val pendingName = "$stableName.pending"
+        val previousName = "$stableName.previous"
+
+        recoverInterruptedReplacement(directory, stableName)
         directory.findFile(pendingName)?.delete()
+        directory.findFile(previousName)?.delete()
 
         val pending = directory.createFile(MIME_GZIP, pendingName)
             ?: throw IOException("Unable to create staged local mirror $pendingName")
+
+        var previous: DocumentFile? = null
         try {
             context.contentResolver.openOutputStream(pending.uri, "wt")?.use { output ->
-                source.inputStream().buffered().use { input -> input.copyTo(output, BUFFER_SIZE) }
+                source.inputStream().buffered().use { input ->
+                    input.copyTo(output, BUFFER_SIZE)
+                }
             } ?: throw IOException("Unable to write staged local mirror $pendingName")
 
             if (pending.length() != source.length()) {
@@ -59,27 +73,54 @@ class LocalArchiveStore @Inject constructor(
             }
 
             val existing = directory.findFile(stableName)
-            if (existing != null && !existing.delete()) {
-                throw IOException("Unable to replace existing local mirror $stableName")
+            if (existing != null) {
+                if (!existing.renameTo(previousName)) {
+                    throw IOException("Unable to stage the previous local mirror for replacement")
+                }
+                previous = directory.findFile(previousName)
+                    ?: throw IOException("Previous local mirror disappeared during replacement")
             }
+
             if (!pending.renameTo(stableName)) {
+                previous?.renameTo(stableName)
                 throw IOException("Unable to finalize local mirror $stableName")
             }
 
             val finalized = directory.findFile(stableName)
                 ?: throw IOException("Final local mirror $stableName is missing")
+
+            if (previous != null && !previous.delete()) {
+                throw IOException(
+                    "The new mirror is valid, but the previous archive could not be removed. " +
+                        "Run the backup again to retry cleanup.",
+                )
+            }
+
             StoredMirrorArchive(
                 name = stableName,
                 sizeBytes = finalized.length(),
             )
         } catch (throwable: Throwable) {
-            pending.delete()
+            directory.findFile(pendingName)?.delete()
+            if (directory.findFile(stableName) == null) {
+                directory.findFile(previousName)?.renameTo(stableName)
+            }
             throw throwable
         }
     }
 
-    fun archiveExists(repository: RepositoryRef): Boolean =
-        runCatching { mirrorDirectory().findFile(archiveName(repository)) != null }.getOrDefault(false)
+    private fun recoverInterruptedReplacement(directory: DocumentFile, stableName: String) {
+        val pendingName = "$stableName.pending"
+        val previousName = "$stableName.previous"
+        val stable = directory.findFile(stableName)
+        val previous = directory.findFile(previousName)
+
+        when {
+            stable != null -> previous?.delete()
+            previous != null -> previous.renameTo(stableName)
+        }
+        directory.findFile(pendingName)?.delete()
+    }
 
     private fun mirrorDirectory(): DocumentFile {
         val treeUri = preferences.documentTreeUri()
