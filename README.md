@@ -45,7 +45,7 @@ For a **fine-grained personal access token**:
 - Repository access: every repository you want GithubBckp to back up.
 - Repository permissions:
   - **Contents: Read-only**
-  - **Metadata: Read-only**
+  - **Metadata: Read-only** (GitHub includes this automatically for repository access)
 - No write, administration, issues, pull requests, actions, or package permissions are required.
 
 For a **classic personal access token**:
