@@ -80,11 +80,6 @@ class RepositoryBackupWorker(
     companion object {
         const val KEY_REPOSITORY_ID = "repository_id"
 
-        // Kept temporarily for scheduler compatibility while the legacy
-        // scheduled-run progress model is removed.
-        const val KEY_BACKUP_ORIGIN = "backup_origin"
-        const val KEY_SCHEDULED_RUN_ID = "scheduled_run_id"
-
         const val NOTIFICATIONS_REQUIRED_MESSAGE =
             "Notifications must be enabled so every running backup remains visible."
     }
