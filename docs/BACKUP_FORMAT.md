@@ -82,9 +82,9 @@ Before a pending archive can be committed:
 5. manifest repository ID must match the expected GitHub repository;
 6. `repository.git` must exist;
 7. JGit must open it successfully as a bare repository;
-8. persisted pending bytes must match the expected SHA-256.
-
-LFS objects are verified by size and SHA-256 when downloaded/reused.
+8. every reachable Git LFS pointer must have a corresponding object;
+9. every referenced LFS object must match its declared size and SHA-256;
+10. persisted pending bytes must match the expected archive SHA-256.
 
 ## Update safety
 
