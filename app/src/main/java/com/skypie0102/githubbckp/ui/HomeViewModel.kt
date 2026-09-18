@@ -122,6 +122,10 @@ class HomeViewModel @Inject constructor(
                 _state.update { it.copy(scheduledRunStatus = status) }
             }
         }
+
+        if (githubAuthManager.isAuthenticated()) {
+            refreshRepositories(showMessage = false)
+        }
     }
 
     fun refreshReadiness() {
@@ -148,6 +152,10 @@ class HomeViewModel @Inject constructor(
     }
 
     fun refreshRepositories() {
+        refreshRepositories(showMessage = true)
+    }
+
+    private fun refreshRepositories(showMessage: Boolean) {
         viewModelScope.launch {
             runBusy {
                 val existing = repositoryDao.getRepositories().associateBy { it.githubId }
@@ -185,13 +193,17 @@ class HomeViewModel @Inject constructor(
                             globalBlockMessage = current.globalBackupBlockMessage(),
                             remoteRefsDigests = remoteRefsDigests,
                         ),
-                        message = buildString {
-                            append("Checked ${remote.size} repositories")
-                            if (unavailableCount > 0) {
-                                append("; ")
-                                append(unavailableCount)
-                                append(" cannot be read with this token")
+                        message = if (showMessage) {
+                            buildString {
+                                append("Checked ${remote.size} repositories")
+                                if (unavailableCount > 0) {
+                                    append("; ")
+                                    append(unavailableCount)
+                                    append(" cannot be read with this token")
+                                }
                             }
+                        } else {
+                            current.message
                         },
                     )
                 }
