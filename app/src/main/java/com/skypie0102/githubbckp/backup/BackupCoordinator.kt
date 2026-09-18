@@ -9,6 +9,9 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 
 @Singleton
 class BackupCoordinator @Inject constructor(
@@ -84,6 +87,27 @@ class BackupCoordinator @Inject constructor(
                 }
             }
             true
+        } catch (cancellation: CancellationException) {
+            // WorkManager can stop work because of constraints, system preemption,
+            // or execution limits. Cancellation is not a repository backup error.
+            // Persist it separately, then rethrow so WorkManager can apply its
+            // normal retry/reschedule behavior.
+            withContext(NonCancellable) {
+                if (!replacementCommitted) {
+                    replacementCandidate?.let { candidate ->
+                        runCatching { storageProvider.delete(candidate) }
+                    }
+                }
+                runCatching {
+                    backupDao.failBackup(
+                        backupId = backupId,
+                        status = BackupStatus.CANCELLED,
+                        completedAtEpochMs = System.currentTimeMillis(),
+                        errorMessage = "Backup was interrupted by Android and can be retried.",
+                    )
+                }
+            }
+            throw cancellation
         } catch (throwable: Throwable) {
             if (!replacementCommitted) {
                 replacementCandidate?.let { candidate ->
