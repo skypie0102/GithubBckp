@@ -7,12 +7,13 @@ The product is intentionally narrow:
 - connect GitHub with a personal access token;
 - choose repositories;
 - choose a local Android document-tree folder;
-- create one `mirror.tar.gz` per repository;
-- update that mirror manually, daily, or weekly;
+- create one full Git mirror archive per repository;
+- keep one separate backup of that repository's latest published GitHub Release;
+- update/check both manually, daily, or weekly;
 - show every running repository job in a grouped ongoing notification, with exact progress when measurable;
 - show simple mirror health.
 
-There is no Google Drive integration, restore/publish workflow, backup retention/history, source-archive mode, or backup of GitHub-hosted releases/issues/discussions/wiki data.
+There is no Google Drive integration, restore/publish workflow, backup retention/history, issue/discussion/wiki backup, or multiple release generations.
 
 ## What is preserved
 
@@ -32,7 +33,9 @@ Each repository maps to one logical archive with a human-readable owner/reposito
 <selected folder>/
 └── GitHub Backups/
     └── <owner>--<repo>--<github-repository-id>/
-        └── <owner>--<repo>.tar.gz
+        ├── <owner>--<repo>.tar.gz
+        └── latest-release/
+            └── <owner>--<repo>--<tag>--release.tar.gz
 ```
 
 Example:
@@ -40,7 +43,9 @@ Example:
 ```text
 GitHub Backups/
 └── skypie0102--intake-edit--1367381284/
-    └── skypie0102--intake-edit.tar.gz
+    ├── skypie0102--intake-edit.tar.gz
+    └── latest-release/
+        └── skypie0102--intake-edit--v1.2.3--release.tar.gz
 ```
 
 Older numeric-only folders created by early 0.3.0 test builds are migrated to the readable layout on the next successful mirror check/update without recompressing an unchanged archive.
@@ -77,6 +82,23 @@ If the repository changed:
 8. persist and hash the pending file;
 9. replace the stable archive;
 10. delete loose temporary files.
+
+## Latest release backup
+
+After a successful Git mirror check/update, the same foreground repository job checks GitHub's latest **published, non-prerelease** Release.
+
+When the latest release changed, the app stores one verified release bundle containing:
+
+```text
+release.json
+source/source.tar.gz
+assets/
+    ...every uploaded release asset...
+```
+
+The bundle filename includes the release tag. Release ID + GitHub `updated_at` are compared before download, so an unchanged latest release is not downloaded or repackaged. When a newer release becomes latest, its verified bundle replaces the previous one. If GitHub currently reports no latest published release, an older local release bundle is retained rather than deleted.
+
+The same fine-grained **Contents: Read-only** repository permission covers the latest-release metadata, source tarball, and release-asset downloads.
 
 ## GitHub token permissions
 
