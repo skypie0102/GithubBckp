@@ -8,14 +8,15 @@ Compose UI
 HomeViewModel
     ↓
 WorkManager / RepositoryBackupWorker
-    ↓
-MirrorSyncCoordinator
-    ↓
-MirrorEngine
-   ↙       ↘
-GitHub     LocalMirrorStore
-              ↓
-          mirror.tar.gz
+    ├── MirrorSyncCoordinator
+    │      ↓
+    │   MirrorEngine → LocalMirrorStore → repository mirror tar.gz
+    │
+    └── LatestReleaseSyncCoordinator
+           ↓
+        GitHubLatestReleaseService
+           ↓
+        LocalLatestReleaseStore → latest-release tar.gz
 ```
 
 There is no application server and no cloud-storage adapter.
@@ -85,6 +86,39 @@ Important timestamps are separate:
 
 This keeps unchanged but regularly checked repositories healthy.
 
+### LatestReleaseSyncCoordinator
+
+Runs after a successful mirror operation for each selected repository.
+
+It calls GitHub's latest published Release endpoint independently of Git ref comparison. This is necessary because release notes/assets can change without changing the release tag ref.
+
+For a changed latest release it:
+
+```text
+check release ID + updated_at
+→ download tag source tarball
+→ stream all uploaded release assets
+→ hash every downloaded file
+→ write release.json
+→ tar.gz
+→ extract + verify every recorded size/SHA-256
+→ persist pending SAF archive
+→ verify persisted archive SHA-256
+→ replace previous latest-release bundle
+```
+
+The release state has its own Room row and failure status; a release-backup failure does not invalidate an already-verified Git mirror.
+
+### LocalLatestReleaseStore
+
+Stores one latest-release bundle under the repository's existing storage directory:
+
+```text
+GitHub Backups/<owner>--<repo>--<repository-id>/latest-release/<owner>--<repo>--<tag>--release.tar.gz
+```
+
+Its pending/promote/recovery rules mirror the durable mirror store.
+
 ### WorkManager
 
 `RepositoryBackupWorker` is unique per repository and runs as foreground work.
@@ -108,6 +142,7 @@ Current schema:
 ```text
 repositories
 mirrors
+latest_releases
 ```
 
 The old historical `backups` table is dropped by migration 10 → 11.
@@ -119,7 +154,7 @@ The architecture intentionally excludes:
 - Google Drive or other app-managed cloud destinations;
 - restore/publish workflows;
 - multiple backup generations;
-- release/asset backup;
+- multiple retained release generations;
 - issue/PR/discussion backup;
 - wiki backup;
 - Git LFS upload;

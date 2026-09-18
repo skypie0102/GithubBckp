@@ -32,7 +32,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.skypie0102.githubbckp.R
+import com.skypie0102.githubbckp.data.local.LatestReleaseEntity
 import com.skypie0102.githubbckp.data.local.RepositoryEntity
+import com.skypie0102.githubbckp.release.LatestReleaseAttemptStatus
 import com.skypie0102.githubbckp.worker.ScheduledBackupRunOutcome
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -147,6 +149,7 @@ fun HomeScreen(
                     RepositoryRow(
                         repository = repository,
                         health = healthByRepository[repository.githubId],
+                        latestRelease = state.latestReleases[repository.githubId],
                         onSelectedChanged = {
                             viewModel.setRepositorySelected(repository.githubId, it)
                         },
@@ -264,6 +267,7 @@ private fun RepositoryHeader(
 private fun RepositoryRow(
     repository: RepositoryEntity,
     health: RepositoryBackupHealth?,
+    latestRelease: LatestReleaseEntity?,
     onSelectedChanged: (Boolean) -> Unit,
 ) {
     Surface(
@@ -301,6 +305,19 @@ private fun RepositoryRow(
                         else -> MaterialTheme.colorScheme.onSurfaceVariant
                     },
                 )
+                latestRelease?.let { release ->
+                    Text(
+                        latestReleaseSupportingText(release),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (
+                            release.lastAttemptStatus == LatestReleaseAttemptStatus.FAILED.name
+                        ) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                    )
+                }
             }
         }
     }
@@ -347,4 +364,20 @@ internal fun selectedRepositoryActionLabel(
         mirroredSelectedCount >= selectedCount -> "Update $selectedCount selected $noun"
         else -> "Back up & update $selectedCount selected $noun"
     }
+}
+
+
+private fun latestReleaseSupportingText(release: LatestReleaseEntity): String = when (
+    release.lastAttemptStatus
+) {
+    LatestReleaseAttemptStatus.CHECKING.name -> "Latest release • checking"
+    LatestReleaseAttemptStatus.DOWNLOADING.name -> "Latest release • downloading"
+    LatestReleaseAttemptStatus.NO_RELEASE.name ->
+        release.tagName?.let { "Latest release $it • retained locally; none currently published" }
+            ?: "Latest release • none published"
+    LatestReleaseAttemptStatus.FAILED.name ->
+        release.tagName?.let { "Latest release $it • backup failed" }
+            ?: "Latest release • backup failed"
+    else -> release.tagName?.let { "Latest release $it • backed up" }
+        ?: "Latest release • not backed up yet"
 }

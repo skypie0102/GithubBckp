@@ -27,6 +27,7 @@ object DatabaseModule {
                 DatabaseMigrations.MIGRATION_8_9,
                 DatabaseMigrations.MIGRATION_9_10,
                 DatabaseMigrations.MIGRATION_10_11,
+                DatabaseMigrations.MIGRATION_11_12,
             )
             .build()
 
@@ -35,4 +36,8 @@ object DatabaseModule {
 
     @Provides
     fun provideMirrorDao(database: AppDatabase): MirrorDao = database.mirrorDao()
+
+    @Provides
+    fun provideLatestReleaseDao(database: AppDatabase): LatestReleaseDao =
+        database.latestReleaseDao()
 }

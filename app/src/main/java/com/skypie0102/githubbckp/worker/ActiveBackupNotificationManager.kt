@@ -67,6 +67,15 @@ class ActiveBackupNotificationManager @Inject constructor(
             MirrorStage.COMMITTING -> normalizedProgress
                 ?.let { "Saving backup… $it%" }
                 ?: "Saving backup…"
+            MirrorStage.CHECKING_RELEASE -> "Checking latest release…"
+            MirrorStage.DOWNLOADING_RELEASE -> normalizedProgress
+                ?.let { "Downloading release… $it%" }
+                ?: "Downloading latest release…"
+            MirrorStage.PACKAGING_RELEASE -> "Packaging latest release…"
+            MirrorStage.VERIFYING_RELEASE -> "Verifying latest release…"
+            MirrorStage.COMMITTING_RELEASE -> normalizedProgress
+                ?.let { "Saving latest release… $it%" }
+                ?: "Saving latest release…"
         }
 
         val builder = NotificationCompat.Builder(context, CHANNEL_ID)
