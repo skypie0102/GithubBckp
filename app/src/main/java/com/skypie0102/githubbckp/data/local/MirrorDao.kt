@@ -16,6 +16,9 @@ interface MirrorDao {
     @Query("SELECT * FROM mirrors ORDER BY repositoryId")
     fun observeAll(): Flow<List<MirrorEntity>>
 
+    @Query("SELECT * FROM mirrors ORDER BY repositoryId")
+    suspend fun getAll(): List<MirrorEntity>
+
     @Query("DELETE FROM mirrors WHERE repositoryId = :repositoryId")
     suspend fun delete(repositoryId: Long)
 }
