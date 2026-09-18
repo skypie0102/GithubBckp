@@ -1,37 +1,10 @@
 package com.skypie0102.githubbckp.storage
 
-import com.skypie0102.githubbckp.backup.BackupArtifact
-import java.io.File
-
+/**
+ * Legacy Room decoding only. New mirror work is always stored in the selected
+ * local document tree and does not route through a storage provider.
+ */
 enum class StorageDestination {
     GOOGLE_DRIVE,
     DOCUMENT_TREE,
-}
-
-data class RemoteBackup(
-    val id: String,
-    val name: String,
-    val sizeBytes: Long,
-    val checksumSha256: String,
-    val checksumMd5: String,
-    val provider: StorageDestination,
-)
-
-interface StorageProvider {
-    /**
-     * Stores [artifact] as a replacement candidate and returns its remote identity.
-     * Providers must not destroy the caller's previous verified object as part of
-     * this operation; BackupCoordinator retires superseded objects only after this
-     * returned object has independently verified and been committed as current.
-     */
-    suspend fun upload(
-        artifact: BackupArtifact,
-        onProgress: suspend (uploadedBytes: Long, totalBytes: Long) -> Unit = { _, _ -> },
-    ): RemoteBackup
-
-    suspend fun verify(remoteBackup: RemoteBackup): Boolean
-
-    suspend fun download(remoteBackup: RemoteBackup, destination: File)
-
-    suspend fun delete(remoteBackup: RemoteBackup)
 }
