@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.skypie0102.githubbckp.data.local.BackupDao
+import com.skypie0102.githubbckp.data.local.MirrorDao
 import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
 import dagger.hilt.android.EntryPointAccessors
@@ -27,10 +28,10 @@ class BackupHealthCheckWorker(
         }
 
         val repositories = dependencies.backupDao().getAvailableRepositories()
-        val backups = dependencies.backupDao().observeBackupHealthHistory().first()
+        val mirrors = dependencies.mirrorDao().observeAll().first()
         val overdue = findOverdueBackupRepositories(
             repositories = repositories,
-            backups = backups,
+            mirrors = mirrors,
             settings = settings,
             scheduleEnabledAtEpochMs = schedulePreferences.enabledAtEpochMs(),
             nowEpochMs = System.currentTimeMillis(),
@@ -44,6 +45,7 @@ class BackupHealthCheckWorker(
 @InstallIn(SingletonComponent::class)
 interface BackupHealthCheckWorkerDependencies {
     fun backupDao(): BackupDao
+    fun mirrorDao(): MirrorDao
     fun schedulePreferences(): BackupSchedulePreferences
     fun backupProblemNotifier(): BackupProblemNotifier
 }
