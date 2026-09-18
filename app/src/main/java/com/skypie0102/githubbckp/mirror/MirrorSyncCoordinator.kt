@@ -105,6 +105,7 @@ class MirrorSyncCoordinator @Inject constructor(
                 }
 
                 is MirrorSyncResult.Rebuilt -> {
+                    onStage(MirrorStage.COMMITTING)
                     val committed = mirrorStore.commit(
                         repositoryId = repository.githubId,
                         verifiedArchive = result.archive,
