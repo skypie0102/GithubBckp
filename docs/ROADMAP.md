@@ -441,7 +441,7 @@ Exit criteria:
 
 ## Phase 11 — Hardening matrix
 
-Status: **automated hardening substantially complete; device/manual stress cases remain**
+Status: **automated hardening complete; device/live-provider validation remains**
 
 Required tests include:
 
@@ -456,7 +456,7 @@ Required tests include:
 - [x] branch deleted;
 - [x] tag deleted;
 - [x] empty repository;
-- large repository;
+- [x] synthetic large-repository stress (~12 MiB incompressible payload plus many refs); real device-scale stress remains a manual release gate;
 - [x] Unicode paths;
 - [x] Git LFS pointers and missing/corrupt LFS object;
 - [x] corrupt/truncated tar.gz;
@@ -476,11 +476,25 @@ Exit criteria:
 
 - interruption testing demonstrates the previous verified mirror survives every failed update stage.
 
+### Remaining manual gates
+
+The automated test matrix is green. The following remain intentionally manual and are mirrored in `docs/RELEASE.md`:
+
+- live GitHub organization approval/revocation behavior;
+- upgrade migration from a signed pre-refactor installation;
+- real device-scale large repository;
+- Android process kill during fetch;
+- Android process kill during compression;
+- Android process kill immediately before/after archive promotion;
+- real SAF folder move/revocation and recovery;
+- real notification permission/channel disablement;
+- several simultaneous real repository jobs.
+
 ---
 
 ## Phase 12 — Documentation and release cutover
 
-Status: **release version prepared; merge/release gate remains**
+Status: **automated release preparation complete; manual device gates and merge remain**
 
 Keep only documentation that serves the new product:
 
