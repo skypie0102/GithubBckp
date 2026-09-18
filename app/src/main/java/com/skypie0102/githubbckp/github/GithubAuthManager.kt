@@ -17,12 +17,11 @@ class GithubAuthManager @Inject constructor(
     fun isAuthenticated(): Boolean = !secureStore.get(KEY_ACCESS_TOKEN).isNullOrBlank()
 
     suspend fun connectPersonalAccessToken(rawToken: String): String = withContext(Dispatchers.IO) {
-        val token = normalizePersonalAccessToken(rawToken)
+        val token = rawToken.trim()
         require(token.isNotBlank()) { "Enter a GitHub personal access token" }
 
         val identity = validateToken(token)
         secureStore.put(KEY_ACCESS_TOKEN, token)
-        clearLegacyOauthState()
         identity
     }
 
@@ -33,18 +32,8 @@ class GithubAuthManager @Inject constructor(
             ?: throw IOException("GitHub is not connected; enter a personal access token")
     }
 
-    suspend fun requireRecoveryAccessToken(): String = requireAccessToken()
-
     fun disconnect() {
         secureStore.remove(KEY_ACCESS_TOKEN)
-        clearLegacyOauthState()
-    }
-
-    private fun clearLegacyOauthState() {
-        secureStore.remove(KEY_ACCESS_EXPIRES_AT)
-        secureStore.remove(KEY_REFRESH_TOKEN)
-        secureStore.remove(KEY_REFRESH_EXPIRES_AT)
-        secureStore.remove(KEY_OAUTH_SCOPES)
     }
 
     private fun validateToken(token: String): String {
@@ -77,13 +66,7 @@ class GithubAuthManager @Inject constructor(
         const val GITHUB_USER_URL = "https://api.github.com/user"
         const val GITHUB_API_VERSION = "2026-03-10"
         const val KEY_ACCESS_TOKEN = "github.access-token"
-        const val KEY_ACCESS_EXPIRES_AT = "github.access-token-expires-at"
-        const val KEY_REFRESH_TOKEN = "github.refresh-token"
-        const val KEY_REFRESH_EXPIRES_AT = "github.refresh-token-expires-at"
-        const val KEY_OAUTH_SCOPES = "github.oauth-scopes"
         const val CONNECT_TIMEOUT_MS = 30_000
         const val READ_TIMEOUT_MS = 30_000
     }
 }
-
-internal fun normalizePersonalAccessToken(value: String): String = value.trim()
