@@ -66,6 +66,18 @@ class MirrorSyncCoordinator @Inject constructor(
                 }
             }
 
+            val requiredBytes = if (storedManifest != null) {
+                mirrorStore.estimateUpdateWorkingBytes(repository.githubId)
+            } else {
+                MIN_INITIAL_WORKSPACE_BYTES
+            }
+            if (requiredBytes != null && session.usableSpace < requiredBytes) {
+                error(
+                    "Not enough temporary storage to safely update this mirror. " +
+                        "Need about ${formatBytes(requiredBytes)} free in app cache.",
+                )
+            }
+
             mirrorDao.upsert(
                 (mirrorDao.get(repository.githubId) ?: MirrorEntity(repository.githubId)).copy(
                     lastAttemptStatus = MirrorAttemptStatus.UPDATING.name,
@@ -189,7 +201,18 @@ class MirrorSyncCoordinator @Inject constructor(
         isPrivate = isPrivate,
     )
 
+    private fun formatBytes(bytes: Long): String {
+        val gib = 1024.0 * 1024.0 * 1024.0
+        val mib = 1024.0 * 1024.0
+        return if (bytes >= gib) {
+            "%.1f GiB".format(bytes / gib)
+        } else {
+            "%.0f MiB".format(bytes / mib)
+        }
+    }
+
     private companion object {
         const val MAX_ERROR_LENGTH = 1_000
+        const val MIN_INITIAL_WORKSPACE_BYTES = 128L * 1024L * 1024L
     }
 }
