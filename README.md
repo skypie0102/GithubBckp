@@ -50,8 +50,8 @@ For a **fine-grained personal access token**:
 
 For a **classic personal access token**:
 
-- public repositories only: `public_repo`;
-- any private repository: `repo`.
+- public repositories only: no repository scope is required;
+- any private repository: `repo` (classic tokens do not offer a read-only private-repository scope).
 
 The token is encrypted locally using Android Keystore-backed storage.
 
