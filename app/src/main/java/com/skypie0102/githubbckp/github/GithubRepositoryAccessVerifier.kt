@@ -5,6 +5,7 @@ import javax.inject.Singleton
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.eclipse.jgit.api.Git
+import org.eclipse.jgit.transport.CredentialsProvider
 import org.eclipse.jgit.transport.UsernamePasswordCredentialsProvider
 
 @Singleton
@@ -13,14 +14,19 @@ class GithubRepositoryAccessVerifier @Inject constructor(
 ) {
     suspend fun canRead(repository: GithubRepository): Boolean = withContext(Dispatchers.IO) {
         val token = authManager.requireAccessToken()
-        runCatching {
-            Git.lsRemoteRepository()
-                .setRemote(repository.remoteUrl)
-                .setCredentialsProvider(
-                    UsernamePasswordCredentialsProvider("x-access-token", token),
-                )
-                .call()
-            true
-        }.getOrDefault(false)
+        gitRemoteReadable(
+            remoteUrl = repository.remoteUrl,
+            credentialsProvider = UsernamePasswordCredentialsProvider("x-access-token", token),
+        )
     }
 }
+
+internal fun gitRemoteReadable(
+    remoteUrl: String,
+    credentialsProvider: CredentialsProvider? = null,
+): Boolean = runCatching {
+    val command = Git.lsRemoteRepository().setRemote(remoteUrl)
+    credentialsProvider?.let(command::setCredentialsProvider)
+    command.call()
+    true
+}.getOrDefault(false)
