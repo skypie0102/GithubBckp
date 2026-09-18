@@ -114,6 +114,36 @@ class BackupHealthPresentationTest {
     }
 
     @Test
+    fun unavailableSelectedRepositoryIsBlockedAndStillVisible() {
+        val summary = summarizeBackupHealth(
+            repositories = listOf(repository(1L).copy(isAvailable = false)),
+            mirrors = listOf(mirror(1L)),
+            scheduleEnabled = false,
+            cadence = BackupCadence.DAILY,
+            nowEpochMs = NOW,
+        )
+
+        assertEquals(1, summary.selectedCount)
+        assertEquals(RepositoryBackupHealthState.BLOCKED, summary.repositories.single().state)
+        assertEquals(1, summary.verifiedCount)
+    }
+
+    @Test
+    fun globalReadinessProblemBlocksSelectedRepositoryWithoutClaimingBackupExists() {
+        val summary = summarizeBackupHealth(
+            repositories = listOf(repository(1L)),
+            mirrors = emptyList(),
+            scheduleEnabled = false,
+            cadence = BackupCadence.DAILY,
+            nowEpochMs = NOW,
+            globalBlockMessage = "Backup folder unavailable",
+        )
+
+        assertEquals(RepositoryBackupHealthState.BLOCKED, summary.repositories.single().state)
+        assertEquals(0, summary.verifiedCount)
+    }
+
+    @Test
     fun unselectedRepositoriesAreExcluded() {
         val summary = summarizeBackupHealth(
             repositories = listOf(
