@@ -131,9 +131,11 @@ class BackupScheduler @Inject constructor(
     }
 
     private fun manualConstraints(): Constraints = Constraints.Builder()
+        // Manual backups are explicit user actions. Requiring "battery not low"
+        // or "storage not low" lets WorkManager stop a backup mid-clone when
+        // Android crosses those thresholds. Keep only the network prerequisite;
+        // actual storage exhaustion will surface as a concrete backup error.
         .setRequiredNetworkType(NetworkType.CONNECTED)
-        .setRequiresBatteryNotLow(true)
-        .setRequiresStorageNotLow(true)
         .build()
 
     companion object {
