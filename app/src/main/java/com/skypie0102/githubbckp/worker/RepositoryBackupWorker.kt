@@ -78,18 +78,21 @@ class RepositoryBackupWorker(
             },
         )
 
-        if (!success) {
-            val currentRepository = dependencies.repositoryDao().getRepository(repositoryId)
-            if (currentRepository?.selectedForBackup == true) {
-                val state = dependencies.mirrorDao().get(repositoryId)
-                dependencies.backupProblemNotifier().notifyBackupFailure(
-                    repository = currentRepository,
-                    errorMessage = state?.lastError,
-                )
+        return when (mirrorWorkDisposition(success, runAttemptCount)) {
+            MirrorWorkDisposition.SUCCESS -> Result.success()
+            MirrorWorkDisposition.RETRY -> Result.retry()
+            MirrorWorkDisposition.FAILURE -> {
+                val currentRepository = dependencies.repositoryDao().getRepository(repositoryId)
+                if (currentRepository?.selectedForBackup == true) {
+                    val state = dependencies.mirrorDao().get(repositoryId)
+                    dependencies.backupProblemNotifier().notifyBackupFailure(
+                        repository = currentRepository,
+                        errorMessage = state?.lastError,
+                    )
+                }
+                Result.failure()
             }
         }
-
-        return if (success) Result.success() else Result.failure()
     }
 
     companion object {
@@ -99,6 +102,23 @@ class RepositoryBackupWorker(
             "Notifications must be enabled so every running backup remains visible."
     }
 }
+
+internal enum class MirrorWorkDisposition {
+    SUCCESS,
+    RETRY,
+    FAILURE,
+}
+
+internal fun mirrorWorkDisposition(
+    success: Boolean,
+    runAttemptCount: Int,
+): MirrorWorkDisposition = when {
+    success -> MirrorWorkDisposition.SUCCESS
+    runAttemptCount < MAX_MIRROR_RETRY_ATTEMPTS -> MirrorWorkDisposition.RETRY
+    else -> MirrorWorkDisposition.FAILURE
+}
+
+private const val MAX_MIRROR_RETRY_ATTEMPTS = 2
 
 @EntryPoint
 @InstallIn(SingletonComponent::class)
