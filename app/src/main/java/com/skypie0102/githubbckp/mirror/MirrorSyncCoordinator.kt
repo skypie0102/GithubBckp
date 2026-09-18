@@ -122,6 +122,8 @@ class MirrorSyncCoordinator @Inject constructor(
                     onStage(MirrorStage.COMMITTING)
                     val committed = mirrorStore.commit(
                         repositoryId = repository.githubId,
+                        owner = repository.owner,
+                        name = repository.name,
                         verifiedArchive = result.archive,
                         expectedSha256 = result.sha256,
                         onProgress = { writtenBytes, totalBytes ->
