@@ -560,3 +560,15 @@ Status: **implemented; CI/release pending**
 - [x] change the primary action to **Update N selected repositories** when all selected repositories already have mirrors;
 - [x] use **Back up & update** for mixed first-backup/update selections;
 - [x] passively refresh selected mirror freshness on launch without converting transient network failures into lost repository access.
+
+
+## 0.3.2 Android update hotfix
+
+Status: **implemented; CI/release pending**
+
+- [x] diagnose device update failure `Failed resolution of: Ljava/lang/ProcessHandle;`;
+- [x] identify JGit garbage collection as the failing Android-incompatible path;
+- [x] remove explicit JGit GC from incremental mirror fetch/prune;
+- [x] retain fetch/prune correctness and existing branch/tag/force-update tests;
+- [x] upgrade JGit from 6.10.1 to 7.8.0, which includes upstream Android detection around ProcessHandle PID lookup;
+- [x] bump release version to 0.3.2 / code 6.
