@@ -86,6 +86,25 @@ class ScheduledBackupReadinessTest {
     }
 
     @Test
+    fun repositoryAccessCanBlockScheduledRunBeforeFanOut() {
+        val status = scheduledBackupRunStatus(
+            completedAtEpochMs = 350L,
+            repositoryCount = 2,
+            scheduledRunId = "run-access-blocked",
+            readiness = ScheduledBackupReadiness(
+                ready = false,
+                blockReason = ScheduledBackupBlockReason.REPOSITORY_ACCESS_UNAVAILABLE,
+            ),
+        )
+
+        assertEquals(ScheduledBackupRunOutcome.SKIPPED_NOT_READY, status.outcome)
+        assertEquals(
+            ScheduledBackupBlockReason.REPOSITORY_ACCESS_UNAVAILABLE,
+            status.blockReason,
+        )
+    }
+
+    @Test
     fun runStatusNormalizesNegativeCountsAndBlankRunIds() {
         val status = scheduledBackupRunStatus(
             completedAtEpochMs = 400L,
