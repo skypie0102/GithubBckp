@@ -5,12 +5,13 @@ GithubBckp is a personal/internal Android app for keeping one current local Git 
 The product is intentionally narrow:
 
 - connect GitHub with a personal access token;
-- choose repositories;
+- choose the backup repository set on a dedicated repository-selection page;
 - choose a local Android document-tree folder;
 - create one full Git mirror archive per repository;
 - keep one separate backup of that repository's latest published GitHub Release;
 - update/check both manually, daily, or weekly;
-- show every running repository job in a grouped ongoing notification, with exact progress when measurable;
+- process repository backup/update jobs strictly one at a time;
+- show one ongoing foreground notification for the currently active repository job, with exact progress when measurable;
 - show simple mirror health.
 
 There is no Google Drive integration, restore/publish workflow, backup retention/history, issue/discussion/wiki backup, or multiple release generations.
@@ -118,6 +119,22 @@ No GitHub write or administration permission is required.
 A classic PAT with the broader `repo` scope can be used as a compatibility fallback when fine-grained token ownership restrictions prevent one token from covering the needed private repositories.
 
 Tokens are stored locally through the Android Keystore-backed secure store and are never embedded in the APK or repository.
+
+## Repository selection and manual updates
+
+Repository selection is separate from backup/update execution.
+
+The **Backup repositories** page contains the repository checkboxes, search, refresh, Select all, and Clear controls. Changing a checkbox only changes whether that repository belongs to the backup set; it does not start network or archive work.
+
+Newly discovered repositories default to unselected. Existing choices are preserved.
+
+On Home:
+
+- the persistent bottom action queues **only** selected repositories currently classified as **Update available**;
+- healthy selected repositories are not queued by that button;
+- repositories that do not yet have a local mirror use a separate secondary **Back up ... without a mirror** action.
+
+All repository jobs—manual and scheduled—share one WorkManager queue and execute sequentially. A repository that exhausts its retry budget records its own failure and the queue advances to the next repository.
 
 ## Automatic updates
 
