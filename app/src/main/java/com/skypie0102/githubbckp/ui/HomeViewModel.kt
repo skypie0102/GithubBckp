@@ -219,7 +219,7 @@ class HomeViewModel @Inject constructor(
                             limiter.withPermit {
                                 val remoteState = githubRepositoryAccessVerifier.inspect(repository)
                                 repository.toEntity(
-                                    selectedForBackup = existing[repository.id]?.selectedForBackup ?: true,
+                                    selectedForBackup = existing[repository.id]?.selectedForBackup ?: false,
                                     isAvailable = remoteState.readable,
                                 ) to remoteState.refsDigest
                             }
