@@ -132,7 +132,10 @@ fun HomeScreen(
 
             if (state.backupHealth.selectedCount > 0) {
                 item {
-                    BackupHealthCard(summary = state.backupHealth)
+                    BackupHealthCard(
+                        summary = state.backupHealth,
+                        latestReleases = state.latestReleases,
+                    )
                 }
             }
 
