@@ -47,6 +47,7 @@ fun BackupHealthCard(
                     title = "Updates available",
                     count = updateAvailable.size,
                     repositories = updateAvailable,
+                    latestReleases = latestReleases,
                 )
             }
 
@@ -55,6 +56,7 @@ fun BackupHealthCard(
                     title = "Needs attention",
                     count = problems.size,
                     repositories = problems,
+                    latestReleases = latestReleases,
                 )
             }
 
@@ -81,6 +83,7 @@ private fun HealthSection(
     title: String,
     count: Int,
     repositories: List<RepositoryBackupHealth>,
+    latestReleases: Map<Long, LatestReleaseEntity>,
 ) {
     HorizontalDivider()
     Text(
@@ -90,9 +93,9 @@ private fun HealthSection(
     )
     repositories.forEach { health ->
         HealthRow(
-                        health = health,
-                        latestRelease = latestReleases[health.repositoryId],
-                    )
+            health = health,
+            latestRelease = latestReleases[health.repositoryId],
+        )
     }
 }
 
