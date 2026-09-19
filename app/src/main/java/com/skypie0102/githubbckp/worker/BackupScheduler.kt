@@ -98,8 +98,8 @@ class BackupScheduler @Inject constructor(
         constraints: Constraints,
         originTag: String,
     ) {
-        repositoryWorkPlans(repositoryIds).forEach { plan ->
-            val request = OneTimeWorkRequestBuilder<RepositoryBackupWorker>()
+        val requests = repositoryWorkPlans(repositoryIds).map { plan ->
+            OneTimeWorkRequestBuilder<RepositoryBackupWorker>()
                 .setConstraints(constraints)
                 .setInputData(
                     workDataOf(
@@ -109,13 +109,18 @@ class BackupScheduler @Inject constructor(
                 .addTag(plan.tag)
                 .addTag(originTag)
                 .build()
-
-            workManager.enqueueUniqueWork(
-                plan.uniqueWorkName,
-                ExistingWorkPolicy.KEEP,
-                request,
-            )
         }
+        if (requests.isEmpty()) return
+
+        var continuation = workManager.beginUniqueWork(
+            REPOSITORY_QUEUE_WORK_NAME,
+            ExistingWorkPolicy.APPEND_OR_REPLACE,
+            requests.first(),
+        )
+        requests.drop(1).forEach { request ->
+            continuation = continuation.then(request)
+        }
+        continuation.enqueue()
     }
 
     private fun manualConstraints(): Constraints = Constraints.Builder()
@@ -133,6 +138,7 @@ class BackupScheduler @Inject constructor(
         private const val TAG_SCHEDULED = "backup-origin-scheduled"
         private const val TAG_SCHEDULE_CONTROLLER = "backup-schedule-controller"
         private const val TAG_HEALTH_CHECK = "backup-health-check"
+        private const val REPOSITORY_QUEUE_WORK_NAME = "repository-backup-queue"
         private const val HEALTH_CHECK_REPEAT_HOURS = 24L
         private const val HEALTH_CHECK_INITIAL_DELAY_HOURS = 1L
 
@@ -147,7 +153,6 @@ class BackupScheduler @Inject constructor(
 
 internal data class RepositoryWorkPlan(
     val repositoryId: Long,
-    val uniqueWorkName: String,
     val tag: String,
 )
 
@@ -159,7 +164,6 @@ internal fun repositoryWorkPlans(repositoryIds: List<Long>): List<RepositoryWork
         .map { repositoryId ->
             RepositoryWorkPlan(
                 repositoryId = repositoryId,
-                uniqueWorkName = "backup-$repositoryId-mirror",
                 tag = "backup-$repositoryId",
             )
         }
