@@ -5,46 +5,31 @@ import org.junit.Test
 
 class HomePrimaryActionTest {
     @Test
-    fun firstTimeSelectionUsesBackupLabel() {
+    fun noUpdatesUsesDisabledLabel() {
+        assertEquals("No updates available", updateAvailableActionLabel(0))
+    }
+
+    @Test
+    fun oneUpdateUsesSingularLabel() {
         assertEquals(
-            "Back up 2 selected repositories",
-            selectedRepositoryActionLabel(
-                selectedCount = 2,
-                mirroredSelectedCount = 0,
-            ),
+            "Update 1 available repository",
+            updateAvailableActionLabel(1),
         )
     }
 
     @Test
-    fun fullyMirroredSelectionUsesUpdateLabel() {
+    fun multipleUpdatesUseOnlyAvailableCount() {
         assertEquals(
-            "Update 2 selected repositories",
-            selectedRepositoryActionLabel(
-                selectedCount = 2,
-                mirroredSelectedCount = 2,
-            ),
+            "Update 3 available repositories",
+            updateAvailableActionLabel(3),
         )
     }
 
     @Test
-    fun mixedSelectionExplainsBothOperations() {
+    fun missingMirrorBackupIsSeparateFromUpdateAction() {
         assertEquals(
-            "Back up & update 3 selected repositories",
-            selectedRepositoryActionLabel(
-                selectedCount = 3,
-                mirroredSelectedCount = 2,
-            ),
-        )
-    }
-
-    @Test
-    fun singularLabelsAreNatural() {
-        assertEquals(
-            "Update 1 selected repository",
-            selectedRepositoryActionLabel(
-                selectedCount = 1,
-                mirroredSelectedCount = 1,
-            ),
+            "Back up 2 repositories without a mirror",
+            missingMirrorActionLabel(2),
         )
     }
 }
