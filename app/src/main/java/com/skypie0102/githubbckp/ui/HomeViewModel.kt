@@ -361,10 +361,37 @@ class HomeViewModel @Inject constructor(
         )
     }
 
-    fun backupSelectedRepositories() {
-        val current = _state.value
-        val selected = current.repositories.filter { it.isAvailable && it.selectedForBackup }
+    fun updateAvailableRepositories() {
+        val repositoryIds = _state.value.backupHealth.updateAvailableRepositories
+            .map { it.repositoryId }
 
+        enqueueRepositories(
+            repositoryIds = repositoryIds,
+            emptyMessage = "No selected repositories have updates available",
+            queuedLabel = "update",
+        )
+    }
+
+    fun backupRepositoriesWithoutMirror() {
+        val repositoryIds = _state.value.backupHealth.repositories
+            .filter {
+                it.state == RepositoryBackupHealthState.NEVER_BACKED_UP ||
+                    it.state == RepositoryBackupHealthState.MISSING
+            }
+            .map { it.repositoryId }
+
+        enqueueRepositories(
+            repositoryIds = repositoryIds,
+            emptyMessage = "All selected repositories already have a local mirror",
+            queuedLabel = "backup",
+        )
+    }
+
+    private fun enqueueRepositories(
+        repositoryIds: List<Long>,
+        emptyMessage: String,
+        queuedLabel: String,
+    ) {
         when {
             !githubAuthManager.isAuthenticated() ->
                 _state.update { it.copy(message = "Connect GitHub first") }
@@ -377,14 +404,15 @@ class HomeViewModel @Inject constructor(
                         message = "Enable notifications before starting backups",
                     )
                 }
-            selected.isEmpty() ->
-                _state.update { it.copy(message = "Select at least one repository") }
+            repositoryIds.isEmpty() ->
+                _state.update { it.copy(message = emptyMessage) }
             else -> {
-                backupScheduler.enqueue(selected.map { it.githubId })
+                backupScheduler.enqueue(repositoryIds)
                 _state.update {
                     it.copy(
                         notificationsReady = true,
-                        message = "Queued ${selected.size} repository update${if (selected.size == 1) "" else "s"}",
+                        message = "Queued ${repositoryIds.size} repository $queuedLabel" +
+                            if (repositoryIds.size == 1) "" else "s",
                     )
                 }
             }
