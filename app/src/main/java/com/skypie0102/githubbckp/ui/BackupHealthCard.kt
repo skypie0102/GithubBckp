@@ -13,12 +13,15 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.skypie0102.githubbckp.data.local.LatestReleaseEntity
+import com.skypie0102.githubbckp.release.LatestReleaseAttemptStatus
 import java.text.DateFormat
 import java.util.Date
 
 @Composable
 fun BackupHealthCard(
     summary: BackupHealthSummary,
+    latestReleases: Map<Long, LatestReleaseEntity> = emptyMap(),
     modifier: Modifier = Modifier,
 ) {
     val updateAvailable = summary.updateAvailableRepositories
@@ -63,7 +66,10 @@ fun BackupHealthCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 current.forEach { health ->
-                    HealthRow(health)
+                    HealthRow(
+                        health = health,
+                        latestRelease = latestReleases[health.repositoryId],
+                    )
                 }
             }
         }
@@ -83,13 +89,17 @@ private fun HealthSection(
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
     repositories.forEach { health ->
-        HealthRow(health)
+        HealthRow(
+                        health = health,
+                        latestRelease = latestReleases[health.repositoryId],
+                    )
     }
 }
 
 @Composable
 private fun HealthRow(
     health: RepositoryBackupHealth,
+    latestRelease: LatestReleaseEntity?,
 ) {
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -121,6 +131,19 @@ private fun HealthRow(
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        latestRelease?.let { release ->
+            Text(
+                latestReleaseSupportingText(release),
+                style = MaterialTheme.typography.bodySmall,
+                color = if (
+                    release.lastAttemptStatus == LatestReleaseAttemptStatus.FAILED.name
+                ) {
+                    MaterialTheme.colorScheme.error
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+            )
+        }
     }
 }
 
@@ -189,3 +212,19 @@ private fun formatBytes(bytes: Long): String {
 
 private fun formatTimestamp(epochMs: Long): String =
     DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(epochMs))
+
+
+private fun latestReleaseSupportingText(release: LatestReleaseEntity): String = when (
+    release.lastAttemptStatus
+) {
+    LatestReleaseAttemptStatus.CHECKING.name -> "Latest release • checking"
+    LatestReleaseAttemptStatus.DOWNLOADING.name -> "Latest release • downloading"
+    LatestReleaseAttemptStatus.NO_RELEASE.name ->
+        release.tagName?.let { "Latest release $it • retained locally; none currently published" }
+            ?: "Latest release • none published"
+    LatestReleaseAttemptStatus.FAILED.name ->
+        release.tagName?.let { "Latest release $it • backup failed" }
+            ?: "Latest release • backup failed"
+    else -> release.tagName?.let { "Latest release $it • backed up" }
+        ?: "Latest release • not backed up yet"
+}
