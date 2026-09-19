@@ -14,6 +14,7 @@ import com.skypie0102.githubbckp.github.GithubAuthManager
 import com.skypie0102.githubbckp.ui.GithubTokenSetupOverlay
 import com.skypie0102.githubbckp.ui.HomeScreen
 import com.skypie0102.githubbckp.ui.HomeViewModel
+import com.skypie0102.githubbckp.ui.RepositorySelectionScreen
 import com.skypie0102.githubbckp.ui.SettingsScreen
 import com.skypie0102.githubbckp.ui.theme.GithubBckpTheme
 import dagger.hilt.android.AndroidEntryPoint
@@ -41,14 +42,19 @@ class MainActivity : ComponentActivity() {
                 }
                 var showTokenSetup by remember { mutableStateOf(false) }
 
-                if (page == AppPage.SETTINGS) {
+                if (page != AppPage.HOME) {
                     BackHandler { page = AppPage.HOME }
                 }
 
                 when (page) {
                     AppPage.HOME -> HomeScreen(
                         viewModel = viewModel,
+                        onOpenRepositorySelection = { page = AppPage.REPOSITORIES },
                         onOpenSettings = { page = AppPage.SETTINGS },
+                    )
+                    AppPage.REPOSITORIES -> RepositorySelectionScreen(
+                        viewModel = viewModel,
+                        onBack = { page = AppPage.HOME },
                     )
                     AppPage.SETTINGS -> SettingsScreen(
                         viewModel = viewModel,
@@ -76,5 +82,6 @@ class MainActivity : ComponentActivity() {
 
 private enum class AppPage {
     HOME,
+    REPOSITORIES,
     SETTINGS,
 }

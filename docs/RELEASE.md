@@ -18,25 +18,25 @@ Nothing needs to be configured in GitHub Secrets.
 
 Because every release can use a different disposable key, a future release may require uninstall/reinstall rather than update-in-place. The user-selected repository mirrors live outside app-private storage and are not embedded in the APK.
 
-## 0.3.4
+## 0.3.5
 
 The local-mirror refactor is versioned as:
 
 ```text
-versionName: 0.3.4
-versionCode: 8
+versionName: 0.3.5
+versionCode: 9
 package: com.skypie0102.githubbckp
 ```
 
-The release is published from `main` as tag `v0.3.4`.
+The release is published from `main` as tag `v0.3.5`.
 
 ## Release assets
 
 The workflow publishes:
 
 ```text
-githubbckp-v0.3.4.apk
-githubbckp-v0.3.4.apk.sha256
+githubbckp-v0.3.5.apk
+githubbckp-v0.3.5.apk.sha256
 ```
 
 The APK is the optimized release build, not the much larger debug/testing APK.
@@ -60,7 +60,7 @@ The workflow may also be started manually with a tag, but the requested tag must
 
 ## Device gate
 
-Repository owner **skypie0102** tested the refactored app on a real Android device, confirmed repository backup worked successfully, and explicitly accepted that testing as sufficient for the 0.3.4 device gate.
+Repository owner **skypie0102** tested the refactored app on a real Android device, confirmed repository backup worked successfully, and explicitly accepted that testing as sufficient for the 0.3.5 device gate.
 
 Issue #53 is closed as completed by owner attestation.
 
@@ -83,24 +83,18 @@ Before treating a later release as known-good:
 
 
 
-## 0.3.4 latest release backup
 
-0.3.4 keeps the existing full Git mirror and additionally stores one current backup of each selected repository's latest published GitHub Release.
 
-The release bundle contains:
+## 0.3.5 sequential queue and selection UX
 
-```text
-release.json
-source/source.tar.gz
-assets/<uploaded release assets>
-```
+0.3.5 changes repository orchestration and Home behavior:
 
-The app skips unchanged releases using GitHub release ID + `updated_at`, verifies source/assets by size and SHA-256, and transactionally replaces only the previous latest-release bundle.
-
-The release bundle lives beside the mirror under:
-
-```text
-GitHub Backups/<owner>--<repo>--<repository-id>/latest-release/
-```
-
-Existing token guidance remains unchanged: fine-grained `Contents: Read-only` is sufficient.
+- manual and scheduled repository jobs run strictly one at a time through one WorkManager queue;
+- the active foreground notification therefore represents one repository at a time;
+- one repository's final failure no longer blocks later queued repositories;
+- repository checkboxes live on a dedicated **Backup repositories** page;
+- selecting/deselecting a repository only changes the backup set and does not start backup work;
+- newly discovered repositories default unselected;
+- Home's bottom action queues only repositories currently marked **Update available**;
+- first-time/missing mirrors use a separate secondary backup action;
+- latest-release backup status remains visible inside Home health rows.

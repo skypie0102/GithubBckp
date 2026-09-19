@@ -6,11 +6,11 @@ Automatic updates use WorkManager and support only:
 - Daily
 - Weekly
 
-The periodic worker is a lightweight controller. It finds selected, currently available repositories and enqueues one unique repository job for each.
+The periodic worker is a lightweight controller. It finds selected, currently available repositories and appends their repository jobs to the same global sequential WorkManager queue used by manual work.
 
 ## Readiness
 
-Before fan-out, scheduled work requires:
+Before queueing repository work, scheduled work requires:
 
 - the stored GitHub token to still validate;
 - each selected repository to remain readable over Git;
@@ -54,9 +54,15 @@ This tolerance accommodates WorkManager's opportunistic execution.
 
 A changed archive can therefore be old while the repository remains healthy if recent scheduled checks prove that the remote repository has not changed.
 
+## Sequential execution
+
+Repository backup/update work is serialized globally. Only one `RepositoryBackupWorker` runs at a time, including when a scheduled cycle contains many repositories or overlaps with a manual request.
+
+Each repository keeps its existing retry budget. If one repository ultimately fails, that failure is persisted and notified, but WorkManager is allowed to continue with the next repository instead of blocking the remaining queue.
+
 ## Notifications
 
-Every repository job is foreground work with one ongoing notification. Simultaneous repository notifications share the same Android notification group. The final local commit reports exact bytes-written progress; stages whose total work is not knowable stay indeterminate.
+Every active repository job is foreground work with one ongoing notification. Because repository jobs are serialized, the device sees one active repository notification at a time instead of a burst of simultaneous backup notifications. The final local commit reports exact bytes-written progress; stages whose total work is not knowable stay indeterminate.
 
 If Android notification permission, app notification settings, or the active-backup notification channel prevents visibility, the repository job is blocked before mirror work starts.
 

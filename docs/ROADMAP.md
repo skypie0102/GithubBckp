@@ -301,12 +301,12 @@ Keep WorkManager with only:
 Tasks:
 
 - [x] remove obsolete backup-format preferences;
-- [x] retain unique repository work;
+- [x] serialize all manual/scheduled repository work through one global WorkManager queue;
 - [x] foreground every active repository job;
 - [x] expose stages: checking, extracting, fetching, LFS, optimizing, compressing, verifying;
 - [x] show exact byte progress during final archive commit; keep non-measurable Git/network stages indeterminate;
 - [x] add cancel action;
-- [x] group simultaneous repository notifications under one active-mirror group;
+- [x] avoid simultaneous repository notifications by running repository jobs one at a time;
 - [x] block job start when Android notification visibility is unavailable;
 - [x] show notification-disabled state as a readiness/health problem.
 
@@ -477,7 +477,7 @@ Required tests include:
 - process death during compression; automated truncated-candidate coverage proves the stable archive is untouched, with device-level process-kill validation tracked in issue #53;
 - process death before/after promotion; recovery state-machine coverage is implemented, with device-level process-kill validation tracked in issue #53;
 - [x] bounded WorkManager retry policy;
-- [x] multiple simultaneous selected repositories use independent unique work plans.
+- [x] multiple selected repositories preserve deterministic order in a serialized work queue.
 
 Exit criteria:
 
@@ -614,3 +614,20 @@ Status: **implemented; final CI/release pending**
 - [x] show the backed-up release tag/status on repository rows;
 - [x] add parser, redirect-validation, manifest, verifier, naming, and no-redownload policy tests;
 - [x] bump release version to 0.3.4 / code 8.
+
+
+## 0.3.5 sequential queue and repository selection
+
+Status: **implemented; final CI/release pending**
+
+- [x] serialize manual and scheduled repository jobs through one global WorkManager chain;
+- [x] allow a permanently failed repository to report failure without blocking later queued repositories;
+- [x] reduce active backup notifications to one repository at a time;
+- [x] move repository checkboxes/search/select-all/clear to a dedicated **Backup repositories** page;
+- [x] make repository selection change only the backup set and never start work;
+- [x] default newly discovered repositories to unselected while preserving existing choices;
+- [x] remove repository checkboxes/list management from Home;
+- [x] make the Home bottom action target only repositories whose state is **Update available**;
+- [x] keep first-time/missing-mirror backup as a separate secondary Home action;
+- [x] keep latest-release backup status visible in Home health rows after removing the old repository list;
+- [x] bump release version to 0.3.5 / code 9.

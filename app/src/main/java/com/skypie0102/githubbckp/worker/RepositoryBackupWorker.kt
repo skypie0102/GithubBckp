@@ -40,7 +40,7 @@ class RepositoryBackupWorker(
                     lastError = null,
                 ),
             )
-            return Result.failure()
+            return Result.success()
         }
 
         setForeground(
@@ -126,7 +126,10 @@ class RepositoryBackupWorker(
                             ?: releaseState?.lastError?.let { "Latest release: $it" },
                     )
                 }
-                Result.failure()
+                // The repository failure is already persisted and surfaced through
+                // the problem notification. Return success to WorkManager so the
+                // serialized queue can continue with the next repository.
+                Result.success()
             }
         }
     }
